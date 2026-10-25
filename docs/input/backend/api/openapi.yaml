@@ -1,0 +1,1904 @@
+openapi: 3.0.3
+info:
+  title: Cerne Backend API
+  description: '**How to build the real URL:** there is no router — each operation is served by its own Edge Function,
+    one per endpoint. The `path` of each operation below is only the contract''s REST notation; the real URL is
+    `{FUNCTIONS_BASE_URL}/<x-cerne-function>/<path parameters, in the same order as they appear in the `path`, as
+    final segments>` — any literal segment of the `path` after the last parameter (e.g., the `/retry` of `/chat/sessions/{id}/messages/{userMessageId}/retry`)
+    does NOT appear in the real URL. Each operation carries the function name in `x-cerne-function`; the full path
+    → function table is in `docs/input/backend/README.md`.'
+  version: 1.0.0
+servers:
+- url: '{FUNCTIONS_BASE_URL}'
+  variables:
+    FUNCTIONS_BASE_URL:
+      default: https://<project-ref>.functions.supabase.co
+      description: Base URL of the environment's Edge Functions — the `project ref` of the environment is provided
+        in the app's `.env`, never in this file.
+paths:
+  /auth/signup:
+    post:
+      operationId: auth.signup
+      summary: Sign-up — thin GoTrue proxy
+      security: []
+      x-cerne-function: auth-signup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 1
+              required:
+              - email
+              - password
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      session:
+                        type: object
+                        properties:
+                          accessToken:
+                            type: string
+                          refreshToken:
+                            type: string
+                          expiresIn:
+                            type: integer
+                          expiresAt:
+                            type: integer
+                          tokenType:
+                            type: string
+                        required:
+                        - accessToken
+                        - refreshToken
+                        - expiresIn
+                        - expiresAt
+                        - tokenType
+                        additionalProperties: {}
+                      user:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            format: uuid
+                          email:
+                            type: string
+                            format: email
+                        required:
+                        - id
+                        - email
+                        additionalProperties: {}
+                    required:
+                    - session
+                    - user
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/login:
+    post:
+      operationId: auth.login
+      summary: Login — thin GoTrue proxy
+      security: []
+      x-cerne-function: auth-login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 1
+              required:
+              - email
+              - password
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      session:
+                        type: object
+                        properties:
+                          accessToken:
+                            type: string
+                          refreshToken:
+                            type: string
+                          expiresIn:
+                            type: integer
+                          expiresAt:
+                            type: integer
+                          tokenType:
+                            type: string
+                        required:
+                        - accessToken
+                        - refreshToken
+                        - expiresIn
+                        - expiresAt
+                        - tokenType
+                        additionalProperties: {}
+                      user:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            format: uuid
+                          email:
+                            type: string
+                            format: email
+                        required:
+                        - id
+                        - email
+                        additionalProperties: {}
+                    required:
+                    - session
+                    - user
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/refresh:
+    post:
+      operationId: auth.refresh
+      summary: Token refresh — thin GoTrue proxy
+      security: []
+      x-cerne-function: auth-refresh
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken:
+                  type: string
+                  minLength: 1
+              required:
+              - refreshToken
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      session:
+                        type: object
+                        properties:
+                          accessToken:
+                            type: string
+                          refreshToken:
+                            type: string
+                          expiresIn:
+                            type: integer
+                          expiresAt:
+                            type: integer
+                          tokenType:
+                            type: string
+                        required:
+                        - accessToken
+                        - refreshToken
+                        - expiresIn
+                        - expiresAt
+                        - tokenType
+                        additionalProperties: {}
+                    required:
+                    - session
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/session:
+    get:
+      operationId: auth.session
+      summary: Current session — the only auth endpoint with its own logic
+      security:
+      - bearerAuth: []
+      x-cerne-function: auth-session
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            format: uuid
+                          email:
+                            type: string
+                            format: email
+                        required:
+                        - id
+                        - email
+                        additionalProperties: {}
+                      expiresAt:
+                        type: integer
+                      serverRevision:
+                        type: integer
+                        minimum: 0
+                    required:
+                    - user
+                    - expiresAt
+                    - serverRevision
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /auth/logout:
+    post:
+      operationId: auth.logout
+      summary: Logout — thin GoTrue proxy
+      security:
+      - bearerAuth: []
+      x-cerne-function: auth-logout
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      ok:
+                        type: boolean
+                        enum:
+                        - true
+                    required:
+                    - ok
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /entries:
+    post:
+      operationId: entries.create
+      summary: Create entry (PII → write → embedding), idempotent for RF10
+      security:
+      - bearerAuth: []
+      x-cerne-function: entries-create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+                  minLength: 1
+                  maxLength: 20000
+                source:
+                  type: string
+                  enum:
+                  - manual
+                  - audio
+                  - photo
+                  - chat
+                chatMessageId:
+                  type: string
+                  format: uuid
+                occurredAt:
+                  type: string
+                  format: date-time
+                mediaDurationSeconds:
+                  type: integer
+                  minimum: 0
+              required:
+              - content
+              - source
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      content:
+                        type: string
+                        minLength: 1
+                        maxLength: 20000
+                      source:
+                        type: string
+                        enum:
+                        - manual
+                        - audio
+                        - photo
+                        - chat
+                      chatMessageId:
+                        type: string
+                        format: uuid
+                        nullable: true
+                      occurredAt:
+                        type: string
+                        format: date-time
+                      tags:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                              format: uuid
+                            name:
+                              type: string
+                          required:
+                          - id
+                          - name
+                      piiStatus:
+                        type: string
+                        enum:
+                        - pending
+                        - clean
+                        - flagged
+                        - failed
+                      piiSpans:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            start:
+                              type: integer
+                              minimum: 0
+                            end:
+                              type: integer
+                              minimum: 0
+                            type:
+                              type: string
+                          required:
+                          - start
+                          - end
+                          - type
+                      embeddingStatus:
+                        type: string
+                        enum:
+                        - pending
+                        - ready
+                        - failed
+                      mediaDurationSeconds:
+                        type: integer
+                        minimum: 0
+                        nullable: true
+                      serverRevision:
+                        type: integer
+                        minimum: 0
+                      createdAt:
+                        type: string
+                        format: date-time
+                      updatedAt:
+                        type: string
+                        format: date-time
+                    required:
+                    - id
+                    - content
+                    - source
+                    - chatMessageId
+                    - occurredAt
+                    - tags
+                    - piiStatus
+                    - piiSpans
+                    - embeddingStatus
+                    - mediaDurationSeconds
+                    - serverRevision
+                    - createdAt
+                    - updatedAt
+                  meta:
+                    type: object
+                    properties:
+                      idempotentReplay:
+                        type: boolean
+                required:
+                - data
+                - meta
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    get:
+      operationId: entries.list
+      summary: List entries, paginated, with embedded tags
+      security:
+      - bearerAuth: []
+      x-cerne-function: entries-list
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+      - name: source
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - manual
+          - audio
+          - photo
+          - chat
+      - name: dateFrom
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: dateTo
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        content:
+                          type: string
+                          minLength: 1
+                          maxLength: 20000
+                        source:
+                          type: string
+                          enum:
+                          - manual
+                          - audio
+                          - photo
+                          - chat
+                        chatMessageId:
+                          type: string
+                          format: uuid
+                          nullable: true
+                        occurredAt:
+                          type: string
+                          format: date-time
+                        tags:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              id:
+                                type: string
+                                format: uuid
+                              name:
+                                type: string
+                            required:
+                            - id
+                            - name
+                        piiStatus:
+                          type: string
+                          enum:
+                          - pending
+                          - clean
+                          - flagged
+                          - failed
+                        piiSpans:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              start:
+                                type: integer
+                                minimum: 0
+                              end:
+                                type: integer
+                                minimum: 0
+                              type:
+                                type: string
+                            required:
+                            - start
+                            - end
+                            - type
+                        embeddingStatus:
+                          type: string
+                          enum:
+                          - pending
+                          - ready
+                          - failed
+                        mediaDurationSeconds:
+                          type: integer
+                          minimum: 0
+                          nullable: true
+                        serverRevision:
+                          type: integer
+                          minimum: 0
+                        createdAt:
+                          type: string
+                          format: date-time
+                        updatedAt:
+                          type: string
+                          format: date-time
+                      required:
+                      - id
+                      - content
+                      - source
+                      - chatMessageId
+                      - occurredAt
+                      - tags
+                      - piiStatus
+                      - piiSpans
+                      - embeddingStatus
+                      - mediaDurationSeconds
+                      - serverRevision
+                      - createdAt
+                      - updatedAt
+                  meta:
+                    type: object
+                    properties:
+                      nextCursor:
+                        type: string
+                        nullable: true
+                      total:
+                        type: integer
+                        minimum: 0
+                    required:
+                    - nextCursor
+                required:
+                - data
+                - meta
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /entries/{id}:
+    get:
+      operationId: entries.get
+      summary: Get one entry by id
+      security:
+      - bearerAuth: []
+      x-cerne-function: entries-get
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      content:
+                        type: string
+                        minLength: 1
+                        maxLength: 20000
+                      source:
+                        type: string
+                        enum:
+                        - manual
+                        - audio
+                        - photo
+                        - chat
+                      chatMessageId:
+                        type: string
+                        format: uuid
+                        nullable: true
+                      occurredAt:
+                        type: string
+                        format: date-time
+                      tags:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                              format: uuid
+                            name:
+                              type: string
+                          required:
+                          - id
+                          - name
+                      piiStatus:
+                        type: string
+                        enum:
+                        - pending
+                        - clean
+                        - flagged
+                        - failed
+                      piiSpans:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            start:
+                              type: integer
+                              minimum: 0
+                            end:
+                              type: integer
+                              minimum: 0
+                            type:
+                              type: string
+                          required:
+                          - start
+                          - end
+                          - type
+                      embeddingStatus:
+                        type: string
+                        enum:
+                        - pending
+                        - ready
+                        - failed
+                      mediaDurationSeconds:
+                        type: integer
+                        minimum: 0
+                        nullable: true
+                      serverRevision:
+                        type: integer
+                        minimum: 0
+                      createdAt:
+                        type: string
+                        format: date-time
+                      updatedAt:
+                        type: string
+                        format: date-time
+                    required:
+                    - id
+                    - content
+                    - source
+                    - chatMessageId
+                    - occurredAt
+                    - tags
+                    - piiStatus
+                    - piiSpans
+                    - embeddingStatus
+                    - mediaDurationSeconds
+                    - serverRevision
+                    - createdAt
+                    - updatedAt
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /entries/search:
+    get:
+      operationId: entries.search
+      summary: Semantic search + filters (AND), no server-side throttle
+      security:
+      - bearerAuth: []
+      x-cerne-function: entries-search
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: source
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - manual
+          - audio
+          - photo
+          - chat
+      - name: dateFrom
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: dateTo
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        content:
+                          type: string
+                          minLength: 1
+                          maxLength: 20000
+                        source:
+                          type: string
+                          enum:
+                          - manual
+                          - audio
+                          - photo
+                          - chat
+                        chatMessageId:
+                          type: string
+                          format: uuid
+                          nullable: true
+                        occurredAt:
+                          type: string
+                          format: date-time
+                        tags:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              id:
+                                type: string
+                                format: uuid
+                              name:
+                                type: string
+                            required:
+                            - id
+                            - name
+                        piiStatus:
+                          type: string
+                          enum:
+                          - pending
+                          - clean
+                          - flagged
+                          - failed
+                        piiSpans:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              start:
+                                type: integer
+                                minimum: 0
+                              end:
+                                type: integer
+                                minimum: 0
+                              type:
+                                type: string
+                            required:
+                            - start
+                            - end
+                            - type
+                        embeddingStatus:
+                          type: string
+                          enum:
+                          - pending
+                          - ready
+                          - failed
+                        mediaDurationSeconds:
+                          type: integer
+                          minimum: 0
+                          nullable: true
+                        serverRevision:
+                          type: integer
+                          minimum: 0
+                        createdAt:
+                          type: string
+                          format: date-time
+                        updatedAt:
+                          type: string
+                          format: date-time
+                        similarity:
+                          type: number
+                          minimum: 0
+                          maximum: 1
+                      required:
+                      - id
+                      - content
+                      - source
+                      - chatMessageId
+                      - occurredAt
+                      - tags
+                      - piiStatus
+                      - piiSpans
+                      - embeddingStatus
+                      - mediaDurationSeconds
+                      - serverRevision
+                      - createdAt
+                      - updatedAt
+                  meta:
+                    type: object
+                    properties:
+                      mode:
+                        type: string
+                        enum:
+                        - filter_only
+                        - semantic
+                    required:
+                    - mode
+                required:
+                - data
+                - meta
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /media/ocr:
+    post:
+      operationId: media.ocr
+      summary: Image OCR — the image is never persisted
+      security:
+      - bearerAuth: []
+      x-cerne-function: media-ocr
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                image:
+                  type: string
+                  minLength: 1
+                mimeType:
+                  type: string
+                  enum:
+                  - image/jpeg
+                  - image/png
+                  - image/webp
+              required:
+              - image
+              - mimeType
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      text:
+                        type: string
+                      confidence:
+                        type: string
+                        enum:
+                        - high
+                        - low
+                    required:
+                    - text
+                    - confidence
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /chat/sessions:
+    post:
+      operationId: chat.sessions.create
+      summary: Create chat session (persona taken from the profile at creation)
+      security:
+      - bearerAuth: []
+      x-cerne-function: chat-sessions-create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  minLength: 1
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      title:
+                        type: string
+                      personaSnapshot:
+                        type: string
+                        enum:
+                        - analitico
+                        - empatico
+                        - socratico
+                      userMessageCount:
+                        type: integer
+                        minimum: 0
+                      lastUserMessageAt:
+                        type: string
+                        format: date-time
+                        nullable: true
+                      createdAt:
+                        type: string
+                        format: date-time
+                      updatedAt:
+                        type: string
+                        format: date-time
+                    required:
+                    - id
+                    - title
+                    - personaSnapshot
+                    - userMessageCount
+                    - lastUserMessageAt
+                    - createdAt
+                    - updatedAt
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    get:
+      operationId: chat.sessions.list
+      summary: List chat sessions
+      security:
+      - bearerAuth: []
+      x-cerne-function: chat-sessions-list
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 20
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        title:
+                          type: string
+                        personaSnapshot:
+                          type: string
+                          enum:
+                          - analitico
+                          - empatico
+                          - socratico
+                        userMessageCount:
+                          type: integer
+                          minimum: 0
+                        lastUserMessageAt:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        createdAt:
+                          type: string
+                          format: date-time
+                        updatedAt:
+                          type: string
+                          format: date-time
+                      required:
+                      - id
+                      - title
+                      - personaSnapshot
+                      - userMessageCount
+                      - lastUserMessageAt
+                      - createdAt
+                      - updatedAt
+                  meta:
+                    type: object
+                    properties:
+                      nextCursor:
+                        type: string
+                        nullable: true
+                      total:
+                        type: integer
+                        minimum: 0
+                    required:
+                    - nextCursor
+                required:
+                - data
+                - meta
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /chat/sessions/{id}/messages:
+    get:
+      operationId: chat.messages.list
+      summary: List the messages of a session, ordered by seq
+      security:
+      - bearerAuth: []
+      x-cerne-function: chat-messages-list
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        sessionId:
+                          type: string
+                          format: uuid
+                        role:
+                          type: string
+                          enum:
+                          - user
+                          - assistant
+                        content:
+                          type: string
+                        seq:
+                          type: integer
+                          minimum: 0
+                        status:
+                          type: string
+                          enum:
+                          - streaming
+                          - complete
+                          - failed
+                        retryCount:
+                          type: integer
+                          minimum: 0
+                        createdAt:
+                          type: string
+                          format: date-time
+                      required:
+                      - id
+                      - sessionId
+                      - role
+                      - content
+                      - seq
+                      - status
+                      - retryCount
+                      - createdAt
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      operationId: chat.messages.send
+      summary: Send message — streaming SSE response
+      security:
+      - bearerAuth: []
+      x-cerne-function: chat-messages-send
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+                  minLength: 1
+                  maxLength: 8000
+              required:
+              - content
+      responses:
+        '200':
+          description: 'SSE streaming: message_created -> context -> token* -> done|error, in this order'
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /chat/sessions/{id}/messages/{userMessageId}/retry:
+    post:
+      operationId: chat.messages.retry
+      summary: Regenerate the last response
+      security:
+      - bearerAuth: []
+      x-cerne-function: chat-messages-retry
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: userMessageId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              additionalProperties: false
+      responses:
+        '200':
+          description: 'SSE streaming: message_created -> context -> token* -> done|error, in this order'
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /chat/sessions/{id}/insight:
+    post:
+      operationId: chat.insight.create
+      summary: Generate insight — never an HTTP error; a failure becomes status='failed' (RF08)
+      security:
+      - bearerAuth: []
+      x-cerne-function: chat-insight-create
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                triggerType:
+                  type: string
+                  enum:
+                  - message_count
+                  - inactivity
+                triggerKey:
+                  type: string
+                  minLength: 1
+              required:
+              - triggerType
+              - triggerKey
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      sessionId:
+                        type: string
+                        format: uuid
+                      triggerType:
+                        type: string
+                        enum:
+                        - message_count
+                        - inactivity
+                      triggerKey:
+                        type: string
+                      status:
+                        type: string
+                        enum:
+                        - generating
+                        - ready
+                        - failed
+                        - dismissed
+                      content:
+                        type: string
+                        nullable: true
+                      errorCode:
+                        type: string
+                        enum:
+                        - AUTH_EXPIRED
+                        - AUTH_INVALID
+                        - NETWORK_TIMEOUT
+                        - NETWORK_OFFLINE
+                        - VALIDATION_ERROR
+                        - PII_CHECK_FAILED
+                        - EMBEDDING_FAILED
+                        - AI_GENERATION_TIMEOUT
+                        - NOT_FOUND
+                        - RATE_LIMITED
+                        - EXPORT_EMPTY_PERIOD
+                        - PAYLOAD_TOO_LARGE
+                        - OCR_NO_TEXT
+                        nullable: true
+                      dismissedAt:
+                        type: string
+                        format: date-time
+                        nullable: true
+                      createdAt:
+                        type: string
+                        format: date-time
+                    required:
+                    - id
+                    - sessionId
+                    - triggerType
+                    - triggerKey
+                    - status
+                    - content
+                    - errorCode
+                    - dismissedAt
+                    - createdAt
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /export/summary:
+    post:
+      operationId: export.summary.create
+      summary: Request export — synchronous count, enqueues the job
+      security:
+      - bearerAuth: []
+      x-cerne-function: export-summary-create
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                periodStart:
+                  type: string
+                  format: date-time
+                  nullable: true
+                periodEnd:
+                  type: string
+                  format: date-time
+                  nullable: true
+                includeNarrative:
+                  type: boolean
+                  default: true
+              required:
+              - periodStart
+              - periodEnd
+      responses:
+        '202':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      jobId:
+                        type: string
+                        format: uuid
+                      status:
+                        type: string
+                        enum:
+                        - pending
+                    required:
+                    - jobId
+                    - status
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /export/{jobId}/status:
+    get:
+      operationId: export.status.get
+      summary: Export job status (data and narrative are independent)
+      security:
+      - bearerAuth: []
+      x-cerne-function: export-status-get
+      parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      jobId:
+                        type: string
+                        format: uuid
+                      status:
+                        type: string
+                        enum:
+                        - pending
+                        - processing
+                        - data_ready
+                        - done
+                        - error
+                      narrativeStatus:
+                        type: string
+                        enum:
+                        - pending
+                        - processing
+                        - done
+                        - failed
+                        - skipped
+                      entryCount:
+                        type: integer
+                        minimum: 0
+                        nullable: true
+                      errorCode:
+                        type: string
+                        nullable: true
+                      narrativeErrorCode:
+                        type: string
+                        nullable: true
+                      downloadAvailable:
+                        type: boolean
+                    required:
+                    - jobId
+                    - status
+                    - narrativeStatus
+                    - entryCount
+                    - errorCode
+                    - narrativeErrorCode
+                    - downloadAvailable
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /export/{jobId}/download:
+    get:
+      operationId: export.download.get
+      summary: Download — 302 to a signed URL; PDF, with fallback to raw data
+      security:
+      - bearerAuth: []
+      x-cerne-function: export-download-get
+      parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: format
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - pdf
+          - raw
+          default: pdf
+      responses:
+        '302':
+          description: Redirect to a signed Storage URL
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /dashboard/aggregate:
+    get:
+      operationId: dashboard.aggregate.get
+      summary: Period aggregate — always 200, including with zero entries
+      security:
+      - bearerAuth: []
+      x-cerne-function: dashboard-aggregate-get
+      parameters:
+      - name: period
+        in: query
+        required: true
+        schema:
+          type: string
+          enum:
+          - 7d
+          - 30d
+          - 90d
+          - all
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      buckets:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            date:
+                              type: string
+                              pattern: ^\d{4}-\d{2}-\d{2}$
+                            count:
+                              type: integer
+                              minimum: 0
+                            sources:
+                              type: object
+                              properties:
+                                manual:
+                                  type: integer
+                                  minimum: 0
+                                audio:
+                                  type: integer
+                                  minimum: 0
+                                photo:
+                                  type: integer
+                                  minimum: 0
+                                chat:
+                                  type: integer
+                                  minimum: 0
+                              required:
+                              - manual
+                              - audio
+                              - photo
+                              - chat
+                          required:
+                          - date
+                          - count
+                          - sources
+                      totals:
+                        type: object
+                        properties:
+                          count:
+                            type: integer
+                            minimum: 0
+                          sources:
+                            type: object
+                            properties:
+                              manual:
+                                type: integer
+                                minimum: 0
+                              audio:
+                                type: integer
+                                minimum: 0
+                              photo:
+                                type: integer
+                                minimum: 0
+                              chat:
+                                type: integer
+                                minimum: 0
+                            required:
+                            - manual
+                            - audio
+                            - photo
+                            - chat
+                        required:
+                        - count
+                        - sources
+                    required:
+                    - buckets
+                    - totals
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /dashboard/narrative:
+    get:
+      operationId: dashboard.narrative.get
+      summary: Period narrative — independent of the aggregate
+      security:
+      - bearerAuth: []
+      x-cerne-function: dashboard-narrative-get
+      parameters:
+      - name: period
+        in: query
+        required: true
+        schema:
+          type: string
+          enum:
+          - 7d
+          - 30d
+          - 90d
+          - all
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      text:
+                        type: string
+                      generatedAt:
+                        type: string
+                        format: date-time
+                    required:
+                    - text
+                    - generatedAt
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /account/settings:
+    patch:
+      operationId: account.settings.update
+      summary: Update name/persona/biometrics — email is rejected
+      security:
+      - bearerAuth: []
+      x-cerne-function: account-settings-update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+                persona:
+                  type: string
+                  enum:
+                  - analitico
+                  - empatico
+                  - socratico
+                biometricEnabled:
+                  type: boolean
+              additionalProperties: false
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                        format: email
+                      displayName:
+                        type: string
+                      persona:
+                        type: string
+                        enum:
+                        - analitico
+                        - empatico
+                        - socratico
+                      biometricEnabled:
+                        type: boolean
+                      serverRevision:
+                        type: integer
+                        minimum: 0
+                      createdAt:
+                        type: string
+                        format: date-time
+                      updatedAt:
+                        type: string
+                        format: date-time
+                    required:
+                    - id
+                    - email
+                    - displayName
+                    - persona
+                    - biometricEnabled
+                    - serverRevision
+                    - createdAt
+                    - updatedAt
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /account:
+    delete:
+      operationId: account.delete
+      summary: Hard delete, cascading, including purge of the exports bucket
+      security:
+      - bearerAuth: []
+      x-cerne-function: account-delete
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                confirmation:
+                  type: string
+                  enum:
+                  - DELETE
+              required:
+              - confirmation
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      ok:
+                        type: boolean
+                        enum:
+                        - true
+                    required:
+                    - ok
+                  meta:
+                    type: object
+                    additionalProperties: {}
+                required:
+                - data
+        default:
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          enum:
+          - AUTH_EXPIRED
+          - AUTH_INVALID
+          - NETWORK_TIMEOUT
+          - NETWORK_OFFLINE
+          - VALIDATION_ERROR
+          - PII_CHECK_FAILED
+          - EMBEDDING_FAILED
+          - AI_GENERATION_TIMEOUT
+          - NOT_FOUND
+          - RATE_LIMITED
+          - EXPORT_EMPTY_PERIOD
+          - PAYLOAD_TOO_LARGE
+          - OCR_NO_TEXT
+        message:
+          type: string
+        retryable:
+          type: boolean
+        requestId:
+          type: string
+      required:
+      - code
+      - message
+      - retryable
+      - requestId
