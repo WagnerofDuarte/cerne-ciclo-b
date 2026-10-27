@@ -24,7 +24,13 @@ Reflective-journaling mobile app with an AI assistant. Flutter/Dart (pinned via 
 
 ## Running and verifying
 
-- TODO: no Flutter project exists yet (F000 not started) — no `pubspec.yaml`, no `.fvmrc`. Do not guess `flutter test` / `flutter analyze` invocations; once F000 scaffolds the project, verify the real fvm-wrapped commands and record them here.
+- Flutter is pinned via `fvm` (`.fvmrc`, currently `3.47.5`) — always prefix commands with `fvm`, never call a global `flutter`/`dart` directly.
+- Install deps: `fvm flutter pub get` — must resolve with no conflicts.
+- Generate code (`Failure`'s `freezed` output today, plus `json_serializable` output for any later feature's DTOs): `fvm flutter pub run build_runner build --delete-conflicting-outputs`.
+- Run tests: `fvm flutter test`.
+- Lint/typecheck: `fvm flutter analyze` — must report zero issues.
+- `.env` (gitignored, holds `FUNCTIONS_BASE_URL` + `SUPABASE_ANON_KEY`) must exist at the repo root before running the app or the DI bootstrap test — copy `.env.example` to `.env` and fill in real values. It's declared as a Flutter asset (`pubspec.yaml`) so `flutter_dotenv` can load it both at runtime and under `flutter test`.
+- No device/simulator or CI pipeline exists yet — `test/core/di/bootstrap_integration_test.dart` fakes the native secure-storage platform channel rather than running on a real iOS target; revisit if/when a device or CI step is introduced.
 
 ## Conventions that differ from defaults
 

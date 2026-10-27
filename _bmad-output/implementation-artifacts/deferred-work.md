@@ -1,0 +1,3 @@
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-1-project-scaffold-stack-integration-core-infrastructure.md`
+  summary: No portrait-only orientation lock is enforced anywhere in the app shell (`ios/Runner/Info.plist` still lists landscape orientations alongside portrait).
+  evidence: `docs/input/requirements.md` fixes the app to a single 390x844 portrait-only frame with no landscape path, but Story 1.1 is core infrastructure only (no screens/app-shell UI) and the architecture spine doesn't assign this lock to any specific story. Likely belongs to Story 1.6 (Base Navigation Shell with Feature Placeholders), the first story that builds real app-shell UI — should be picked up there rather than silently falling through the cracks.
