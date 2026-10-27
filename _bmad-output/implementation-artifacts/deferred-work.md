@@ -1,3 +1,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-1-project-scaffold-stack-integration-core-infrastructure.md`
   summary: No portrait-only orientation lock is enforced anywhere in the app shell (`ios/Runner/Info.plist` still lists landscape orientations alongside portrait).
   evidence: `docs/input/requirements.md` fixes the app to a single 390x844 portrait-only frame with no landscape path, but Story 1.1 is core infrastructure only (no screens/app-shell UI) and the architecture spine doesn't assign this lock to any specific story. Likely belongs to Story 1.6 (Base Navigation Shell with Feature Placeholders), the first story that builds real app-shell UI — should be picked up there rather than silently falling through the cracks.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-2-design-token-system-core-component-library.md`
+  summary: `lib/core/widgets/avatar.dart`'s `Avatar` renders raw initials text with no `Semantics` wrapper, so a screen reader announces e.g. "W D" instead of something like "Avatar, Wagner Duarte".
+  evidence: Accessibility semantics were never required by Story 1.2's spec (no boundary, acceptance criterion, or epic-context requirement mentions it) and the prototype gives no guidance either, so adding it now would be scope creep beyond the frozen intent. Worth a deliberate pass across all shared widgets (button/text-field/avatar) once an accessibility requirement exists, rather than bolting it onto one widget ad hoc.
