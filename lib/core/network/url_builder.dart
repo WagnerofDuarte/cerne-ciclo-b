@@ -14,8 +14,7 @@ class UrlBuilder {
   /// Builds the real request URL for [function] (the operation's
   /// `x-cerne-function` name), appending [pathParams] as trailing segments.
   String build(String function, [List<String> pathParams = const []]) {
-    final trimmedBase =
-        baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+    final trimmedBase = baseUrl.replaceAll(RegExp(r'/+$'), '');
     final segments = [function, ...pathParams].map(Uri.encodeComponent);
     return '$trimmedBase/${segments.join('/')}';
   }

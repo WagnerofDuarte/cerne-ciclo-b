@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:fpdart/fpdart.dart';
 
 import '../failure/failure.dart';
+import 'dio_error_code.dart';
 import 'url_builder.dart';
 
 /// AD-2/AD-5 — the one network façade every repository's data source calls
@@ -92,22 +93,20 @@ class ApiClient {
   }
 
   Failure _mapDioException(DioException e) {
+    final code = dioErrorCodeOf(e);
+    if (code == null) {
+      // Covers a cancelled request and an HTTP response that doesn't carry
+      // the expected `{code, message, retryable}` body — neither is one of
+      // the 13 backend codes, so neither is retryable (dioErrorCodeOf).
+      return Failure.malformedResponse(
+        message: e.message ?? 'Malformed response',
+      );
+    }
     final data = e.response?.data;
-    if (data is Map && data['code'] is String) {
-      final message = data['message'];
-      return Failure.fromCode(
-        data['code'] as String,
-        (message is String ? message : null) ?? e.message ?? 'Unknown error',
-      );
-    }
-    if (e.response == null) {
-      // NETWORK_OFFLINE never produces an HTTP response at all
-      // (error-taxonomy.md) — every connection-level dio error without a
-      // response maps here.
-      return Failure.networkOffline(
-        message: e.message ?? 'No connection',
-      );
-    }
-    return Failure.malformedResponse(message: e.message ?? 'Malformed response');
+    final message = data is Map ? data['message'] : null;
+    return Failure.fromCode(
+      code,
+      (message is String ? message : null) ?? e.message ?? 'Unknown error',
+    );
   }
 }

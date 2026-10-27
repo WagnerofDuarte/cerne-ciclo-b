@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
 
+import 'dio_error_code.dart';
+
 /// AD-4 — the one place retry policy lives. Retries only the 6 server
 /// `retryable:true` codes (`error-taxonomy.md`); every other failure
 /// (including the local `MalformedResponse`) surfaces once, unretried.
@@ -61,19 +63,10 @@ class RetryInterceptor extends Interceptor {
   static int attemptOf(DioException err) =>
       (err.requestOptions.extra[_attemptKey] as int?) ?? 0;
 
-  /// The backend error `code` for [err] — `NETWORK_OFFLINE` is the one code
-  /// with no HTTP response at all (`error-taxonomy.md`); every other code is
-  /// read from the response body `{code, message, retryable}`.
-  static String? errorCodeOf(DioException err) {
-    final data = err.response?.data;
-    if (data is Map && data['code'] is String) {
-      return data['code'] as String;
-    }
-    if (err.response == null) {
-      return 'NETWORK_OFFLINE';
-    }
-    return null;
-  }
+  /// The backend error `code` for [err] — delegates to the shared
+  /// [dioErrorCodeOf] (also used by `ApiClient`) so a client-side timeout or
+  /// a cancelled request is never misread as `NETWORK_OFFLINE` here.
+  static String? errorCodeOf(DioException err) => dioErrorCodeOf(err);
 
   /// Pure decision function, independently testable: retry only if the
   /// error's code is one of the 6 allowlisted codes and the max-retries

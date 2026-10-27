@@ -76,6 +76,19 @@ context:
 - Given a stubbed response, then only the 6 retryable codes retry; all 14 `Failure` subtypes are reachable.
 - Given the matrix helper run against `auth-signup` for all 3 failure types, then each yields `Left(Failure)`, zero unhandled exceptions, via a reusable API.
 
+### Review Findings
+
+- [x] [Review][Patch] Client-side Dio timeouts (connectTimeout/sendTimeout/receiveTimeout) misclassified as `NETWORK_OFFLINE` instead of `NETWORK_TIMEOUT` [lib/core/network/api_client.dart:103, lib/core/network/retry_interceptor.dart:72] — fixed via shared `dioErrorCodeOf` (`lib/core/network/dio_error_code.dart`), which checks `e.type` before falling back to offline.
+- [x] [Review][Patch] Cancelled requests (`DioExceptionType.cancel`) misread as `NETWORK_OFFLINE` and retried by `RetryInterceptor` [lib/core/network/retry_interceptor.dart:72] — fixed in the same shared helper; `cancel` now yields no code, so it's never retried.
+- [x] [Review][Patch] `DioException` → error-code extraction logic duplicated between `ApiClient` and `RetryInterceptor`, risking drift [lib/core/network/api_client.dart:94, lib/core/network/retry_interceptor.dart:67] — unified into `dioErrorCodeOf` (`lib/core/network/dio_error_code.dart`); both files now delegate to it.
+- [x] [Review][Patch] `UrlBuilder.build` only strips a single trailing slash from `baseUrl`, leaving a double slash if `FUNCTIONS_BASE_URL` has two or more [lib/core/network/url_builder.dart:17] — now strips all trailing slashes via `replaceAll(RegExp(r'/+$'), '')`.
+- [x] [Review][Patch] `HeaderInterceptor.functionNameOf` can throw unguarded inside `onRequest`, hanging the request with no visible error if it does [lib/core/network/header_interceptor.dart:35] — call site now wrapped in try/catch, falling back to an unrecognized function name and logging via `debugPrint`.
+- [x] [Review][Patch] Bootstrap has no error handling for a missing/malformed `.env` — raw crash from `setupCoreDependencies`/`main` instead of a clear setup message [lib/core/di/injection_container.dart:23, lib/main.dart:7] — `main()` now catches, logs a clear "copy .env.example to .env" diagnostic, and rethrows.
+- [x] [Review][Patch] Interceptor tests rely on fixed-duration sleeps instead of deterministic synchronization, risking flakiness under load [test/core/network/header_interceptor_test.dart:56, test/core/network/retry_interceptor_test.dart:126] — replaced with `_runOnRequest`/`_runOnError` helpers that await the interceptor's real (void-hidden) Future.
+- [x] [Review][Patch] `ApiClient.get`/`patch`/`delete` have no test coverage — only `post` is exercised [test/core/network/api_client_test.dart:1] — added coverage for all three, including `queryParameters`/`pathParams` pass-through.
+- [x] [Review][Patch] `SecureStorageAccessTokenProvider` has no dedicated unit test [lib/core/network/access_token_provider.dart:19] — added `test/core/network/access_token_provider_test.dart`.
+- [x] [Review][Patch] `HeaderInterceptor` swallows any exception from `readAccessToken()` with a bare `catch (_)` and no logging [lib/core/network/header_interceptor.dart:42] — now logs via `debugPrint` before proceeding without a token.
+
 ## Spec Change Log
 
 ## Design Notes

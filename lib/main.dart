@@ -4,7 +4,16 @@ import 'core/di/injection_container.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await setupCoreDependencies();
+  try {
+    await setupCoreDependencies();
+  } catch (error) {
+    debugPrint(
+      'Cerne failed to start: could not load .env ($error). Copy '
+      '.env.example to .env and fill in FUNCTIONS_BASE_URL + '
+      'SUPABASE_ANON_KEY before running the app.',
+    );
+    rethrow;
+  }
   runApp(const CerneApp());
 }
 

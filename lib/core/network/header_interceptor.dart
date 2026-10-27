@@ -1,5 +1,6 @@
 // ignore_for_file: prefer_initializing_formals
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import 'access_token_provider.dart';
 
@@ -32,17 +33,36 @@ class HeaderInterceptor extends Interceptor {
   ) async {
     options.headers['apikey'] = _anonKey;
 
-    final function = functionNameOf(options.path);
+    String function;
+    try {
+      function = functionNameOf(options.path);
+    } catch (error) {
+      // A malformed `options.path` must never crash/hang the pipeline (an
+      // uncaught throw here, before `handler.next` is called, would leave
+      // the request unresolved forever) — proceed as if the function were
+      // unrecognized rather than let it propagate.
+      debugPrint(
+        'HeaderInterceptor: functionNameOf failed ($error) for path '
+        '"${options.path}" — treating as unrecognized.',
+      );
+      function = '';
+    }
     if (anonKeyOnlyFunctions.contains(function)) {
       options.headers['Authorization'] = 'Bearer $_anonKey';
     } else {
       String? userToken;
       try {
         userToken = await _accessTokenProvider.readAccessToken();
-      } catch (_) {
+      } catch (error) {
         // A thrown platform exception from the native secure-storage
         // channel must never crash the request pipeline — proceed as if no
-        // token were found rather than let it propagate uncaught.
+        // token were found rather than let it propagate uncaught. Logged so
+        // a genuine bug in a future AccessTokenProvider implementation
+        // isn't silently invisible.
+        debugPrint(
+          'HeaderInterceptor: readAccessToken failed ($error) — proceeding '
+          'without an Authorization header.',
+        );
         userToken = null;
       }
       if (userToken != null) {

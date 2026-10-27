@@ -156,5 +156,129 @@ void main() {
         (_) => fail('expected Left'),
       );
     });
+
+    test(
+        'a client-side connect timeout maps to Left(NetworkTimeout), not '
+        'NetworkOffline (patch item 1)', () async {
+      final dioError = DioException(
+        requestOptions: requestOptions,
+        type: DioExceptionType.connectionTimeout,
+      );
+      when(
+        () => mockDio.post<Map<String, dynamic>>(any(), data: any(named: 'data')),
+      ).thenThrow(dioError);
+
+      final result = await apiClient.post('auth-signup', data: {'a': 1});
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) {
+          expect(failure, isA<NetworkTimeout>());
+          expect(failure.retryable, isTrue);
+        },
+        (_) => fail('expected Left'),
+      );
+    });
+
+    test(
+        'a cancelled request maps to Left(MalformedResponse), never '
+        'NetworkOffline — it must never be retried (patch item 2)',
+        () async {
+      final dioError = DioException(
+        requestOptions: requestOptions,
+        type: DioExceptionType.cancel,
+      );
+      when(
+        () => mockDio.post<Map<String, dynamic>>(any(), data: any(named: 'data')),
+      ).thenThrow(dioError);
+
+      final result = await apiClient.post('auth-signup', data: {'a': 1});
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) {
+          expect(failure, isA<MalformedResponse>());
+          expect(failure.retryable, isFalse);
+        },
+        (_) => fail('expected Left'),
+      );
+    });
+
+    test('get sends queryParameters through and maps a success response',
+        () async {
+      final response = Response<Map<String, dynamic>>(
+        requestOptions: requestOptions,
+        statusCode: 200,
+        data: {'items': <dynamic>[]},
+      );
+      when(
+        () => mockDio.get<Map<String, dynamic>>(
+          any(),
+          queryParameters: any(named: 'queryParameters'),
+        ),
+      ).thenAnswer((_) async => response);
+
+      final result = await apiClient.get(
+        'entries-list',
+        queryParameters: {'cursor': 'abc'},
+      );
+
+      expect(result.isRight(), isTrue);
+      final captured = verify(
+        () => mockDio.get<Map<String, dynamic>>(
+          captureAny(),
+          queryParameters: captureAny(named: 'queryParameters'),
+        ),
+      ).captured;
+      expect(captured[0], '$baseUrl/entries-list');
+      expect(captured[1], {'cursor': 'abc'});
+    });
+
+    test('patch sends data through and maps a success response', () async {
+      final response = Response<Map<String, dynamic>>(
+        requestOptions: requestOptions,
+        statusCode: 200,
+        data: {'updated': true},
+      );
+      when(
+        () => mockDio.patch<Map<String, dynamic>>(
+          any(),
+          data: any(named: 'data'),
+        ),
+      ).thenAnswer((_) async => response);
+
+      final result = await apiClient.patch(
+        'account-settings-update',
+        data: {'name': 'x'},
+      );
+
+      expect(result.isRight(), isTrue);
+      result.match(
+        (_) => fail('expected Right'),
+        (data) => expect(data, {'updated': true}),
+      );
+    });
+
+    test('delete maps errors the same way the other verbs do', () async {
+      when(
+        () => mockDio.delete<Map<String, dynamic>>(
+          any(),
+          data: any(named: 'data'),
+        ),
+      ).thenThrow(
+        DioException(
+          requestOptions: requestOptions,
+          type: DioExceptionType.connectionError,
+        ),
+      );
+
+      final result = await apiClient.delete('account');
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<NetworkOffline>()),
+        (_) => fail('expected Left'),
+      );
+    });
   });
 }

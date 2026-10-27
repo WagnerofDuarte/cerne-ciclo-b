@@ -52,8 +52,7 @@ void main() {
       final handler = MockRequestInterceptorHandler();
       when(() => handler.next(any())).thenReturn(null);
 
-      interceptor.onRequest(options, handler);
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await _runOnRequest(interceptor, options, handler);
 
       expect(options.headers['apikey'], anonKey);
       expect(options.headers['Authorization'], 'Bearer $userToken');
@@ -69,8 +68,7 @@ void main() {
       final handler = MockRequestInterceptorHandler();
       when(() => handler.next(any())).thenReturn(null);
 
-      interceptor.onRequest(options, handler);
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await _runOnRequest(interceptor, options, handler);
 
       expect(options.headers['apikey'], anonKey);
       expect(options.headers.containsKey('Authorization'), isFalse);
@@ -87,11 +85,26 @@ void main() {
       final handler = MockRequestInterceptorHandler();
       when(() => handler.next(any())).thenReturn(null);
 
-      interceptor.onRequest(options, handler);
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+      await _runOnRequest(interceptor, options, handler);
 
       expect(options.headers['apikey'], anonKey);
       expect(options.headers.containsKey('Authorization'), isFalse);
+      verify(() => handler.next(options)).called(1);
+    });
+
+    test(
+        'a path that makes functionNameOf throw (malformed percent-escape) '
+        'still completes instead of hanging the request', () async {
+      when(() => mockAccessTokenProvider.readAccessToken())
+          .thenAnswer((_) async => null);
+
+      final options = RequestOptions(path: 'https://host/%');
+      final handler = MockRequestInterceptorHandler();
+      when(() => handler.next(any())).thenReturn(null);
+
+      await _runOnRequest(interceptor, options, handler);
+
+      expect(options.headers['apikey'], anonKey);
       verify(() => handler.next(options)).called(1);
     });
   });
@@ -117,4 +130,21 @@ void main() {
       expect(HeaderInterceptor.functionNameOf('/auth-signup'), 'auth-signup');
     });
   });
+}
+
+/// `onRequest` is declared `void` but implemented `async`, so Dart still
+/// returns a real `Future` at runtime even though the static type hides it
+/// — awaiting that real Future deterministically waits for the method's
+/// async work to finish, instead of a fixed-duration sleep.
+Future<void> _runOnRequest(
+  HeaderInterceptor interceptor,
+  RequestOptions options,
+  RequestInterceptorHandler handler,
+) async {
+  // `onRequest`'s declared return type is `void`, but the real
+  // implementation is `async` and returns a real `Future` at runtime.
+  // Calling through a `dynamic`-typed reference bypasses the static void
+  // check so that real Future can be captured and awaited.
+  final dynamic pending = (interceptor.onRequest as dynamic)(options, handler);
+  if (pending is Future) await pending;
 }
