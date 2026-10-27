@@ -1,0 +1,48 @@
+# Digest: routing & dependency injection — round 1
+
+## Q1 — Routing package
+
+**Pick: `go_router`. Runner-up: `auto_route`.** Switch condition: switch to `auto_route` if, during implementation, compile-time-checked route arguments matter enough to accept a second build_runner codegen pipeline and the "generated code is opaque during debugging" cost — or if go_router's maintenance-mode status (Flutter team doing bug fixes, not new features) turns into an actually-missing capability. For a solo iOS-only, portrait-only app with fairly standard chat/journal screens, go_router's larger adoption, official Flutter-team backing, and simpler no-codegen mental model make it the lower-risk pick on a deadline.
+
+Screened out: Beamer (last GitHub push reported Oct 2024, single source only, no 2025/2026 activity surfaced — treated as stale). GetX's router not separately screened (poor prior fit with flutter_bloc + Clean Architecture commitments, not pursued).
+
+Fit notes: go_router's `redirect` callback + `refreshListenable` (wrapping the auth Bloc's stream via a `StreamListenable`/ChangeNotifier adapter) is the documented pattern for "redirect to login on session expiry," evaluated globally at the GoRouter level — well-trodden in Flutter/Bloc tutorials. Both go_router and auto_route are pure presentation-layer concerns; route tables live in `core`/`presentation/`, referencing Bloc state only through adapters — neither forces an import into `domain/`. auto_route's generator adds an annotation + build_runner step, one more moving part for a solo dev. go_router needs no codegen (an optional `go_router_builder` exists for typed routes later). go_router is the Flutter-team-maintained, officially-pointed-to option with larger first-party docs/tutorial volume.
+
+**Flagged low-confidence pain-point:** reports of go_router having "unstable API from version to version," `StatefulShellRoute` called problematic, and view-model state not reinitializing on route return — this is a single aggregated search synthesis, not corroborated by two independent primary sources per the pack's pain-point rule. Report as an unverified signal, not a confirmed flaw. Also note: a Feb 2025 source calling `auto_route` "stagnating" is contradicted by current pub.dev data showing active Dec 2025/Feb 2026 releases — that stagnation claim is stale/superseded.
+
+## Q2 — Dependency injection package
+
+**Pick: `get_it`** (manual registration in a single composition-root file; skip `injectable`/codegen unless registration volume becomes painful). **Runner-up: `riverpod` used as a DI layer.** Switch condition: only if the project drops `flutter_bloc` in favor of Riverpod's own state-management primitives — running `flutter_bloc` and `riverpod` side by side as two separate reactive/DI paradigms adds conceptual overhead a solo TCC dev on a deadline should avoid. Staying on `flutter_bloc` (as already committed), `get_it` is the straightforward choice: plain Dart service locator, no Flutter dependency, so it never forces anything into the domain layer; Blocs/Cubits are commonly created via `BlocProvider(create: (_) => getIt<MyBloc>())`.
+
+Fit notes: `get_it` is pure Dart (no `package:flutter` dependency) — best practice is still to keep `get_it` calls out of `domain/` and resolve only at the composition root and in `presentation/`; domain exposes only abstract interfaces, `get_it` binds concrete `data/` implementations at startup. Testability: `get_it` is a singleton locator but explicitly designed to be reset/overridden per test (`getIt.reset()` + `registerSingleton<Repo>(MockRepo())`, or `pushNewScope()`) — satisfies "no untestable hidden singleton" in practice, though architecturally it IS a singleton locator (a nuance against the stated criterion, not a clean pass). `injectable` (codegen companion) current v3.0.0, Dart 3 compatible, "LeanBuilder" since 2.12.0+ addresses historically slow build_runner times — still, default to manual `get_it` registration first given the deadline. Riverpod-as-DI's provider-override mechanism is arguably cleaner for test-time swapping, but pairing Riverpod only for DI while `flutter_bloc` handles state is a combination with no current production source found discussing it — flagged unverified/thin, not well-evidenced. `provider` and "no-package manual DI" were not researched this round — no claims reported for them.
+
+## Flat findings list
+
+1. go_router has 4,435 likes on pub.dev; a recent version (17.2.2) shows a pub.dev health score of 87/100, data as of ~Apr 20 2026 — source: pub-web.flutter-io.cn mirror pages — publisher: pub.dev mirror/WebSearch synthesis — accessed 2026-10-25 — confidence medium — class adoption/version
+2. GoRouter has entered "maintenance mode" — Flutter team focused on bug fixes/stability, community contributions continue, "far from abandoned" — source: https://8thlight.com/insights/flutter-navigation-is-gorouter-still-the-best-choice — publisher 8th Light — pub_date ~Feb 2025 — accessed 2026-10-25 — confidence high — class adoption/maintenance
+3. GoRouter remains "the best choice for Flutter navigation right now" per the same Feb 2025 retrospective, citing download lead over auto_route (1.28M vs 208k at the time) — same source — confidence medium (dated ~20 months before today; download numbers are a snapshot) — class pattern/recommendation
+4. The same article's "auto_route stagnating" claim is CONTRADICTED by current pub.dev data showing auto_route 11.1.0 (Dec 2025) and auto_route_generator 10.5.0 (Feb 2026) — active releases after that claim's timeframe — source: 8th Light vs pub-web-s2.flutter-io.cn mirror — confidence low on the stagnation claim specifically, treat as stale/superseded — class pain-point (superseded)
+5. auto_route latest version 11.1.0 (Dec 2025), 3.39K likes, 160 pub points, 289.2K downloads/30 days, 1.75K GitHub stars; auto_route_generator 10.5.0 (Feb 2026) — source: pub-web-s2.flutter-io.cn mirror — confidence medium — class adoption/version
+6. Beamer's last GitHub push was Oct 16, 2024 — source: gittrend.io (third-party tracker) — confidence low-medium (single source, third-party not GitHub itself) — class adoption/maintenance
+7. go_router's `redirect` + `refreshListenable` (wrapping a Bloc/auth stream) is the standard pattern for global "redirect to login on session expiry" — source: gurubase.io aggregated answer — confidence medium (widely corroborated across results, no single primary doc fetched directly) — class pattern
+8. Reports of go_router "unstable API from version to version," `StatefulShellRoute` called problematic, view-model state not reinitializing on route return — source: WebSearch synthesized over several forum/blog results, no single URL isolates each claim — confidence low (single aggregated synthesis, not independently corroborated per two-source pain-point rule) — class pain-point (needs follow-up)
+9. get_it latest version 9.2.1 (Feb 2026), 140/140 pub points, 4.7K likes, 100% popularity, 1.7M downloads/30 days, 1.46K GitHub stars — source: pub.dev/fluttergems.dev mirror — confidence medium-high — class adoption/version
+10. injectable latest version 3.0.0 (Apr 2026), Dart 3/null-safety compatible, 1.45K likes, 260.9K downloads/30 days; LeanBuilder since v2.12.0+ for faster incremental builds — source: pub.dev documentation/fluttergems.dev — confidence medium-high — class version/pain-point-fixed
+11. get_it is a classic Service Locator; Riverpod bakes dependency lookup into `ref.read`, making mocking/override straightforward — source: gskinner blog, Nov 2021 — confidence low (2021 article, outside the pack's 2-year pattern-freshness bar relative to Oct 2026 — treat as dated/background only) — class pattern (stale)
+12. Clean-Architecture Flutter writeups commonly pair get_it + injectable for DI and mocktail for testing, domain layer kept Flutter-free, runnable under plain `dart test` — source: aggregated dev.to/Medium tutorials, no single URL isolates the full claim — confidence low-medium — class pattern
+
+## Leads not chased (budget spent)
+- A July 2026 comparative article (go_router vs auto_route vs Navigator 2.0) surfaced only by title, never fetched — best next source for Q1.
+- Direct pub.dev pages for go_router/auto_route/get_it/riverpod never fetched as primary pages — all data via mirrors/aggregators; worth confirming against canonical pub.dev directly.
+- GitHub issue trackers for go_router (flutter/packages) and auto_route (Milad-Akarie/auto_route) not searched directly.
+- `provider` and "manual constructor injection, no package" (named Q2 candidates) not researched at all.
+- GetX's router (named Q1 candidate) not researched at all.
+- riverpod's own pub.dev score/release cadence not searched as a standalone signal.
+
+## Explicit gaps
+- No single, directly-attributable, current (≤6mo) primary source enumerating go_router's specific open bugs — claim #8 is a low-confidence signal only, not independently corroborated.
+- No current (2025/2026) source on Beamer's status beyond one third-party aggregator; no pub.dev score/likes data retrieved for Beamer at all.
+- No current production retrospective pairing Riverpod as a DI layer underneath flutter_bloc — the Q2 runner-up's viability is a reasoned inference, not evidenced.
+- `provider` / "no-package manual DI" maturity/fit not verified at all — zero searches run, no findings reported for them.
+- GetX's router not verified against project criteria — zero searches run; omitted from the field rather than evidenced as "cut."
+- All pub.dev score/likes/download figures came through regional mirrors or third-party aggregators, not a direct pub.dev/packages/<name> fetch — treat exact numbers as approximate.

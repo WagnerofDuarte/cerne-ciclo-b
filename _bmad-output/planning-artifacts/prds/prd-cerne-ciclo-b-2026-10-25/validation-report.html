@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PRD Validation: Cerne</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e7e5e4;
+    --text: #1c1917;
+    --muted: #78716c;
+
+    --verdict-strong: #16a34a;
+    --verdict-adequate: #65a30d;
+    --verdict-thin: #d97706;
+    --verdict-broken: #dc2626;
+
+    --sev-low: #64748b;
+    --sev-medium: #ca8a04;
+    --sev-high: #ea580c;
+    --sev-critical: #dc2626;
+
+    --grade-exc: #16a34a;
+    --grade-good: #65a30d;
+    --grade-fair: #d97706;
+    --grade-poor: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  header.report-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .title h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .title .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .grade {
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-weight: 600;
+    color: white;
+    font-size: 15px;
+    white-space: nowrap;
+  }
+  .grade-excellent { background: var(--grade-exc); }
+  .grade-good { background: var(--grade-good); }
+  .grade-fair { background: var(--grade-fair); }
+  .grade-poor { background: var(--grade-poor); }
+
+  .synthesis {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--muted);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin-bottom: 24px;
+    font-size: 15.5px;
+  }
+  .synthesis p { margin: 0 0 10px; }
+  .synthesis p:last-child { margin-bottom: 0; }
+
+  .dimension-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .dim-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .dim-card .dim-name { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .dim-card .dim-verdict { font-size: 14px; font-weight: 600; }
+
+  section.dimension, section.reviewer-section { margin-bottom: 14px; }
+  section.dimension details, section.reviewer-section details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  section summary {
+    padding: 14px 20px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  section summary::-webkit-details-marker { display: none; }
+  section summary::before {
+    content: "▸";
+    display: inline-block;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  section details[open] summary::before { transform: rotate(90deg); }
+  section summary h2 {
+    display: inline;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    flex: 1;
+  }
+  .verdict-pill {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: white;
+  }
+  .verdict-strong { background: var(--verdict-strong); }
+  .verdict-adequate { background: var(--verdict-adequate); }
+  .verdict-thin { background: var(--verdict-thin); }
+  .verdict-broken { background: var(--verdict-broken); }
+
+  .dim-body { padding: 4px 20px 18px; }
+  .dim-judgment { color: var(--text); font-size: 14.5px; }
+  .dim-judgment p { margin: 0 0 10px; }
+
+  .findings-list { padding: 0 20px 4px; }
+  article.finding {
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+  }
+  article.finding:first-child { border-top: none; }
+  article.finding header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .badge {
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+  }
+  .badge-sev-low { background: rgba(100, 116, 139, 0.12); color: var(--sev-low); }
+  .badge-sev-medium { background: rgba(202, 138, 4, 0.14); color: var(--sev-medium); }
+  .badge-sev-high { background: rgba(234, 88, 12, 0.14); color: var(--sev-high); }
+  .badge-sev-critical { background: rgba(220, 38, 38, 0.14); color: var(--sev-critical); }
+  .finding-title { margin: 0; font-size: 15px; font-weight: 500; flex: 1; min-width: 200px; }
+  .finding-location { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  .finding-note, .finding-fix { margin-top: 6px; font-size: 14px; }
+  .finding-fix strong { color: var(--muted); font-weight: 500; }
+
+  .reviewer-source {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  .mechanical {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    font-size: 14px;
+  }
+  .mechanical h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .mechanical ul { margin: 0; padding-left: 20px; }
+  .mechanical li { margin-bottom: 4px; color: var(--text); }
+
+  footer.report-footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  footer .meta { display: flex; gap: 24px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="report-header">
+      <div class="title">
+        <h1>Cerne — Validation Report</h1>
+        <div class="subtitle">_bmad-output/planning-artifacts/prds/prd-cerne-ciclo-b-2026-10-25/prd.md</div>
+      </div>
+      <div class="grade grade-fair">Fair</div>
+    </header>
+
+    <div class="synthesis">
+      <p>Unusually honest, well-disciplined PRD for its academic/TCC-rigorous stakes — Open Questions, <code>[ASSUMPTION]</code> tags, and Non-Goals do real work rather than performing completeness, and IDs/glossary/cross-refs are clean for downstream use. The two soft spots the rubric found are done-ness (a few FRs and one NFR have no settled acceptance path despite <code>status: final</code>) and strategic coherence (one feature with no User-Journey anchor, breaking an otherwise-complete thesis→UJ→feature chain).</p>
+      <p>A second, independent pass checked the PRD against the frozen <code>docs/input/</code> sources specifically for drift introduced by the two polish passes that ran after the original reconciliation. Fidelity is strong overall — delivery order, extension non-goals, error taxonomy, and the AI-provider/on-device-STT constraints all match exactly — but it surfaced one high-severity dropped prototype behavior (an OCR-failure recovery path the prototype documents that the PRD's FR-13 omits) plus a handful of smaller drift items. Combined with the rubric's RNF01 finding, the report carries two high-severity findings, which is what pulls the grade to Fair rather than Good — neither is expensive to close.</p>
+    </div>
+
+    <div class="dimension-summary">
+      <div class="dim-card">
+        <div class="dim-name">Decision-readiness</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Substance over theater</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Strategic coherence</div>
+        <div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Done-ness clarity</div>
+        <div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Scope honesty</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Downstream usability</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+      <div class="dim-card">
+        <div class="dim-name">Shape fit</div>
+        <div class="dim-verdict" style="color: var(--verdict-strong)">strong</div>
+      </div>
+    </div>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Decision-readiness</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Decisions are stated as decisions (§1's "bet is narrow and deliberate: not a bigger feature set than competitors, but a better memory"), trade-offs name what was given up (FR-20: "no tag/category filter exists, since categorization is an extension feature"), and §8's eleven Open Questions mostly read as genuinely unresolved rather than rhetorical — several are wired directly into the FR they block (<code>[OPEN]</code> tags inline at FR-11, FR-15, FR-20). SM-5 is explicitly marked "informal" and "not a graded criterion" rather than dressed up as a real metric. The one <code>[NOTE FOR PM]</code> (§4.11, under FR-43) sits at a real tension — a missing account-deletion confirmation screen — not a safe checkpoint.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Open Questions aren't sequenced against the delivery order they constrain</h3>
+              <span class="finding-location">§8, §6.1</span>
+            </header>
+            <div class="finding-note">OQ-3 blocks FR-11 inside RF01 (build unit 2 of 11) and OQ-7 blocks FR-19/20 inside RF06 (unit 6), but §8 lists all eleven OQs as a flat, unprioritized list with no marker for "must resolve before unit N starts." A solo author sequencing their own work benefits from knowing which OQs are load-bearing soon vs. deferrable to polish time.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Tag each OQ with the earliest build unit it blocks, or sort §8 by urgency against §6.1's order.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">OQ-5 is not actually open</h3>
+              <span class="finding-location">§8</span>
+            </header>
+            <div class="finding-note">"Cloud-only, immutable-entry design is a backend constraint... confirm there's no appetite to request a contract change" is answered in the same sentence ("there is none per AGENTS.md"). The PRD is self-aware about this, so the risk is cosmetic, but it inflates the "genuinely open" count a reader would use to gauge readiness.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Move OQ-5 to a "decisions already settled, recorded for visibility" note rather than the Open Questions list.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Substance over theater</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>No findings. The persona is a single, consistently-named protagonist (Mara) reused across all six UJs rather than a persona roster assembled for appearance. Cross-Cutting NFRs are quantified (RNF01: "&lt;100ms" / "300ms"; RNF07: "≥80%"; RNF08: "zero hardcoded visual values") rather than boilerplate. The Vision (§1) is specific to this product's bet and the addendum's competitive section names real, specific competitor complaints (Mindsera "feature-sprawl," Rosebud's "therapist-designed framing risk") rather than generic differentiation language.</p>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary>
+          <h2>Strategic coherence</h2>
+          <span class="verdict-pill verdict-adequate">adequate</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>The thesis ("a better memory," §1) is stated plainly and every feature section but one explicitly declares which UJ it realizes — the right mechanism for proving a PRD isn't a backlog with headers. Success Metrics are honestly scoped to conformance rather than adoption, and the PRD says so itself (§7).</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">RF08 Proactive Insights has no "Realizes UJ-X" linkage</h3>
+              <span class="finding-location">§4.9 / FR-31–33</span>
+            </header>
+            <div class="finding-note">Every other §4 section (4.1–4.8, 4.10, 4.11) states one; RF08's description reads "Depends on RF04" and stops. This breaks the otherwise-complete thesis→UJ→feature traceability chain and leaves FR-31–33 structurally un-anchored to any user journey.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Either add a UJ realized by RF08 (e.g., extend UJ-2 to cover an unprompted Insight arriving mid-conversation), or state explicitly that RF08 is UJ-less by design and why.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary>
+          <h2>Done-ness clarity</h2>
+          <span class="verdict-pill verdict-adequate">adequate</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Most FRs carry a self-evident testable clause or an explicit Consequences block, and several are impressively concrete (FR-38's "correctly at zero, one, and more-than-thirty Entries"; FR-21's "debounced... by 300ms"; FR-31's "5 user messages sent or 2 minutes of inactivity, whichever occurs first"). None of the classic vague tells ("gracefully," "reasonable," "user-friendly") appear in an FR statement. But a non-trivial slice of the 43 FRs, plus one NFR, do not actually have a settled "done" at this status.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">RNF01 has no mapped Success Metric or verification method</h3>
+              <span class="finding-location">Cross-Cutting NFRs / §7</span>
+            </header>
+            <div class="finding-note">RNF01 ("&lt;100ms" local UI, "300ms" loading-indicator threshold) is the only one of the nine Cross-Cutting NFRs with no mapped SM. SM-2 ties to RNF06+RNF07, SM-3 to RNF09, SM-4 to RNF08 — no SM references RNF01, and §7 gives no instrumented or manual method for checking it. For a document whose Success Metrics framing is "success is defined by specification conformance," a conformance criterion with no check is a gap.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add an SM (or a line under SM-1) naming how RNF01 gets verified, or state explicitly that RNF01 is unverified-by-design for this delivery.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Three FRs have a literal unresolved sub-behavior at status: final</h3>
+              <span class="finding-location">FR-11, FR-15, FR-20</span>
+            </header>
+            <div class="finding-note">FR-11 ("switching tabs mid-recording... is undefined behavior in the current prototype"), FR-15 ("no retry affordance is visible on the error state"), FR-20 ("how an active text search and active filters interact... is unspecified"). Honestly flagged — but an engineer building RF01 (unit 2 of 11) or RF06 (unit 6) cannot fully determine "done" for that sub-behavior without first resolving OQ-3/OQ-6/OQ-7.</div>
+            <div class="finding-fix"><strong>Fix:</strong> No PRD change needed beyond what §8 already does — but sequence these against build order (see the Decision-readiness finding above); FR-11's gap is live almost immediately.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">FR-19 search quality has no mechanism-only carve-out</h3>
+              <span class="finding-location">FR-19 / §5 / OQ-10</span>
+            </header>
+            <div class="finding-note">Unlike RF05/RF08/RF09, which each explicitly declare generated-content quality out of acceptance scope, RF06 search-result quality has no such carve-out. OQ-10 raises this exact "mechanism-only" boundary question for RF04 only — RF06 has the identical ambiguity and it isn't named anywhere.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Extend OQ-10 (or add an OQ-12) to cover RF06 search-quality alongside RF04 chat-quality.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">RNF02/RNF03 are inherited backend/vendor facts, not app-testable requirements</h3>
+              <span class="finding-location">Cross-Cutting NFRs</span>
+            </header>
+            <div class="finding-note">RNF02 (PII stripping, server-side) and RNF03 (zero data retention by upstream AI providers) describe facts the Flutter app neither implements nor can verify, yet sit in the same list as RNF01/04/05-09 which are app behaviors. This blurs what this PRD's own deliverable is actually on the hook for.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Mark RNF02/RNF03 as "inherited, not verified by this delivery" inline, or move them to the addendum's backend-context section.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Scope honesty</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>The Non-Goals section (§5) does real work — eight explicit exclusions, three tagged <code>[ext]</code> and tied to concrete inert-placeholder descriptions, plus the risk-signal-detection exclusion is framed as "a deliberate scope exclusion... not an oversight." The two <code>[ASSUMPTION]</code> tags (§2.1/§2.3 persona reconstruction, §4.1 FR-1 signup fields) both round-trip cleanly into §9's Assumptions Index. No additional findings beyond what's already captured under Decision-readiness (OQ-5 mislabeling) and Done-ness clarity (the FR-11/15/20 <code>[OPEN]</code> tags) — both are scope-honesty mechanisms working as intended, not failures of this dimension.</p>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Downstream usability</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Glossary (§3) terms are used consistently as proper nouns through the FRs. FR IDs run FR-1 through FR-43 with no gaps or duplicates; UJ-1–6 and SM-1–5 plus SM-C1/C2 are likewise contiguous. Cross-references resolve on spot-check, and the Failure-contract retryable-code list is consistent across three locations (the PRD's own table, §7's SM-3 framing, and the addendum's dio-retry list). Each feature section is reasonably self-contained, stating its own dependencies and UJ linkage inline rather than relying on "see above."</p>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary>
+          <h2>Shape fit</h2>
+          <span class="verdict-pill verdict-strong">strong</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>This is a consumer product with meaningful UX, and UJs with a named, consistent protagonist (Mara) are correctly load-bearing — six UJs, one per major feature cluster, neither over- nor under-formalized. The heavy formal apparatus (43 FRs, a 13-code failure taxonomy, explicit NFR thresholds) matches the stated "academic/TCC rigorous" stakes and audience. Greenfield framing is handled correctly. As a chain-top document, the downstream-usability strength above is load-bearing and earned.</p>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details open>
+        <summary>
+          <h2>Input-fidelity review</h2>
+          <span class="reviewer-source">review-input-fidelity.md</span>
+        </summary>
+        <div class="dim-body">
+          <div class="dim-judgment">
+            <p>Ad-hoc check of the PRD against the frozen <code>docs/input/</code> sources — all 43 FRs against requirements.md §1/§12, endpoint coverage against backend/README.md + openapi.yaml, AGENTS.md hard constraints, and visual/IA claims against prototype-extract.md — specifically hunting for drift introduced by the two polish passes that ran after the original reconciliation. Delivery order, extension-feature non-goals, error taxonomy, and AI-provider/on-device-STT constraints all match the frozen sources exactly.</p>
+          </div>
+        </div>
+        <div class="findings-list">
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-high">high</span>
+              <h3 class="finding-title">Dropped "Salvar só a foto" OCR-failure fallback</h3>
+              <span class="finding-location">§4.4 FR-13 vs. prototype-extract.md §2.3/§4</span>
+            </header>
+            <div class="finding-note">prototype-extract.md explicitly documents a second recovery path on OCR failure: a "Salvar só a foto" action that saves the Entry without extracted text, distinct from "Tentar novamente." FR-13's consequences only mention "error with retry, photo never discarded" — the save-without-text exit is absent, so acceptance testing would miss a documented state.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add a consequence to FR-13: "On OCR failure, in addition to retry, the user can save the Entry with no extracted text ('Salvar só a foto')."</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">Unsupported reinstall caveat on biometric preference</h3>
+              <span class="finding-location">§4.2 FR-7</span>
+            </header>
+            <div class="finding-note">FR-7 states the biometric toggle "survives app restarts (but not reinstalls)," but requirements.md §6.1 and the FR itself say the preference is stored server-side via PATCH /account/settings; a server-side value is retrieved on re-login after reinstall, so the "not reinstalls" claim is unsupported by (and in tension with) the cited mechanism.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Remove the reinstall caveat, or replace with an [ASSUMPTION] tag if a specific client-side caching behavior is intended.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-medium">medium</span>
+              <h3 class="finding-title">New Chat Session creation's offline restriction dropped</h3>
+              <span class="finding-location">§4.7 FR-25/FR-27</span>
+            </header>
+            <div class="finding-note">requirements.md §6.3 states POST /chat/sessions is "blocked offline" (distinct from GET /chat/sessions and message history, which work offline from cache). FR-27 ("Offline composer lock") only covers disabling the composer in an existing conversation; FR-25 ("New-conversation action") has no offline consequence, so the PRD doesn't carry forward that starting a new session is also blocked while offline.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add a consequence to FR-25 or FR-27 stating that POST /chat/sessions is blocked offline, consistent with the existing-conversation composer lock.</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">Overstated citation on session-expiry overlay coverage</h3>
+              <span class="finding-location">§4.1 FR-2</span>
+            </header>
+            <div class="finding-note">FR-2 says the overlay can appear on the timeline (RF07) or chat (RF04), "the two surfaces explicitly called out in requirements.md as session-dependent." Only RF07 explicitly states this in requirements.md text; the chat case is sourced from prototype-extract.md, not requirements.md's RF04 text.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Reword to cite both sources correctly: "...the timeline (RF07, called out explicitly in requirements.md) and chat (shown as the 'Sessão expirada' state in prototype-extract.md)."</div>
+          </article>
+          <article class="finding">
+            <header>
+              <span class="badge badge-sev-low">low</span>
+              <h3 class="finding-title">Prototype/backend conflict on profile editing not flagged</h3>
+              <span class="finding-location">§4.11 FR-41</span>
+            </header>
+            <div class="finding-note">prototype-extract.md §2.6 describes the avatar area as having "editable name/e-mail" inline. openapi.yaml's PATCH /account/settings explicitly rejects email changes. FR-41 correctly scopes itself to display-name editing only, but — unlike other prototype/backend conflicts the addendum already documents — this one is never called out, so a future reader could reintroduce an email-edit field by trusting the prototype literally.</div>
+            <div class="finding-fix"><strong>Fix:</strong> Add a line to addendum.md's "Corrections carried forward" noting that the prototype's visual "editable e-mail" affordance is not buildable, and FR-41 deliberately omits it.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <div class="mechanical">
+      <h3>Mechanical notes</h3>
+      <ul>
+        <li><strong>Casing drift:</strong> "Entry" is capitalized consistently as the Glossary-defined term through most of §4, but §5's Non-Goals heading text drifts to lowercase ("Dynamic AI categorization of entries," "Offline entry creation"). Similarly "Dashboard" is capitalized in §3's Glossary but appears lowercase through §4.11 and UJ-6 ("checks her settings dashboard").</li>
+        <li><strong>Unnumbered sections:</strong> §0–§9 are numbered, but "Information Architecture" (between §3 and §4) and the three trailing sections (Cross-Cutting NFRs, Constraints and Guardrails, Aesthetic and Tone) carry no section numbers. Internal references use the section name as a pseudo-ID, which works but is inconsistent with the rest of the document's numeric cross-referencing.</li>
+        <li><strong>Feature-specific NFR without an ID:</strong> §4.5's BLoC-composition rule is referenced by SM-1 but, unlike the nine global RNF01–09, has no stable identifier of its own. If more feature-specific NFRs accumulate, this will need one to stay unambiguous under downstream extraction.</li>
+        <li><strong>Assumptions Index and ID continuity otherwise check out clean:</strong> both [ASSUMPTION] tags round-trip into §9 with no drift; FR/UJ/SM numbering has no gaps, duplicates, or unresolved forward references found on spot-check.</li>
+      </ul>
+    </div>
+
+    <footer class="report-footer">
+      <div class="meta">
+        <span>Rubric: .claude/skills/bmad-prd/assets/prd-validation-checklist.md</span>
+        <span>Generated: 2026-10-26T00:00:00</span>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

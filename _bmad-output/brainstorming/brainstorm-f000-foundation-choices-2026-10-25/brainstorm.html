@@ -1,0 +1,1234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>F000 — Foundation Blueprint</title>
+<style>
+  :root{
+    --bg:#f1e9d2;
+    --bg2:#e9ddb9;
+    --paper:#faf4e4;
+    --paper2:#f5ecd4;
+    --ink:#1c2b48;
+    --ink-soft:#4a5a7c;
+    --ink-faint:#8691ab;
+    --accent:#1c6e8c;
+    --accent-ink:#0d3d52;
+    --warn:#a8381f;
+    --safe:#2f6b45;
+    --line:rgba(28,43,72,0.28);
+    --line-soft:rgba(28,43,72,0.14);
+    --grid-major:rgba(28,43,72,0.10);
+    --grid-minor:rgba(28,43,72,0.055);
+    --stamp:#a8381f;
+    --font-mono: "SF Mono", "Courier New", ui-monospace, Menlo, monospace;
+    --font-sans: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]) {
+      --bg:#081a30;
+      --bg2:#0c2440;
+      --paper:#0e2a4c;
+      --paper2:#0a2140;
+      --ink:#dceeff;
+      --ink-soft:#a9c7e8;
+      --ink-faint:#5e82ab;
+      --accent:#5fd4ff;
+      --accent-ink:#bdeeff;
+      --warn:#ff9470;
+      --safe:#7be0a8;
+      --line:rgba(180,220,255,0.30);
+      --line-soft:rgba(180,220,255,0.15);
+      --grid-major:rgba(180,220,255,0.10);
+      --grid-minor:rgba(180,220,255,0.05);
+      --stamp:#ff9470;
+    }
+  }
+  :root[data-theme="dark"]{
+      --bg:#081a30;
+      --bg2:#0c2440;
+      --paper:#0e2a4c;
+      --paper2:#0a2140;
+      --ink:#dceeff;
+      --ink-soft:#a9c7e8;
+      --ink-faint:#5e82ab;
+      --accent:#5fd4ff;
+      --accent-ink:#bdeeff;
+      --warn:#ff9470;
+      --safe:#7be0a8;
+      --line:rgba(180,220,255,0.30);
+      --line-soft:rgba(180,220,255,0.15);
+      --grid-major:rgba(180,220,255,0.10);
+      --grid-minor:rgba(180,220,255,0.05);
+      --stamp:#ff9470;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background-color:var(--bg);
+    background-image:
+      linear-gradient(var(--grid-major) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+      linear-gradient(var(--grid-minor) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-minor) 1px, transparent 1px);
+    background-size: 160px 160px, 160px 160px, 20px 20px, 20px 20px;
+    color:var(--ink);
+    font-family:var(--font-sans);
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  a{color:var(--accent);}
+
+  .theme-toggle{
+    position:fixed;
+    top:16px;
+    right:16px;
+    z-index:50;
+    background:var(--paper);
+    border:1.5px solid var(--line);
+    color:var(--ink);
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:0.06em;
+    padding:8px 12px;
+    border-radius:3px;
+    cursor:pointer;
+    box-shadow:2px 2px 0 var(--line-soft);
+  }
+  .theme-toggle:hover{border-color:var(--accent); color:var(--accent);}
+
+  main, header, footer.site-footer{
+    max-width:1100px;
+    margin:0 auto;
+    padding:0 20px;
+  }
+
+  /* ---------- shared "sheet" chrome ---------- */
+  .sheet{
+    position:relative;
+    background:var(--paper);
+    border:1.5px solid var(--line);
+    margin:28px 0;
+    padding:34px clamp(18px,4vw,54px) 40px;
+    box-shadow: 0 1px 0 var(--line-soft), 0 10px 26px rgba(0,0,0,0.08);
+  }
+  .sheet::before, .sheet::after{
+    content:"";
+    position:absolute;
+    width:22px; height:22px;
+    pointer-events:none;
+  }
+  .sheet::before{
+    top:-1px; left:-1px;
+    border-top:3px solid var(--accent);
+    border-left:3px solid var(--accent);
+  }
+  .sheet::after{
+    bottom:-1px; right:-1px;
+    border-bottom:3px solid var(--accent);
+    border-right:3px solid var(--accent);
+  }
+  .sheet-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+    flex-wrap:wrap;
+    gap:10px;
+    border-bottom:1.5px solid var(--line);
+    padding-bottom:12px;
+    margin-bottom:22px;
+  }
+  .sheet-no{
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:0.12em;
+    color:var(--ink-faint);
+  }
+  .sheet-title{
+    font-family:var(--font-mono);
+    text-transform:uppercase;
+    letter-spacing:0.08em;
+    font-size:clamp(20px,2.6vw,30px);
+    font-weight:700;
+    color:var(--ink);
+    margin:0;
+  }
+  .sheet-sub{
+    font-style:italic;
+    color:var(--ink-soft);
+    font-size:14px;
+    max-width:620px;
+    margin-top:4px;
+  }
+  .sheet-tech{
+    font-family:var(--font-mono);
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.1em;
+    color:var(--accent);
+    border:1px solid var(--accent);
+    padding:4px 9px;
+    border-radius:3px;
+    white-space:nowrap;
+  }
+
+  h3.block-label{
+    font-family:var(--font-mono);
+    text-transform:uppercase;
+    letter-spacing:0.12em;
+    font-size:12.5px;
+    color:var(--ink-faint);
+    margin:30px 0 12px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  h3.block-label::after{
+    content:"";
+    flex:1;
+    height:1px;
+    background:var(--line-soft);
+  }
+
+  .note{
+    font-family:var(--font-mono);
+    font-size:12.5px;
+    color:var(--ink-soft);
+    border-left:3px dashed var(--line);
+    padding:8px 14px;
+    margin:14px 0;
+    background:var(--paper2);
+  }
+  .note b{color:var(--warn);}
+  .note.open{border-left-color:var(--warn);}
+  .note.open b{color:var(--warn);}
+
+  /* ============ COVER ============ */
+  .cover{
+    padding-top:40px;
+    text-align:left;
+  }
+  .cover-kicker{
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+  }
+  .cover-main{
+    display:flex;
+    align-items:flex-end;
+    gap:28px;
+    flex-wrap:wrap;
+    margin:10px 0 18px;
+  }
+  .cover-f000{
+    font-family:var(--font-mono);
+    font-weight:800;
+    font-size:clamp(64px,13vw,128px);
+    line-height:0.85;
+    color:var(--accent);
+    letter-spacing:-0.02em;
+    text-shadow: 3px 3px 0 var(--line-soft);
+  }
+  .cover-title{
+    font-size:clamp(20px,3vw,28px);
+    color:var(--ink);
+    max-width:460px;
+    padding-bottom:10px;
+  }
+  .cover-rule{
+    border-top:3px solid var(--ink);
+    border-bottom:1px solid var(--ink);
+    height:5px;
+    margin:18px 0 24px;
+  }
+  .cover-desc{
+    max-width:720px;
+    color:var(--ink-soft);
+    font-size:15px;
+  }
+  .titleblock{
+    margin-top:28px;
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    border:1.5px solid var(--ink);
+    font-family:var(--font-mono);
+    font-size:11.5px;
+  }
+  .titleblock div{
+    padding:9px 12px;
+    border-right:1px solid var(--line);
+    border-bottom:1px solid var(--line);
+  }
+  .titleblock div:last-child{border-right:none;}
+  .titleblock .k{
+    color:var(--ink-faint);
+    text-transform:uppercase;
+    letter-spacing:0.08em;
+    font-size:9.5px;
+    margin-bottom:3px;
+  }
+  .titleblock .v{color:var(--ink); font-weight:600;}
+  .techmap{
+    margin-top:26px;
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+  .techmap a{
+    text-decoration:none;
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:0.05em;
+    text-transform:uppercase;
+    border:1px solid var(--line);
+    padding:6px 10px;
+    border-radius:3px;
+    color:var(--ink-soft);
+  }
+  .techmap a:hover{border-color:var(--accent); color:var(--accent);}
+
+  /* ============ 1. MORPHOLOGICAL MATRIX ============ */
+  .matrix-wrap{overflow-x:auto; padding-bottom:4px;}
+  .matrix{
+    display:grid;
+    grid-template-columns: 148px repeat(3, minmax(168px,1fr)) 46px;
+    min-width:760px;
+    border:1.5px solid var(--line);
+  }
+  .matrix .cell{
+    border-right:1px solid var(--line-soft);
+    border-bottom:1px solid var(--line-soft);
+    padding:10px 12px;
+    position:relative;
+  }
+  .matrix .rowlabel{
+    background:var(--paper2);
+    font-family:var(--font-mono);
+    font-size:12px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.04em;
+    color:var(--ink);
+    display:flex;
+    align-items:center;
+  }
+  .matrix .colhead{
+    background:var(--bg2);
+    font-family:var(--font-mono);
+    font-size:9.5px;
+    letter-spacing:0.12em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    text-align:center;
+  }
+  .chip{
+    font-family:var(--font-mono);
+    font-size:12.5px;
+    font-weight:700;
+    color:var(--ink);
+    margin-bottom:4px;
+    display:block;
+  }
+  .chip-note{
+    font-size:11px;
+    color:var(--ink-soft);
+    font-style:italic;
+    display:block;
+    line-height:1.35;
+  }
+  .tag{
+    display:inline-block;
+    font-family:var(--font-mono);
+    font-size:9px;
+    letter-spacing:0.07em;
+    padding:1px 6px;
+    border-radius:2px;
+    margin-bottom:5px;
+    text-transform:uppercase;
+  }
+  .tag.spec{background:var(--safe); color:var(--paper); font-weight:700;}
+  .tag.alt{border:1px solid var(--line); color:var(--ink-faint);}
+  .tag.open{
+    color:#3a2a0c;
+    background:repeating-linear-gradient(45deg, #e8b84b 0 6px, #caa23a 6px 12px);
+    font-weight:700;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]) .tag.open{ color:#241a06; }
+  }
+  :root[data-theme="dark"] .tag.open{ color:#241a06; }
+  .cell.empty{background:transparent;}
+  .vault-block{
+    display:grid;
+    grid-template-columns: 148px repeat(3, minmax(168px,1fr)) 46px;
+    grid-column: 1 / -1;
+  }
+  .cell.bracket{
+    background:transparent;
+    border-right:none;
+    border-bottom:none;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    grid-column:5;
+    grid-row: 1 / 3;
+  }
+  .brace{
+    writing-mode:vertical-rl;
+    font-family:var(--font-mono);
+    font-size:10.5px;
+    letter-spacing:0.15em;
+    color:var(--accent);
+    font-weight:700;
+    position:relative;
+    padding:4px 2px;
+    border-top:2px solid var(--accent);
+    border-right:2px solid var(--accent);
+    border-bottom:2px solid var(--accent);
+    border-radius:0 6px 6px 0;
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  .wiring-notes{
+    margin-top:18px;
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+    gap:12px;
+  }
+  .wiring-notes .wn{
+    border:1px dashed var(--line);
+    padding:10px 12px;
+    font-size:13px;
+    background:var(--paper2);
+  }
+  .wiring-notes .wn .wlabel{
+    font-family:var(--font-mono);
+    font-size:10px;
+    letter-spacing:0.1em;
+    color:var(--accent);
+    text-transform:uppercase;
+    display:block;
+    margin-bottom:4px;
+  }
+
+  /* ============ 2. CONSTRAINT LEDGER ============ */
+  .ledger{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13.5px;
+  }
+  .ledger th{
+    text-align:left;
+    font-family:var(--font-mono);
+    font-size:10.5px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    border-bottom:1.5px solid var(--line);
+    padding:6px 10px;
+  }
+  .ledger td{
+    padding:9px 10px;
+    border-bottom:1px solid var(--line-soft);
+    vertical-align:top;
+  }
+  .ledger tr:hover td{background:var(--paper2);}
+  .ledger .riv{
+    width:16px;
+    color:var(--ink-faint);
+  }
+  .ledger .riv::before{content:"⬤"; font-size:7px; position:relative; top:-2px;}
+  .ledger .constraint{color:var(--ink-soft); width:38%;}
+  .ledger .arrow{color:var(--accent); font-family:var(--font-mono); text-align:center; width:30px;}
+  .ledger .asset{color:var(--ink); font-weight:600;}
+
+  .callout-grid{
+    margin-top:22px;
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
+    gap:14px;
+  }
+  .callout{
+    position:relative;
+    border:1.5px solid var(--line);
+    background:var(--paper2);
+    padding:14px 16px 14px 46px;
+    font-size:13px;
+  }
+  .callout .ic{
+    position:absolute;
+    left:12px; top:14px;
+    font-size:18px;
+    font-family:var(--font-mono);
+  }
+  .callout.challenge{border-color:var(--ink-faint);}
+  .callout.challenge .ic{color:var(--ink-faint);}
+  .callout.leverage{border-color:var(--stamp); background:var(--paper);}
+  .callout.leverage .ic{color:var(--stamp);}
+  .callout.reframe{border-color:var(--safe);}
+  .callout.reframe .ic{color:var(--safe);}
+  .callout .clabel{
+    font-family:var(--font-mono);
+    font-size:10px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    display:block;
+    margin-bottom:4px;
+    color:var(--ink-faint);
+  }
+
+  /* ============ 3. SCAMPER STAMPS ============ */
+  .scamper-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(300px,1fr));
+    gap:18px;
+    margin-top:10px;
+  }
+  .scamper-card{
+    border:1.5px solid var(--line);
+    background:var(--paper2);
+    padding:16px 18px;
+  }
+  .scamper-top{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin-bottom:10px;
+  }
+  .stamp-letter{
+    width:42px; height:42px;
+    border:3px solid var(--stamp);
+    border-radius:50%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-family:var(--font-mono);
+    font-weight:800;
+    font-size:19px;
+    color:var(--stamp);
+    transform:rotate(-7deg);
+    flex-shrink:0;
+  }
+  .scamper-op{
+    font-family:var(--font-mono);
+    text-transform:uppercase;
+    letter-spacing:0.08em;
+    font-size:14px;
+    font-weight:700;
+    color:var(--ink);
+  }
+  .scamper-card ul{
+    margin:0;
+    padding-left:18px;
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+  .scamper-card li{margin-bottom:6px;}
+  .scamper-card li::marker{color:var(--accent);}
+
+  /* ============ 4. BEDROCK ============ */
+  .superstructure{
+    margin:10px 0 26px;
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+    gap:10px;
+  }
+  .pillar{
+    background:var(--paper);
+    border:1.5px solid var(--accent);
+    border-bottom:6px solid var(--accent);
+    padding:10px 12px;
+    font-size:12.5px;
+    color:var(--ink);
+    font-weight:600;
+  }
+  .gradeline{
+    height:3px;
+    background:repeating-linear-gradient(90deg, var(--ink) 0 14px, transparent 14px 20px);
+    margin:4px 0 18px;
+    opacity:0.55;
+  }
+  .gradeline-label{
+    font-family:var(--font-mono);
+    font-size:10px;
+    letter-spacing:0.14em;
+    color:var(--ink-faint);
+    text-transform:uppercase;
+    text-align:center;
+    margin-bottom:6px;
+  }
+  .strata{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+    gap:8px;
+  }
+  .stone{
+    background:
+      repeating-linear-gradient(135deg, var(--line-soft) 0 2px, transparent 2px 9px),
+      var(--paper2);
+    border:1px solid var(--line);
+    padding:10px 12px;
+    font-size:12.5px;
+    color:var(--ink-soft);
+    position:relative;
+    padding-left:30px;
+  }
+  .stone::before{
+    content:"§";
+    position:absolute;
+    left:10px; top:9px;
+    color:var(--ink-faint);
+    font-family:var(--font-mono);
+    font-weight:700;
+  }
+
+  /* ============ 5. REVERSE / SABOTAGE ============ */
+  .sabotage-grid{
+    display:grid;
+    gap:12px;
+    margin-top:10px;
+  }
+  .sab-card{
+    display:grid;
+    grid-template-columns:1fr 34px 1fr;
+    align-items:stretch;
+    border:1.5px solid var(--line);
+    overflow:hidden;
+  }
+  .sab-left, .sab-right{
+    padding:12px 14px;
+    font-size:13px;
+  }
+  .sab-left{
+    background:
+      repeating-linear-gradient(45deg, rgba(168,56,31,0.14) 0 10px, rgba(168,56,31,0.04) 10px 20px);
+    color:var(--ink-soft);
+  }
+  .sab-left .tagline{
+    font-family:var(--font-mono);
+    font-size:9.5px;
+    letter-spacing:0.12em;
+    color:var(--warn);
+    text-transform:uppercase;
+    display:block;
+    margin-bottom:5px;
+  }
+  .sab-mid{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:var(--paper2);
+    color:var(--accent);
+    font-size:17px;
+    border-left:1px solid var(--line-soft);
+    border-right:1px solid var(--line-soft);
+  }
+  .sab-right{
+    background:rgba(47,107,69,0.08);
+    color:var(--ink);
+    font-weight:500;
+  }
+  .sab-right .tagline{
+    font-family:var(--font-mono);
+    font-size:9.5px;
+    letter-spacing:0.12em;
+    color:var(--safe);
+    text-transform:uppercase;
+    display:block;
+    margin-bottom:5px;
+  }
+  @media (max-width:640px){
+    .sab-card{grid-template-columns:1fr; }
+    .sab-mid{padding:6px;}
+  }
+
+  /* ============ 6. SYNTHESIS / CLIMAX ============ */
+  .synthesis-sheet{
+    border-color:var(--accent);
+    background:
+      radial-gradient(ellipse at 50% 0%, var(--line-soft), transparent 60%),
+      var(--paper);
+  }
+  .pediment-wrap{
+    display:flex;
+    justify-content:center;
+    margin:6px 0 0;
+  }
+  .pediment{
+    width:min(260px, 70%);
+    height:76px;
+    clip-path:polygon(50% 0%, 100% 100%, 0% 100%);
+    background:var(--accent);
+    display:flex;
+    align-items:flex-end;
+    justify-content:center;
+    padding-bottom:10px;
+  }
+  .pediment span{
+    font-family:var(--font-mono);
+    font-weight:800;
+    letter-spacing:0.08em;
+    font-size:16px;
+    color:var(--paper);
+  }
+  .pediment-cap{
+    text-align:center;
+    font-family:var(--font-mono);
+    font-size:10.5px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    margin:6px 0 28px;
+  }
+  .beam{
+    height:14px;
+    background:var(--ink);
+    position:relative;
+    margin:0 2%;
+    box-shadow:0 2px 0 var(--line-soft);
+  }
+  .beam .rivet{
+    position:absolute;
+    top:3px;
+    width:8px; height:8px;
+    border-radius:50%;
+    background:var(--paper);
+    border:1.5px solid var(--ink);
+  }
+  .joint{
+    position:absolute;
+    top:-34px;
+    left:50%;
+    transform:translateX(-50%);
+    background:var(--paper);
+    border:2px solid var(--accent);
+    color:var(--accent);
+    font-family:var(--font-mono);
+    font-size:10.5px;
+    font-weight:700;
+    letter-spacing:0.04em;
+    padding:6px 10px;
+    border-radius:4px;
+    white-space:nowrap;
+    box-shadow:0 2px 6px rgba(0,0,0,0.15);
+  }
+  .joint-line{
+    position:absolute;
+    top:-10px; left:50%;
+    width:2px; height:10px;
+    background:var(--accent);
+    transform:translateX(-50%);
+  }
+  .piers{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:24px;
+    margin:50px 2% 0;
+  }
+  @media (max-width:680px){ .piers{grid-template-columns:1fr;} }
+  .pier{
+    background:var(--paper2);
+    border:1.5px solid var(--ink);
+    border-top:none;
+    padding:16px 18px 20px;
+    position:relative;
+  }
+  .pier::before{
+    content:"";
+    position:absolute;
+    top:-14px; left:0; right:0; height:14px;
+    background:var(--ink);
+  }
+  .pier h4{
+    margin:0 0 8px;
+    font-family:var(--font-mono);
+    font-size:15px;
+    text-transform:uppercase;
+    letter-spacing:0.04em;
+    color:var(--ink);
+  }
+  .pier p{margin:0 0 10px; font-size:13.5px; color:var(--ink-soft);}
+  .converge-tags{display:flex; flex-wrap:wrap; gap:6px;}
+  .converge-tags span{
+    font-family:var(--font-mono);
+    font-size:9.5px;
+    letter-spacing:0.05em;
+    text-transform:uppercase;
+    border:1px solid var(--accent);
+    color:var(--accent);
+    padding:3px 7px;
+    border-radius:10px;
+  }
+  .bedrock-strip{
+    height:26px;
+    margin:0 2%;
+    background:repeating-linear-gradient(135deg, var(--line-soft) 0 6px, transparent 6px 14px);
+    border:1px solid var(--line);
+    border-top:none;
+  }
+
+  .bom{
+    margin-top:36px;
+  }
+  .bom table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13px;
+  }
+  .bom th{
+    text-align:left;
+    font-family:var(--font-mono);
+    font-size:10px;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    border-bottom:1.5px solid var(--ink);
+    padding:6px 10px;
+  }
+  .bom td{
+    padding:9px 10px;
+    border-bottom:1px solid var(--line-soft);
+  }
+  .bom .partno{font-family:var(--font-mono); color:var(--ink-faint); font-size:12px;}
+  .bom .part{font-weight:700; font-family:var(--font-mono);}
+  .bom tr.pending td{background:repeating-linear-gradient(45deg, rgba(168,56,31,0.07) 0 10px, rgba(168,56,31,0.02) 10px 20px);}
+  .bom .status{
+    font-family:var(--font-mono);
+    font-size:9.5px;
+    letter-spacing:0.06em;
+    padding:2px 7px;
+    border-radius:2px;
+    text-transform:uppercase;
+  }
+  .bom .status.spec{background:var(--safe); color:var(--paper); font-weight:700;}
+  .bom .status.open{
+    color:#3a2a0c;
+    background:repeating-linear-gradient(45deg, #e8b84b 0 6px, #caa23a 6px 12px);
+    font-weight:700;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]) .bom .status.open{color:#241a06;}
+  }
+  :root[data-theme="dark"] .bom .status.open{color:#241a06;}
+
+  .site-footer{
+    padding:30px 20px 60px;
+    text-align:center;
+    font-family:var(--font-mono);
+    font-size:11px;
+    letter-spacing:0.08em;
+    color:var(--ink-faint);
+  }
+  .site-footer .rule{
+    border-top:1.5px solid var(--line);
+    margin:0 auto 14px;
+    max-width:1060px;
+  }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" id="themeToggle" type="button">☼ / ☽ THEME</button>
+
+<header class="sheet cover">
+  <div class="cover-kicker">Brainstorming Session Record — Cerne, Reflective Journaling App</div>
+  <div class="cover-main">
+    <div class="cover-f000">F000</div>
+    <div class="cover-title">Foundation Choices &amp; Shared Scaffolding</div>
+  </div>
+  <div class="cover-rule"></div>
+  <p class="cover-desc">Before a single screen of Cerne exists, F000 is the unit every other requirement stands on. This sheet set surfaces the free technical choices — routing, HTTP, local cache, DI, secure storage, biometrics, charts — and the shared patterns underneath them, run across five techniques in sequence. Two load‑bearing decisions survive every technique that touches them.</p>
+
+  <div class="titleblock">
+    <div><div class="k">Project</div><div class="v">Cerne</div></div>
+    <div><div class="k">Unit</div><div class="v">F000 — Foundation</div></div>
+    <div><div class="k">Mode</div><div class="v">Autonomous</div></div>
+    <div><div class="k">Status</div><div class="v">Complete</div></div>
+    <div><div class="k">Updated</div><div class="v">2026‑10‑25 15:58</div></div>
+  </div>
+
+  <nav class="techmap">
+    <a href="#morph">01 · Morphological Matrix</a>
+    <a href="#constraints">02 · Constraint Ledger</a>
+    <a href="#scamper">03 · Scaffold Mutations</a>
+    <a href="#bedrock">04 · Bedrock Facts</a>
+    <a href="#reverse">05 · Sabotage → Safeguard</a>
+    <a href="#synthesis">06 · Load‑Bearing Synthesis</a>
+  </nav>
+</header>
+
+<main>
+
+  <!-- ============ 1. MORPHOLOGICAL ============ -->
+  <section class="sheet" id="morph">
+    <div class="sheet-head">
+      <div>
+        <div class="sheet-no">SHEET 01 / 06 — DWG. F000‑MORPH‑A</div>
+        <h2 class="sheet-title">Parameter Cross Matrix</h2>
+        <div class="sheet-sub">Seven independent parameters, each crossed against its candidate options. Technique: Morphological Analysis.</div>
+      </div>
+      <div class="sheet-tech">Technique 01</div>
+    </div>
+
+    <div class="matrix-wrap">
+      <div class="matrix">
+        <div class="cell colhead" style="background:transparent;border:none;"></div>
+        <div class="cell colhead">Option A</div>
+        <div class="cell colhead">Option B</div>
+        <div class="cell colhead">Option C</div>
+        <div class="cell colhead" style="border:none;"></div>
+
+        <div class="cell rowlabel">Routing</div>
+        <div class="cell"><span class="tag spec">spec'd</span><span class="chip">go_router</span><span class="chip-note">declarative, redirect‑based session‑expiry guarding</span></div>
+        <div class="cell"><span class="tag alt">alt</span><span class="chip">auto_route</span><span class="chip-note">codegen type safety, build_runner overhead for a solo build</span></div>
+        <div class="cell"><span class="tag alt">alt</span><span class="chip">Navigator 2.0 (raw)</span><span class="chip-note">zero deps, reinvents the session‑expiry guard logic itself</span></div>
+        <div class="cell empty"></div>
+
+        <div class="cell rowlabel">HTTP Client</div>
+        <div class="cell"><span class="tag spec">spec'd</span><span class="chip">dio + interceptor</span><span class="chip-note">one place to inject apikey/Authorization + retry logic</span></div>
+        <div class="cell"><span class="tag alt">alt</span><span class="chip">dio + dio_smart_retry</span><span class="chip-note">auto‑retries NETWORK_TIMEOUT / RATE_LIMITED, no hand‑rolled loops</span></div>
+        <div class="cell"><span class="tag alt">alt</span><span class="chip">http (hand‑wrapped)</span><span class="chip-note">every repository reinvents the Either‑mapping boilerplate RNF09 demands</span></div>
+        <div class="cell empty"></div>
+
+        <div class="cell rowlabel">Local Cache</div>
+        <div class="cell"><span class="tag open">open</span><span class="chip">drift (SQLite)</span><span class="chip-note">real SQL predicates for RF06's AND‑logic source + date‑range filters</span></div>
+        <div class="cell"><span class="tag open">open</span><span class="chip">Hive</span><span class="chip-note">simpler key‑value, faster to stand up, awkward for AND‑logic filters</span></div>
+        <div class="cell"><span class="tag alt">alt</span><span class="chip">sqflite (raw)</span><span class="chip-note">most control, most boilerplate — a real risk on a solo timeline</span></div>
+        <div class="cell empty"></div>
+
+        <div class="cell rowlabel">DI</div>
+        <div class="cell"><span class="tag spec">spec'd</span><span class="chip">get_it</span><span class="chip-note">simplest registration, no codegen, fastest to wire into F000</span></div>
+        <div class="cell"><span class="tag alt">alt</span><span class="chip">get_it + injectable</span><span class="chip-note">removes manual registration drift as RF01–RF09 accumulate</span></div>
+        <div class="cell"><span class="tag alt">alt</span><span class="chip">riverpod‑as‑DI</span><span class="chip-note">unifies state + DI, but fights the already‑pinned flutter_bloc stack</span></div>
+        <div class="cell empty"></div>
+
+        <div class="vault-block">
+          <div class="cell rowlabel">Secure Storage</div>
+          <div class="cell"><span class="tag spec">spec'd</span><span class="chip">flutter_secure_storage</span><span class="chip-note">Keychain‑backed home for Supabase session tokens</span></div>
+          <div class="cell"><span class="tag alt">alt</span><span class="chip">biometric_storage</span><span class="chip-note">wraps secure storage + biometric gating into one API</span></div>
+          <div class="cell empty"></div>
+
+          <div class="cell rowlabel">Biometrics</div>
+          <div class="cell"><span class="tag spec">spec'd</span><span class="chip">local_auth</span><span class="chip-note">Face ID / Touch ID direct; PIN fallback must be hand‑built</span></div>
+          <div class="cell"><span class="tag alt">alt</span><span class="chip">biometric_storage</span><span class="chip-note">fewer total deps than the secure_storage + local_auth combo</span></div>
+          <div class="cell empty"></div>
+
+          <div class="cell bracket"><div class="brace">VAULT</div></div>
+        </div>
+
+        <div class="cell rowlabel">Charts</div>
+        <div class="cell"><span class="tag spec">spec'd</span><span class="chip">fl_chart</span><span class="chip-note">pure Dart, no native bridge, fits RF09's three rendering scenarios</span></div>
+        <div class="cell"><span class="tag alt">alt</span><span class="chip">syncfusion_flutter_charts</span><span class="chip-note">more polished out of the box, heavier than three scenarios need</span></div>
+        <div class="cell empty"></div>
+        <div class="cell empty"></div>
+      </div>
+    </div>
+
+    <div class="note open"><b>Open — Q96</b> — Is a relational cache like drift overkill if RF06's source + date‑range AND‑logic could be satisfied by in‑memory predicates over a Hive‑cached list? Does the query complexity actually justify SQL? Left pending RF06.</div>
+
+    <h3 class="block-label">Wiring Notes — how cells combine</h3>
+    <div class="wiring-notes">
+      <div class="wn"><span class="wlabel">Combination</span>go_router + dio interceptor + get_it: each piece owns exactly one cross‑cutting concern.</div>
+      <div class="wn"><span class="wlabel">Combination</span>drift + get_it + dio lets RF06's AND‑logic filters run as real SQL predicates, not in‑memory filtering.</div>
+      <div class="wn"><span class="wlabel">Vault wiring</span>Secure storage + biometrics + DI register as one lazy singleton exposing an unlock‑state stream, consumed everywhere via DI — no screen duplicates vault logic.</div>
+      <div class="wn"><span class="wlabel">DI vs. testing</span>get_it factory overrides swap more easily with mocktail fakes than injectable's generated code — concrete point in get_it's favor given the RNF07 coverage target.</div>
+      <div class="wn"><span class="wlabel">Insight</span>PIN storage sits between secure storage and biometrics — a vault use case trying biometric first, then falling back to a securely‑stored PIN hash, is itself a reusable F000 artifact.</div>
+      <div class="wn"><span class="wlabel">Insight — risk</span>Nothing forces the seven parameters to agree with each other. The real foundation risk is strong per‑cell defaults that never compose — e.g. does the HTTP client's Either failure feed the same Failure type the cache layer produces?</div>
+    </div>
+  </section>
+
+  <!-- ============ 2. CONSTRAINT MAPPING ============ -->
+  <section class="sheet" id="constraints">
+    <div class="sheet-head">
+      <div>
+        <div class="sheet-no">SHEET 02 / 06 — DWG. F000‑CONS‑B</div>
+        <h2 class="sheet-title">Constraints → Assets Ledger</h2>
+        <div class="sheet-sub">Every fixed constraint of the stack, double‑entered against the asset it becomes when taken seriously. Technique: Constraint Mapping.</div>
+      </div>
+      <div class="sheet-tech">Technique 02</div>
+    </div>
+
+    <table class="ledger">
+      <tr><th></th><th>Fixed Constraint</th><th></th><th>Becomes Asset</th></tr>
+      <tr><td class="riv"></td><td class="constraint">fvm‑pinned Flutter / Dart version</td><td class="arrow">⟶</td><td class="asset">Commit .fvmrc in F000 day one — no later unit can silently drift</td></tr>
+      <tr><td class="riv"></td><td class="constraint">flutter_bloc only</td><td class="arrow">⟶</td><td class="asset">One base Cubit/Bloc helper in core defines the loading‑data‑error shape once</td></tr>
+      <tr><td class="riv"></td><td class="constraint">Clean Architecture layering</td><td class="arrow">⟶</td><td class="asset">An import‑linter rule enforces it — safety is imagined until enforced</td></tr>
+      <tr><td class="riv"></td><td class="constraint">fpdart Either everywhere</td><td class="arrow">⟶</td><td class="asset">One Failure hierarchy in core, mapped from the 13 backend error codes</td></tr>
+      <tr><td class="riv"></td><td class="constraint">mocktail for test doubles</td><td class="arrow">⟶</td><td class="asset">One fake HTTP client + fake clock pattern every later unit copies for RNF07</td></tr>
+      <tr><td class="riv"></td><td class="constraint">whisper_ggml on‑device speech‑to‑text</td><td class="arrow">⟶</td><td class="asset">F000 decides the native‑plugin / isolate boundary so RF02 doesn't invent threading alone</td></tr>
+      <tr><td class="riv"></td><td class="constraint">design_tokens.dart as single visual source</td><td class="arrow">⟶</td><td class="asset">Generate it mechanically from prototype‑extract.md §3 — removes a class of RNF08 drift bugs</td></tr>
+      <tr><td class="riv"></td><td class="constraint">iOS portrait only</td><td class="arrow">⟶</td><td class="asset">Removes work: no orientation handling, no tablet layouts, no Android shims</td></tr>
+      <tr><td class="riv"></td><td class="constraint">Fixed 5‑minute background session timeout</td><td class="arrow">⟶</td><td class="asset">One AppLifecycleState listener + timestamp in the auth‑vault shell, not per screen</td></tr>
+      <tr><td class="riv"></td><td class="constraint">Device‑only biometric / PIN vault</td><td class="arrow">⟶</td><td class="asset">Zero network failure modes — only local_auth / PIN failure states. Genuinely freeing.</td></tr>
+      <tr><td class="riv"></td><td class="constraint">RNF09: 5 write endpoints × 3 failure types</td><td class="arrow">⟶</td><td class="asset">One parametrized test harness — later units fill a table instead of writing 15 tests</td></tr>
+      <tr><td class="riv"></td><td class="constraint">RLS enforced entirely server‑side</td><td class="arrow">⟶</td><td class="asset">Client HTTP layer only needs to always attach the bearer token — simpler than it looks</td></tr>
+      <tr><td class="riv"></td><td class="constraint">Supabase is the only backend</td><td class="arrow">⟶</td><td class="asset">Treat it as a dio base URL via the x-cerne-function convention — skip supabase_flutter entirely</td></tr>
+      <tr><td class="riv"></td><td class="constraint">apikey / Authorization header rules</td><td class="arrow">⟶</td><td class="asset">Build the rule entirely into one dio interceptor — no feature code ever sets headers itself</td></tr>
+      <tr><td class="riv"></td><td class="constraint">Audio must never leave the device</td><td class="arrow">⟶</td><td class="asset">Establish the whisper_ggml isolate/plugin boundary early, before RF02 discovers it the hard way</td></tr>
+      <tr><td class="riv"></td><td class="constraint">fvm pinned per‑repository, not per‑machine</td><td class="arrow">⟶</td><td class="asset">F000 fills the "Running and verifying" TODO in AGENTS.md the moment the project scaffolds</td></tr>
+    </table>
+
+    <div class="callout-grid">
+      <div class="callout challenge"><span class="ic">?</span><span class="clabel">Challenged assumption</span>A frozen backend contract doesn't forbid a generated HTTP client — but codegen still isn't worth it for ~25 endpoints on a solo timeline.</div>
+      <div class="callout challenge"><span class="ic">?</span><span class="clabel">Challenged assumption</span>Three layers per feature doesn't mean three mandatory files — a thin presentation layer can be one file when a screen is simple, like the RF09 dashboard.</div>
+      <div class="callout leverage"><span class="ic">★</span><span class="clabel">Leverage point</span>Of all the fixed constraints, only the Failure hierarchy and the base bloc state shape are genuinely cross‑feature infrastructure F000 must build directly.</div>
+      <div class="callout reframe"><span class="ic">⟲</span><span class="clabel">Reframe</span>A frozen backend is a gift for a solo project — no backend bugs to chase, no API renegotiation. Build entirely against the OpenAPI contract and fixtures.</div>
+      <div class="callout reframe"><span class="ic">⟲</span><span class="clabel">Reframe</span>The "free choices" section isn't freedom, it's risk ownership. Whichever library F000 picks becomes load‑bearing for nine more units, with no external veto to catch a bad pick.</div>
+    </div>
+  </section>
+
+  <!-- ============ 3. SCAMPER ============ -->
+  <section class="sheet" id="scamper">
+    <div class="sheet-head">
+      <div>
+        <div class="sheet-no">SHEET 03 / 06 — DWG. F000‑SCMP‑C</div>
+        <h2 class="sheet-title">Scaffold Mutations</h2>
+        <div class="sheet-sub">Seven stock operations applied directly to the scaffold's own structure. Technique: SCAMPER Method.</div>
+      </div>
+      <div class="sheet-tech">Technique 03</div>
+    </div>
+
+    <div class="scamper-grid">
+      <div class="scamper-card">
+        <div class="scamper-top"><div class="stamp-letter">S</div><div class="scamper-op">Substitute</div></div>
+        <ul>
+          <li>Hand‑written DTO/JSON mapping → freezed + json_serializable for Entry, ChatMessage, ExportJob</li>
+          <li>Per‑feature loading‑error‑data state classes → one generic Resource sealed class shared from core</li>
+          <li>Hand‑rolled debounce Timer in RF06 → one reusable Debouncer utility in core</li>
+        </ul>
+      </div>
+      <div class="scamper-card">
+        <div class="scamper-top"><div class="stamp-letter">C</div><div class="scamper-op">Combine</div></div>
+        <ul>
+          <li>HTTP client + offline‑cache read path behind one repository‑facing helper — features never choose network vs. cache</li>
+          <li>design_tokens.dart generation + a golden‑screenshot test step — RNF08 fidelity partly machine‑checked</li>
+          <li>Auth vault + session‑refresh logic → one AppStartupGate owning both</li>
+          <li>Vault background timeout + HTTP token‑refresh timing driven from one shared app‑lifecycle clock, not two drifting timers</li>
+        </ul>
+      </div>
+      <div class="scamper-card">
+        <div class="scamper-top"><div class="stamp-letter">A</div><div class="scamper-op">Adapt</div></div>
+        <ul>
+          <li>The closed 13‑code backend error taxonomy → a generated Dart enum, exhaustiveness‑checkable</li>
+          <li>Every screen's multiple visible states (RF02's four, RF04's three) → instances of one generic view‑state enum</li>
+        </ul>
+      </div>
+      <div class="scamper-card">
+        <div class="scamper-top"><div class="stamp-letter">M</div><div class="scamper-op">Magnify / Shrink</div></div>
+        <ul>
+          <li><b>Magnify</b> — invest more than F000 strictly needs in the fake‑clock / fake‑HTTP test harness; the RNF07 target multiplies across nine more units</li>
+          <li><b>Shrink</b> — scope F000 navigation to exactly the skeleton the flowchart needs: splash → vault → home → side menu, nothing speculative beyond it</li>
+        </ul>
+      </div>
+      <div class="scamper-card">
+        <div class="scamper-top"><div class="stamp-letter">P</div><div class="scamper-op">Put to other use</div></div>
+        <ul>
+          <li>The design‑token generator also emits a ThemeData object, not just raw constants — widgets read Theme.of(context) with less import noise</li>
+          <li>Reuse the dio retry interceptor's backoff policy for RF05 export‑job status polling instead of a separate poller</li>
+        </ul>
+      </div>
+      <div class="scamper-card">
+        <div class="scamper-top"><div class="stamp-letter">E</div><div class="scamper-op">Eliminate</div></div>
+        <ul>
+          <li>No home‑grown JWT parsing — hold Supabase tokens opaque; auth/refresh and auth/session are the only source of validity</li>
+          <li>No speculative future‑platform abstractions — iOS‑portrait‑only already forbids needing them</li>
+          <li>No shared god repository interface — each feature repository stays in its own domain layer per RNF06</li>
+          <li>No generic BaseRepository with shared CRUD — independent repositories, no base that could tempt cross‑imports</li>
+        </ul>
+      </div>
+      <div class="scamper-card">
+        <div class="scamper-top"><div class="stamp-letter">R</div><div class="scamper-op">Reverse</div></div>
+        <ul>
+          <li>Write the Failure hierarchy and the 15‑scenario RNF09 harness <i>before</i> the first real HTTP call is wired — every repository built test‑first</li>
+          <li>Let the router itself redirect on a single AuthStatus stream — screens stay dumb instead of each checking auth state on build</li>
+          <li>Shape RF10's shared save‑use‑case interface in F000, before RF04 or RF01 exist — RNF06 satisfied by construction, not retrofit</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 4. FIRST PRINCIPLES / BEDROCK ============ -->
+  <section class="sheet" id="bedrock">
+    <div class="sheet-head">
+      <div>
+        <div class="sheet-no">SHEET 04 / 06 — DWG. F000‑FP‑D</div>
+        <h2 class="sheet-title">Bedrock Facts &amp; Superstructure</h2>
+        <div class="sheet-sub">Shared patterns rebuilt from bedrock facts, not from habit. Technique: First Principles Thinking.</div>
+      </div>
+      <div class="sheet-tech">Technique 04</div>
+    </div>
+
+    <p style="color:var(--ink-soft); font-size:13.5px; margin-top:0;">Everything above the grade line below is <i>derived</i> — it stands only because of the irreducible facts stacked underneath it.</p>
+
+    <div class="superstructure">
+      <div class="pillar">Failure hierarchy mirrors the 13 backend codes + exactly one local‑only variant</div>
+      <div class="pillar">One SessionStatus stream — valid / expired — every bloc subscribes, nothing decides independently</div>
+      <div class="pillar">Vault rebuilt synchronous, no Either plumbing — it is 100% local</div>
+      <div class="pillar">One isolatedSideEffect helper shared by RF08 and RF10</div>
+    </div>
+
+    <div class="gradeline-label">— grade line —</div>
+    <div class="gradeline"></div>
+
+    <div class="strata">
+      <div class="stone">Every repository returns Either&lt;Failure, T&gt; — the Failure shape should mirror the backend error shape plus exactly one local‑only variant.</div>
+      <div class="stone">Retryable is a server‑asserted flag — the try‑again button renders purely on retryable being true, never on client‑side guessing.</div>
+      <div class="stone">Session state is binary, valid or expired — exactly one SessionStatus stream, nothing else independently decides login state.</div>
+      <div class="stone">The vault is 100% local — threading a synchronous local decision through the same Either as network calls would be over‑engineering.</div>
+      <div class="stone">Entries are immutable, no PATCH or DELETE — the entries repository interface should never expose update or delete, not even as stubs.</div>
+      <div class="stone">Offline allows only viewing cached data, never writing — createEntry and sendMessage have no offline code path, no optimistic queueing.</div>
+      <div class="stone">RF08 and RF10 explicitly share the same failure‑isolation pattern — permission to build one isolatedSideEffect helper, not two parallel implementations.</div>
+      <div class="stone">PII check and embedding happen inside POST /entries — the client needs zero PII‑awareness logic, resist client‑side pre‑filtering.</div>
+      <div class="stone">The spec explicitly states no risk‑signal detection as a scope decision — don't add defensive risk‑detection hooks "just in case." That door is deliberately closed.</div>
+      <div class="stone">design_tokens.dart is the single source with zero hardcoded values allowed — no screen widget holds even one temporary literal color or number.</div>
+      <div class="stone">"No BLoC imports another BLoC" is stated for RF07 but is really whole‑app — cross‑feature communication stays repository/stream level everywhere.</div>
+      <div class="stone">Chat messages never become entries automatically except the explicit RF10 action — chat and entries are genuinely separate aggregates, resisting a shared Record supertype.</div>
+      <div class="stone">The background session timeout is fixed and explicitly not configurable — a hardcoded Duration constant in core, never exposed through Settings.</div>
+      <div class="stone">whisper_ggml never sends audio to the backend — the RF02 domain use case takes raw audio in, text out, with zero awareness of where transcription runs.</div>
+      <div class="stone">The 13 backend error codes are a closed set — the Failure‑mapping function switches with no default case; a hypothetical 14th code becomes a compile error.</div>
+    </div>
+
+    <div class="callout-grid" style="margin-top:22px;">
+      <div class="callout leverage"><span class="ic">★</span><span class="clabel">Insight</span>Secure storage and biometrics are really one decision, the vault, not two independent parameters — worth collapsing in any eventual decision matrix.</div>
+      <div class="callout leverage"><span class="ic">★</span><span class="clabel">Insight</span>The shared failure‑isolation wording for RF08 and RF10 reads as a spec‑level hint toward one shared helper, not a coincidence of similar phrasing.</div>
+      <div class="callout leverage"><span class="ic">★</span><span class="clabel">Insight</span>F000's real deliverable isn't picking seven libraries — it's building the two or three shared abstractions that make every later RF unit boring to implement.</div>
+    </div>
+    <div class="note open"><b>Open — Q95</b> — Should F000 also decide the test‑fixture strategy for shaping fake HTTP responses, given RNF09 needs 15 scenarios across only 5 write endpoints — or should that be deferred to each RF unit?</div>
+  </section>
+
+  <!-- ============ 5. REVERSE BRAINSTORMING ============ -->
+  <section class="sheet" id="reverse">
+    <div class="sheet-head">
+      <div>
+        <div class="sheet-no">SHEET 05 / 06 — DWG. F000‑REV‑E</div>
+        <h2 class="sheet-title">Sabotage → Safeguard</h2>
+        <div class="sheet-sub">Every way to wreck the foundation, inverted into the safeguard that prevents it. Technique: Reverse Brainstorming.</div>
+      </div>
+      <div class="sheet-tech">Technique 05</div>
+    </div>
+
+    <div class="sabotage-grid">
+      <div class="sab-card"><div class="sab-left"><span class="tagline">Sabotage</span>Pick a chart package with a heavy native dependency early — every build and CI run slows for all nine units, not just RF09.</div><div class="sab-mid">⟶</div><div class="sab-right"><span class="tagline">Safeguard</span>Prefer pure‑Dart packages in F000 whenever one meets the acceptance criteria.</div></div>
+
+      <div class="sab-card"><div class="sab-left"><span class="tagline">Sabotage</span>Let the HTTP client silently swallow the retryable flag and hardcode retry logic per feature.</div><div class="sab-mid">⟶</div><div class="sab-right"><span class="tagline">Safeguard</span>The interceptor is the single place retry policy lives — features never re‑derive it.</div></div>
+
+      <div class="sab-card"><div class="sab-left"><span class="tagline">Sabotage</span>Build the Failure hierarchy as one giant catch‑all GenericFailure class.</div><div class="sab-mid">⟶</div><div class="sab-right"><span class="tagline">Safeguard</span>Keep a closed sealed hierarchy mirroring the 13 backend codes + one local‑only variant — pattern matching stays exhaustive.</div></div>
+
+      <div class="sab-card"><div class="sab-left"><span class="tagline">Sabotage</span>Skip the import‑linter rule in F000, promise to check RNF06 by hand later.</div><div class="sab-mid">⟶</div><div class="sab-right"><span class="tagline">Safeguard</span>Wire the lint rule before the second feature folder exists, not after a violation is found.</div></div>
+
+      <div class="sab-card"><div class="sab-left"><span class="tagline">Sabotage</span>Let two different features each invent their own loading‑error‑data state enum with slightly different names.</div><div class="sab-mid">⟶</div><div class="sab-right"><span class="tagline">Safeguard</span>The shared view‑state shape ships from core before RF01 starts.</div></div>
+
+      <div class="sab-card"><div class="sab-left"><span class="tagline">Sabotage</span>Wire biometrics and secure storage as two independent, uncoordinated pieces — a biometric failure can leave the PIN fallback inconsistent.</div><div class="sab-mid">⟶</div><div class="sab-right"><span class="tagline">Safeguard</span>One vault service owns both paths behind a single state machine.</div></div>
+
+      <div class="sab-card"><div class="sab-left"><span class="tagline">Sabotage</span>Generate design_tokens.dart once by hand and never revisit it as the prototype extract gets corrected.</div><div class="sab-mid">⟶</div><div class="sab-right"><span class="tagline">Safeguard</span>Make token generation a repeatable script, not a one‑time manual transcription.</div></div>
+
+      <div class="sab-card"><div class="sab-left"><span class="tagline">Sabotage</span>Let the session‑expiry stream be derived independently in three places — auth vault, router, HTTP interceptor.</div><div class="sab-mid">⟶</div><div class="sab-right"><span class="tagline">Safeguard</span>One SessionStatus source of truth; the other two merely subscribe.</div></div>
+
+      <div class="sab-card"><div class="sab-left"><span class="tagline">Sabotage</span>Build the F000 test harness against only the happy path, leaving the 15 RNF09 failure scenarios to be improvised per unit.</div><div class="sab-mid">⟶</div><div class="sab-right"><span class="tagline">Safeguard</span>The fake HTTP client ships with timeout, malformed‑response and no‑connection fixtures from day one.</div></div>
+
+      <div class="sab-card"><div class="sab-left"><span class="tagline">Sabotage</span>Choose a DI package with heavy codegen, and let a slow build_runner tempt later units to skip regenerating it.</div><div class="sab-mid">⟶</div><div class="sab-right"><span class="tagline">Safeguard</span>Pick the DI approach whose feedback loop stays fast enough that nobody is tempted to skip it.</div></div>
+
+      <div class="sab-card"><div class="sab-left"><span class="tagline">Sabotage</span>Treat iOS‑portrait‑only as temporary and sneak in orientation‑handling scaffolding anyway.</div><div class="sab-mid">⟶</div><div class="sab-right"><span class="tagline">Safeguard</span>Actively delete any orientation or multi‑platform code that creeps in during F000 review.</div></div>
+
+      <div class="sab-card"><div class="sab-left"><span class="tagline">Sabotage</span>Let F000 own navigation guards per‑screen instead of centrally — the ninth unit discovers the eighth screen forgot to check session state.</div><div class="sab-mid">⟶</div><div class="sab-right"><span class="tagline">Safeguard</span>The router redirect is the only gate; screens cannot opt out of it.</div></div>
+
+      <div class="sab-card"><div class="sab-left"><span class="tagline">Sabotage</span>Delay deciding the Failure hierarchy until RF04 needs error handling, forcing a retrofit across RF01, RF02, RF03, RF06, RF07.</div><div class="sab-mid">⟶</div><div class="sab-right"><span class="tagline">Safeguard</span>The Failure hierarchy is F000 deliverable number one, before any repository is written.</div></div>
+
+      <div class="sab-card"><div class="sab-left"><span class="tagline">Sabotage</span>Let the PIN fallback store the PIN in plaintext in shared_preferences because a 4‑digit code "felt like overkill" for secure storage.</div><div class="sab-mid">⟶</div><div class="sab-right"><span class="tagline">Safeguard</span>The vault always uses the platform secure store for the PIN hash and biometrics alike — no plaintext exception.</div></div>
+    </div>
+  </section>
+
+  <!-- ============ 6. SYNTHESIS — CLIMAX ============ -->
+  <section class="sheet synthesis-sheet" id="synthesis">
+    <div class="sheet-head">
+      <div>
+        <div class="sheet-no">SHEET 06 / 06 — DWG. F000‑SYN‑F</div>
+        <h2 class="sheet-title">Load‑Bearing Synthesis</h2>
+        <div class="sheet-sub">What four of the five techniques converged on independently, without being asked to agree.</div>
+      </div>
+      <div class="sheet-tech">Final</div>
+    </div>
+
+    <div class="pediment-wrap"><div class="pediment"><span>F000</span></div></div>
+    <div class="pediment-cap">rests entirely on the two piers below</div>
+
+    <div class="beam">
+      <div class="rivet" style="left:6%;"></div>
+      <div class="rivet" style="left:18%;"></div>
+      <div class="rivet" style="left:30%;"></div>
+      <div class="rivet" style="left:42%;"></div>
+      <div class="rivet" style="left:58%;"></div>
+      <div class="rivet" style="left:70%;"></div>
+      <div class="rivet" style="left:82%;"></div>
+      <div class="rivet" style="left:94%;"></div>
+      <div class="joint-line"></div>
+      <div class="joint">isolatedSideEffect — RF08 ⟷ RF10</div>
+    </div>
+
+    <div class="piers">
+      <div class="pier">
+        <h4>Pier 01 — Vault State Machine</h4>
+        <p>The biometric/PIN vault is one state machine, not two uncoordinated parameters. Secure storage and biometrics collapse into a single lazy‑singleton vault service exposing one unlock‑state stream.</p>
+        <div class="converge-tags">
+          <span>Morphological</span><span>Constraint Mapping</span><span>SCAMPER</span><span>Reverse Brainstorming</span>
+        </div>
+      </div>
+      <div class="pier">
+        <h4>Pier 02 — Failure Hierarchy + Test Harness</h4>
+        <p>The Failure hierarchy plus a parametrized fake‑HTTP test harness is F000 deliverable number one — built before any repository, never retrofitted after RF04 needs error handling.</p>
+        <div class="converge-tags">
+          <span>Constraint Mapping</span><span>SCAMPER (Reverse)</span><span>First Principles</span><span>Reverse Brainstorming</span>
+        </div>
+      </div>
+    </div>
+    <div class="bedrock-strip"></div>
+
+    <h3 class="block-label" style="margin-top:34px;">Bill of Materials — Leading Library Profile</h3>
+    <div class="note" style="margin-top:0;">Not yet converged / decided — this is the session's leading direction, carried forward for F000 to confirm.</div>
+    <div class="bom">
+      <table>
+        <tr><th>Part No.</th><th>Component</th><th>Role</th><th>Status</th></tr>
+        <tr><td class="partno">RT‑01</td><td class="part">go_router</td><td>Declarative routing + AuthStatus redirect guard</td><td><span class="status spec">spec'd</span></td></tr>
+        <tr><td class="partno">HT‑01</td><td class="part">dio</td><td>Interceptor‑owned headers, retry policy, session‑expiry handling</td><td><span class="status spec">spec'd</span></td></tr>
+        <tr><td class="partno">DI‑01</td><td class="part">get_it</td><td>Dependency registration, fast mocktail‑friendly overrides</td><td><span class="status spec">spec'd</span></td></tr>
+        <tr><td class="partno">SS‑01</td><td class="part">flutter_secure_storage</td><td>Vault half A — Keychain‑backed token &amp; PIN‑hash storage</td><td><span class="status spec">spec'd</span></td></tr>
+        <tr><td class="partno">BM‑01</td><td class="part">local_auth</td><td>Vault half B — Face ID / Touch ID gating</td><td><span class="status spec">spec'd</span></td></tr>
+        <tr><td class="partno">CH‑01</td><td class="part">fl_chart</td><td>RF09 dashboard rendering, pure‑Dart, no native bridge</td><td><span class="status spec">spec'd</span></td></tr>
+        <tr class="pending"><td class="partno">CA‑01</td><td class="part">drift ⟷ Hive</td><td>Local cache for RF04/RF06/RF07 offline reads — resolve against RF06 query complexity</td><td><span class="status open">pending</span></td></tr>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer sheet-no" style="background:transparent; border:none; box-shadow:none;">
+  <div class="rule"></div>
+  Cerne · F000 Foundation Choices · Brainstorming Session · 2026‑10‑25 · Status: Complete · End of Sheet 06/06
+</footer>
+
+<script>
+  (function(){
+    var btn = document.getElementById('themeToggle');
+    var root = document.documentElement;
+    btn.addEventListener('click', function(){
+      var current = root.getAttribute('data-theme');
+      if(current === 'dark'){
+        root.setAttribute('data-theme','light');
+      } else if(current === 'light'){
+        root.removeAttribute('data-theme');
+      } else {
+        root.setAttribute('data-theme','dark');
+      }
+    });
+  })();
+</script>
+
+</body>
+</html>

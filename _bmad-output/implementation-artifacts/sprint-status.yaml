@@ -1,0 +1,94 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 10-26-2026 00:00
+last_updated: 10-26-2026 00:00
+project: cerne-ciclo-b
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+development_status:
+  epic-1: backlog
+  1-1-project-scaffold-stack-integration-core-infrastructure: backlog
+  1-2-design-token-system-core-component-library: backlog
+  1-3-account-creation-and-login: backlog
+  1-4-silent-session-refresh-persistence: backlog
+  1-5-expired-session-recovery-overlay: backlog
+  1-6-base-navigation-shell-with-feature-placeholders: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-biometric-pin-app-access-gate: backlog
+  2-2-biometric-failure-fallback-to-pin: backlog
+  2-3-fixed-5-minute-idle-re-authentication-timeout: backlog
+  2-4-biometric-preference-persistence: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-text-entry-capture-insertion-modal-shell: backlog
+  3-2-audio-entry-capture-on-device-transcription: backlog
+  3-3-photo-entry-capture-backend-ocr: backlog
+  3-4-cancel-safe-capture-across-all-tabs: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-chronological-entry-list-with-origin-marking: backlog
+  4-2-per-entry-sync-badge: backlog
+  4-3-empty-state-handling: backlog
+  4-4-entry-detail-view: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-semantic-search-with-debounced-input: backlog
+  5-2-metadata-filters: backlog
+  5-3-combined-search-filter-non-disruptive-clearing: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-send-message-receive-rag-grounded-streaming-response: backlog
+  6-2-multi-session-chat-history-new-conversation: backlog
+  6-3-dropped-stream-resilience-offline-composer-lock: backlog
+  6-4-bookmark-a-chat-message-into-an-entry: backlog
+  6-5-proactive-insight-injection-failure-isolation: backlog
+  epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-request-a-period-export-job-status-tracking: backlog
+  7-2-narrative-independent-raw-data-download: backlog
+  7-3-empty-period-handling: backlog
+  epic-7-retrospective: optional
+
+  epic-8: backlog
+  8-1-on-demand-dashboard-aggregation-across-entry-counts: backlog
+  8-2-independent-narrative-text-narrative-unavailable-state: backlog
+  8-3-profile-name-editing: backlog
+  8-4-logout: backlog
+  8-5-account-deletion: backlog
+  epic-8-retrospective: optional

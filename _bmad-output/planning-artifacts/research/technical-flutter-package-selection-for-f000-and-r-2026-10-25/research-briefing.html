@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flutter package selection — F000/RF03 research briefing</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-alt: #f6f7f9;
+    --text: #1b1f24;
+    --text-dim: #5b6572;
+    --border: #e2e5ea;
+    --accent: #2f6fed;
+    --accent-dim: #e8eefd;
+    --high: #1a7f4e;
+    --high-bg: #e4f6ec;
+    --medium: #9a6c00;
+    --medium-bg: #fdf2d8;
+    --low: #a13a1f;
+    --low-bg: #fbe8e2;
+    --unverified: #8a1f3d;
+    --unverified-bg: #fbe3ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171c;
+      --bg-alt: #1b1f26;
+      --text: #e7eaee;
+      --text-dim: #9aa4b2;
+      --border: #2a2f38;
+      --accent: #6c9bf5;
+      --accent-dim: #1d2a44;
+      --high: #4fd48a;
+      --high-bg: #103321;
+      --medium: #e3b23c;
+      --medium-bg: #3a2e0c;
+      --low: #f08a66;
+      --low-bg: #3a1e12;
+      --unverified: #f07ba0;
+      --unverified-bg: #3a1424;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px 80px; }
+  header.page {
+    background: var(--bg-alt);
+    border-bottom: 1px solid var(--border);
+    padding: 28px 16px 20px;
+  }
+  header.page .wrap { padding-bottom: 0; }
+  header.page h1 { margin: 0 0 6px; font-size: 1.5rem; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 0.85rem; color: var(--text-dim); margin-top: 10px; }
+  .meta-row span b { color: var(--text); }
+  .decision-box {
+    margin-top: 14px;
+    padding: 12px 14px;
+    background: var(--accent-dim);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    font-size: 0.95rem;
+  }
+  nav.toc {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  nav.toc a {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 0.82rem;
+    margin-right: 18px;
+    padding: 4px 0;
+  }
+  nav.toc a:hover { color: var(--accent); }
+  section { padding: 28px 0; border-bottom: 1px solid var(--border); }
+  section:last-of-type { border-bottom: none; }
+  h2 { font-size: 1.2rem; margin: 0 0 4px; }
+  h2 .pick { color: var(--accent); }
+  .subtle { color: var(--text-dim); font-size: 0.9rem; margin-bottom: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 10px 0 16px; }
+  table.sources th, table.sources td, table.matrix th, table.matrix td {
+    border: 1px solid var(--border); padding: 7px 9px; text-align: left; vertical-align: top;
+  }
+  table.matrix th { background: var(--bg-alt); }
+  table.sources { }
+  table.sources td a { color: var(--accent); }
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.72rem;
+    font-weight: 600; border: 1px solid transparent;
+  }
+  .badge.high { background: var(--high-bg); color: var(--high); }
+  .badge.medium { background: var(--medium-bg); color: var(--medium); }
+  .badge.low { background: var(--low-bg); color: var(--low); border-color: var(--low); }
+  .badge.unverified { background: var(--unverified-bg); color: var(--unverified); border-color: var(--unverified); font-weight: 700; }
+  .summary-card {
+    background: var(--bg-alt); border: 1px solid var(--border); border-radius: 10px;
+    padding: 18px 20px; margin: 10px 0;
+  }
+  .pick-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 14px 0; }
+  .pick-card { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--bg); }
+  .pick-card .slot { font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; }
+  .pick-card .pick { font-weight: 700; font-size: 1rem; margin: 2px 0; }
+  .pick-card .runner { font-size: 0.82rem; color: var(--text-dim); }
+  blockquote.note {
+    margin: 10px 0; padding: 8px 12px; border-left: 3px solid var(--medium);
+    background: var(--medium-bg); font-size: 0.85rem; border-radius: 0 6px 6px 0;
+  }
+  details.appendix { border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-top: 10px; }
+  details.appendix summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
+  ul.open-q li, ul.plain li { margin-bottom: 8px; }
+  code { background: var(--bg-alt); padding: 1px 5px; border-radius: 4px; font-size: 0.88em; }
+  .staleness-earliest { font-weight: 700; color: var(--low); }
+  footer.caveat { font-size: 0.8rem; color: var(--text-dim); margin-top: 30px; padding-top: 16px; border-top: 1px dashed var(--border); }
+</style>
+</head>
+<body>
+
+<header class="page">
+  <div class="wrap">
+    <h1>Flutter package selection — F000 / RF03 free-choice slots</h1>
+    <div class="meta-row">
+      <span><b>Type:</b> technical research (select shape)</span>
+      <span><b>Date:</b> 2026-10-25</span>
+      <span><b>Depth:</b> standard preset, 1 round, 3 parallel assistants</span>
+      <span><b>Verification:</b> normal — load-bearing spot-check, semantic citation check applied</span>
+    </div>
+    <div class="decision-box">
+      <b>Decision this research serves:</b> pick concrete packages for Cerne's six free-choice technical slots (routing, HTTP client, local cache, dependency injection, secure storage, biometrics) — needed for F000 (foundation) and RF03 (biometric vault), the next two units in the delivery order.
+    </div>
+  </div>
+</header>
+
+<nav class="toc">
+  <a href="#summary">Summary</a>
+  <a href="#routing">Routing</a>
+  <a href="#http">HTTP client</a>
+  <a href="#cache">Local cache</a>
+  <a href="#di">DI</a>
+  <a href="#storage">Secure storage</a>
+  <a href="#biometrics">Biometrics</a>
+  <a href="#cross">Cross-dimension</a>
+  <a href="#open">Open questions</a>
+  <a href="#sources">Sources</a>
+  <a href="#staleness">Staleness</a>
+</nav>
+
+<div class="wrap">
+
+<section id="summary">
+  <h2>Executive summary</h2>
+  <div class="summary-card">
+    <div class="pick-grid">
+      <div class="pick-card"><div class="slot">Routing</div><div class="pick">go_router</div><div class="runner">runner-up: auto_route</div></div>
+      <div class="pick-card"><div class="slot">HTTP client</div><div class="pick">dio</div><div class="runner">runner-up: package:http</div></div>
+      <div class="pick-card"><div class="slot">Local cache</div><div class="pick">drift</div><div class="runner">runner-up: sqflite</div></div>
+      <div class="pick-card"><div class="slot">Dependency injection</div><div class="pick">get_it</div><div class="runner">runner-up: riverpod-as-DI</div></div>
+      <div class="pick-card"><div class="slot">Secure storage</div><div class="pick">flutter_secure_storage</div><div class="runner">runner-up: flutter_keychain</div></div>
+      <div class="pick-card"><div class="slot">Biometrics</div><div class="pick">local_auth</div><div class="runner">sole credible candidate</div></div>
+    </div>
+    <p>The driving pattern across all six: <b>avoid build-time codegen unless it earns its keep.</b> <code>go_router</code>, <code>get_it</code>, and <code>dio</code> each have codegen-based siblings (<code>auto_route</code>+generator, <code>injectable</code>, <code>chopper</code>) that are credible but add a <code>build_runner</code> step a solo developer on a fixed timeline doesn't need yet — every codegen alternative is kept as a named upgrade path, not dismissed.</p>
+    <p>Second pattern: <b>two of the "obvious" NoSQL picks are traps.</b> Both <code>isar</code> and <code>hive</code> — the packages most tutorials still point to — have their original packages effectively abandoned (last releases 2022–2023); only community forks remain. <code>drift</code> avoids that risk entirely.</p>
+    <blockquote class="note"><b>Biggest caveat:</b> no cross-package integration friction was tested (e.g. dio + flutter_secure_storage + get_it wired together) — each pick was researched independently. Reasonable to accept given all six are mainstream, popular choices, but it's an open question, not a verified fact.</blockquote>
+  </div>
+</section>
+
+<section id="routing">
+  <h2>1. Routing — <span class="pick">go_router</span></h2>
+  <div class="subtle">Runner-up: auto_route. Switch if compile-time-checked route arguments become worth a second codegen pipeline, or if go_router's maintenance-mode status becomes an actually-missing capability.</div>
+  <table class="matrix">
+    <tr><th>Criterion</th><th>go_router</th><th>auto_route</th><th>Beamer / GetX</th></tr>
+    <tr><td>Fit: flutter_bloc redirect-on-expiry</td><td>Documented <code>redirect</code> + <code>refreshListenable</code> pattern <a href="#src-30">[30]</a></td><td>Supported, less first-party-documented</td><td>Not screened</td></tr>
+    <tr><td>Clean Architecture fit</td><td>Pure presentation layer, no codegen <a href="#src-26">[26]</a></td><td>Needs build_runner + annotations</td><td>—</td></tr>
+    <tr><td>Maturity / adoption</td><td>Flutter-team-maintained, 4,435 likes <a href="#src-26">[26]</a><a href="#src-27">[27]</a></td><td>Active (Dec 2025/Feb 2026 releases), 3.39K likes <a href="#src-28">[28]</a></td><td>Beamer: last push Oct 2024 <a href="#src-29">[29]</a>; GetX: not researched</td></tr>
+  </table>
+  <p><span class="badge high">verified</span> "go_router is still the right 2026 default" — single-sourced to a Feb 2025 article <a href="#src-27">[27]</a>, independently re-confirmed by a fresher Jul 2026 source <a href="#src-36">[36]</a>.</p>
+  <p><span class="badge low">overturned</span> [27]'s claim that auto_route was "stagnating" — contradicted by current release data <a href="#src-28">[28]</a>; auto_route is smaller, not stagnant.</p>
+  <p><span class="badge unverified">unverified</span> go_router "API instability across versions" / StatefulShellRoute complaints — single aggregated synthesis <a href="#src-31">[31]</a>, not two independent sources.</p>
+</section>
+
+<section id="http">
+  <h2>2. HTTP client — <span class="pick">dio</span></h2>
+  <div class="subtle">Runner-up: package:http. Switch to chopper only if typed Retrofit-style clients become worth a codegen pipeline — not recommended here.</div>
+  <table class="matrix">
+    <tr><th>Criterion</th><th>dio</th><th>package:http</th><th>chopper</th></tr>
+    <tr><td>Header injection (apikey always, Bearer conditional)</td><td>First-class Interceptors, global + per-request <a href="#src-1">[1]</a></td><td>No built-in interceptors <a href="#src-7">[7]</a><a href="#src-8">[8]</a></td><td>Interceptors exist, gated behind codegen</td></tr>
+    <tr><td>Retry on retryable codes</td><td>retryEvaluator pattern <a href="#src-2">[2]</a><a href="#src-3">[3]</a></td><td>Manual</td><td>Not checked</td></tr>
+    <tr><td>Maps to Either&lt;Failure,T&gt;</td><td>Single typed DioException on every failure <a href="#src-1">[1]</a></td><td>Various exception types, no unifying type</td><td>Not checked</td></tr>
+    <tr><td>Testability</td><td>MockDio / http_mock_adapter <a href="#src-4">[4]</a><a href="#src-5">[5]</a></td><td>Mockable, simpler surface</td><td>Not checked</td></tr>
+    <tr><td>Maturity</td><td>8.37k likes, 5.2M weekly downloads <a href="#src-1">[1]</a></td><td>First-party Dart-team package</td><td>906 likes, needs build_runner <a href="#src-6">[6]</a></td></tr>
+  </table>
+</section>
+
+<section id="cache">
+  <h2>3. Local cache / persistence — <span class="pick">drift</span></h2>
+  <div class="subtle">Runner-up: sqflite. Switch to sqflite if build_runner friction becomes a real blocker — the schema (entries + a syncStatus column) is simple enough that losing codegen costs little.</div>
+  <table class="matrix">
+    <tr><th>Criterion</th><th>drift</th><th>sqflite</th><th>isar</th><th>hive</th></tr>
+    <tr><td>Maintenance</td><td>Actively published, Flutter Favorite <a href="#src-20">[20]</a></td><td>Flutter Favorite, no codegen <a href="#src-21">[21]</a></td><td><b>Original abandoned</b> (last release Apr 2023) <a href="#src-15">[15]</a><a href="#src-16">[16]</a></td><td><b>Original abandoned</b> (2021/2022) <a href="#src-17">[17]</a><a href="#src-18">[18]</a><a href="#src-19">[19]</a></td></tr>
+    <tr><td>Risk</td><td>Low</td><td>Low (hand-rolled mapping)</td><td>Elevated — fork-maintenance risk</td><td>Elevated — fork-maintenance risk</td></tr>
+  </table>
+  <p>None of the four expose Either natively — all throw exceptions; repository layer maps to Failure regardless of pick. Not a differentiator (architectural inference, not independently sourced).</p>
+</section>
+
+<section id="di">
+  <h2>4. Dependency injection — <span class="pick">get_it</span></h2>
+  <div class="subtle">Runner-up: riverpod-as-DI. Switch only if the project drops flutter_bloc entirely for Riverpod's own state primitives.</div>
+  <table class="matrix">
+    <tr><th>Criterion</th><th>get_it</th><th>riverpod-as-DI</th><th>injectable (add-on)</th></tr>
+    <tr><td>Flutter-free (RNF06)</td><td>Pure Dart, no Flutter dep (architectural inference)</td><td>Usable without Flutter dep</td><td>N/A</td></tr>
+    <tr><td>Testability</td><td>Singleton locator, explicitly reset/override-able per test</td><td>Provider-override arguably cleaner</td><td>Same as get_it</td></tr>
+    <tr><td>Fit with flutter_bloc</td><td>Standard: BlocProvider(create: (_) =&gt; getIt&lt;MyBloc&gt;())</td><td>No current production source pairing this combo — unverified</td><td>—</td></tr>
+    <tr><td>Maturity</td><td>4.7K likes, 1.7M downloads/30d <a href="#src-32">[32]</a></td><td>Not checked standalone</td><td>LeanBuilder since 2.12.0+ fixes slow builds <a href="#src-33">[33]</a></td></tr>
+  </table>
+  <p><span class="badge unverified">gap</span> provider and "no-package manual DI" were named candidates but not researched this round.</p>
+</section>
+
+<section id="storage">
+  <h2>5. Secure storage — <span class="pick">flutter_secure_storage</span></h2>
+  <div class="subtle">Runner-up: flutter_keychain. No realistic switch condition for an iOS-only app.</div>
+  <table class="matrix">
+    <tr><th>Criterion</th><th>flutter_secure_storage</th><th>flutter_keychain</th></tr>
+    <tr><td>Maintenance</td><td>5.64M weekly downloads, verified publisher <a href="#src-9">[9]</a></td><td>Latest 3.0.1, far smaller footprint <a href="#src-14">[14]</a> (unverified at source)</td></tr>
+    <tr><td>iOS Keychain control</td><td>Exposes accessibility classes directly incl. first_unlock <a href="#src-11">[11]</a><a href="#src-12">[12]</a></td><td>Not checked</td></tr>
+    <tr><td>Known pitfall</td><td>v10→v11 cipher migration — pre-v10 data unreadable if migration step skipped <a href="#src-9">[9]</a><a href="#src-10">[10]</a></td><td>—</td></tr>
+  </table>
+  <p><span class="badge unverified">unverified</span> iOS Keychain error codes -25308/-25291 around restart/background <a href="#src-13">[13]</a> — single-source, no second source found.</p>
+  <p><b>Architectural note:</b> Keychain accessibility classes govern device-lock state, not the app's own biometric re-auth gate — RF03's 5-minute-timeout re-auth sits on top of, not inside, the storage package choice.</p>
+</section>
+
+<section id="biometrics">
+  <h2>6. Biometrics — <span class="pick">local_auth</span></h2>
+  <div class="subtle">Sole credible candidate — a hand-rolled platform-channel implementation was considered and rejected (duplicates the plugin, no documented upside for a solo timeline).</div>
+  <ul class="plain">
+    <li>Verified flutter.dev publisher, 1.82M weekly downloads <a href="#src-22">[22]</a></li>
+    <li><code>NSFaceIDUsageDescription</code> required in Info.plist for Face ID; not required for Touch ID <a href="#src-23">[23]</a></li>
+    <li><code>stickyAuth</code>: true resumes in-flight auth on foreground return; false (default) fails immediately on backgrounding <a href="#src-24">[24]</a>. The 5-minute idle-timeout gate (RF03) itself is app-level logic, not plugin-provided.</li>
+    <li>Biometric lockout after repeated failures requires passcode entry to reset — no programmatic reset <a href="#src-23">[23]</a><a href="#src-25">[25]</a>.</li>
+  </ul>
+</section>
+
+<section id="cross">
+  <h2>Cross-dimension insights</h2>
+  <ul class="plain">
+    <li>The codegen-avoidance pattern recurred independently three times (routing, DI, HTTP) despite each dimension being researched in isolation — weak evidence that "skip codegen for now" is the right default for this project's size, not one researcher's bias.</li>
+    <li>The abandoned-package trap was specific to local cache — no other category had a "popular but actually dead" result. A developer going by package-name familiarity alone would likely have picked isar/hive without knowing both are fork-dependent now.</li>
+    <li>Biometrics and secure storage are adjacent but distinct: local_auth gates access, flutter_secure_storage's Keychain accessibility class governs when stored data is readable relative to device-lock state. RF03 needs both wired together at the app layer; neither package solves the other's half.</li>
+  </ul>
+</section>
+
+<section id="open">
+  <h2>Open questions</h2>
+  <ul class="open-q">
+    <li>Cross-package integration friction (dio + flutter_secure_storage + get_it together) — not tested; resolve during F000 implementation, not more research.</li>
+    <li>go_router's version-to-version API stability complaint <a href="#src-31">[31]</a> — needs a direct read of flutter/packages GitHub issues.</li>
+    <li>flutter_secure_storage's iOS Keychain error codes on restart/background <a href="#src-13">[13]</a> — needs a direct GitHub issues search.</li>
+    <li>provider, manual-constructor DI, and GetX's router were never researched — no evidence either way if reconsidered.</li>
+    <li>riverpod-as-DI-under-flutter_bloc has no current production source evidencing the combination works — reasoned inference only.</li>
+  </ul>
+</section>
+
+<section id="sources">
+  <h2>Source appendix</h2>
+  <details class="appendix" open>
+    <summary>36 sources (click to collapse)</summary>
+    <table class="sources">
+      <thead><tr><th>#</th><th>Claim / finding</th><th>Publisher</th><th>Pub. date</th><th>Accessed</th><th>Confidence</th></tr></thead>
+      <tbody>
+<tr id="src-1"><td>[1]</td><td><a href="https://pub.dev/packages/dio" target="_blank" rel="noopener">dio version 5.11.1, interceptors, DioException</a></td><td>pub.dev</td><td>live page</td><td>2026-10-25</td><td><span class="badge high">High</span></td></tr><tr id="src-2"><td>[2]</td><td><a href="https://pub.dev/documentation/dio_retry_it/latest/" target="_blank" rel="noopener">dio retryEvaluator pattern</a></td><td>pub.dev docs</td><td>current</td><td>2026-10-25</td><td><span class="badge high">High</span></td></tr><tr id="src-3"><td>[3]</td><td><a href="https://pub.dev/documentation/gt_api/1.1.0/api_service_retry_interceptor/RetryInterceptor/onError.html" target="_blank" rel="noopener">RetryInterceptor.onError pattern</a></td><td>pub.dev docs</td><td>current</td><td>2026-10-25</td><td><span class="badge high">High</span></td></tr><tr id="src-4"><td>[4]</td><td><a href="https://pub.dev/packages/http_mock_adapter" target="_blank" rel="noopener">http_mock_adapter for dio testing</a></td><td>pub.dev</td><td>current</td><td>2026-10-25</td><td><span class="badge medium">Medium</span></td></tr><tr id="src-5"><td>[5]</td><td><a href="https://sahasuthpala.medium.com/unit-testing-in-dio-dart-package-91b7a78314bc" target="_blank" rel="noopener">dio mocktail pattern / MockDio</a></td><td>Medium</td><td>current</td><td>2026-10-25</td><td><span class="badge medium">Medium</span></td></tr><tr id="src-6"><td>[6]</td><td><a href="https://pub.dev/packages/chopper" target="_blank" rel="noopener">chopper version ~8.5-8.6, 906 likes, needs build_runner</a></td><td>pub.dev</td><td>live page</td><td>2026-10-25</td><td><span class="badge medium">Medium</span></td></tr><tr id="src-7"><td>[7]</td><td><a href="https://pub.dev/documentation/http_interceptor/latest/" target="_blank" rel="noopener">package:http has no built-in interceptors</a></td><td>pub.dev docs</td><td>current</td><td>2026-10-25</td><td><span class="badge medium">Medium</span></td></tr><tr id="src-8"><td>[8]</td><td><a href="https://pub.dev/documentation/http_client_interceptor/latest/" target="_blank" rel="noopener">http_client_interceptor as third-party add-on</a></td><td>pub.dev docs</td><td>current</td><td>2026-10-25</td><td><span class="badge medium">Medium</span></td></tr><tr id="src-9"><td>[9]</td><td><a href="https://pub.dev/packages/flutter_secure_storage" target="_blank" rel="noopener">flutter_secure_storage v11.2.0, 5.64M weekly downloads</a></td><td>pub.dev</td><td>live page</td><td>2026-10-25</td><td><span class="badge high">High</span></td></tr><tr id="src-10"><td>[10]</td><td><a href="https://github.com/juliansteenbakker/flutter_secure_storage/releases" target="_blank" rel="noopener">v10→v11 cipher migration pitfall</a></td><td>GitHub</td><td>2026</td><td>2026-10-25</td><td><span class="badge medium">Medium</span></td></tr><tr id="src-11"><td>[11]</td><td><a href="https://docs.flet.dev/secure_storage/types/keychainaccessibility" target="_blank" rel="noopener">IOSOptions KeychainAccessibility semantics</a></td><td>flet.dev docs</td><td>current</td><td>2026-10-25</td><td><span class="badge high">High</span></td></tr><tr id="src-12"><td>[12]</td><td><a href="https://pub.dev/documentation/flutter_secure_storage/latest/" target="_blank" rel="noopener">flutter_secure_storage IOSOptions docs</a></td><td>pub.dev docs</td><td>current</td><td>2026-10-25</td><td><span class="badge high">High</span></td></tr><tr id="src-13"><td>[13]</td><td>iOS Keychain error codes -25308/-25291 on restart</td><td>community forum (FlutterFlow community)</td><td>undated</td><td>2026-10-25</td><td><span class="badge unverified">Low / unverified</span></td></tr><tr id="src-14"><td>[14]</td><td>flutter_keychain v3.0.1 adoption snippet</td><td>aggregator (fluttergems-adjacent)</td><td>2026-03 (claimed)</td><td>2026-10-25</td><td><span class="badge unverified">Low-medium / unverified</span></td></tr><tr id="src-15"><td>[15]</td><td><a href="https://dev.co/databases/open-source/isar" target="_blank" rel="noopener">Isar original package abandoned</a></td><td>dev.co</td><td>n/a</td><td>2026-10-25</td><td><span class="badge high">High (2 sources)</span></td></tr><tr id="src-16"><td>[16]</td><td><a href="https://pub.dev/packages/isar_community" target="_blank" rel="noopener">isar_community fork, v3.4.1</a></td><td>pub.dev</td><td>2026-10-14 (approx)</td><td>2026-10-25</td><td><span class="badge high">High</span></td></tr><tr id="src-17"><td>[17]</td><td><a href="https://fluttergems.dev/packages/hive_flutter" target="_blank" rel="noopener">hive_flutter stale since ~2021</a></td><td>FlutterGems</td><td>n/a</td><td>2026-10-25</td><td><span class="badge high">High (2 sources)</span></td></tr><tr id="src-18"><td>[18]</td><td><a href="https://github.com/hivedb/hive" target="_blank" rel="noopener">hive README, no new releases</a></td><td>GitHub</td><td>n/a</td><td>2026-10-25</td><td><span class="badge high">High</span></td></tr><tr id="src-19"><td>[19]</td><td><a href="https://fluttergems.dev/packages/hive_ce" target="_blank" rel="noopener">hive_ce active fork, v2.19.3</a></td><td>FlutterGems</td><td>2026-02 (approx)</td><td>2026-10-25</td><td><span class="badge medium">Medium (borderline freshness)</span></td></tr><tr id="src-20"><td>[20]</td><td><a href="https://pub.dev/packages/drift" target="_blank" rel="noopener">drift v2.35.3, Flutter Favorite, verified publisher</a></td><td>pub.dev</td><td>2026-10-23 (approx)</td><td>2026-10-25</td><td><span class="badge high">High</span></td></tr><tr id="src-21"><td>[21]</td><td>sqflite Flutter Favorite designation</td><td>aggregator (FlutterGems/Walturn)</td><td>n/a</td><td>2026-10-25</td><td><span class="badge medium">Medium</span></td></tr><tr id="src-22"><td>[22]</td><td><a href="https://pub.dev/packages/local_auth" target="_blank" rel="noopener">local_auth v3.0.2, verified flutter.dev publisher</a></td><td>pub.dev</td><td>~2026-07/08</td><td>2026-10-25</td><td><span class="badge high">High</span></td></tr><tr id="src-23"><td>[23]</td><td>NSFaceIDUsageDescription requirement; biometric lockout semantics</td><td>developer.apple.com (LocalAuthentication / LAError docs)</td><td>n/a</td><td>2026-10-25</td><td><span class="badge high">High</span></td></tr><tr id="src-24"><td>[24]</td><td>stickyAuth option semantics</td><td>flutter.dev (pub-web mirror of local_auth docs)</td><td>n/a</td><td>2026-10-25</td><td><span class="badge high">High</span></td></tr><tr id="src-25"><td>[25]</td><td>LAError lockout semantics restated</td><td>pub.dev (local_biometric package docs)</td><td>n/a</td><td>2026-10-25</td><td><span class="badge high">High (2 sources)</span></td></tr><tr id="src-26"><td>[26]</td><td>go_router 4,435 likes, score 87/100</td><td>pub.dev mirror (pub-web.flutter-io.cn)</td><td>~Apr 2026</td><td>2026-10-25</td><td><span class="badge medium">Medium</span></td></tr><tr id="src-27"><td>[27]</td><td><a href="https://8thlight.com/insights/flutter-navigation-is-gorouter-still-the-best-choice" target="_blank" rel="noopener">"Is GoRouter Still The Best Choice?"</a></td><td>8th Light</td><td>~Feb 2025</td><td>2026-10-25</td><td><span class="badge medium">Medium (dated; re-confirmed by [36])</span></td></tr><tr id="src-28"><td>[28]</td><td>auto_route v11.1.0 (Dec 2025), active releases</td><td>pub.dev mirror (pub-web-s2.flutter-io.cn)</td><td>Dec 2025/Feb 2026</td><td>2026-10-25</td><td><span class="badge medium">Medium</span></td></tr><tr id="src-29"><td>[29]</td><td><a href="https://gittrend.io/repo/slovnicki/beamer" target="_blank" rel="noopener">Beamer last push Oct 2024</a></td><td>gittrend.io</td><td>n/a</td><td>2026-10-25</td><td><span class="badge low">Low-medium</span></td></tr><tr id="src-30"><td>[30]</td><td><a href="https://gurubase.io/g/flutter/redirecting-routes-go-router-bloc-flutter" target="_blank" rel="noopener">go_router redirect + refreshListenable pattern</a></td><td>gurubase.io</td><td>n/a</td><td>2026-10-25</td><td><span class="badge medium">Medium</span></td></tr><tr id="src-31"><td>[31]</td><td>go_router API-instability complaints</td><td>aggregated WebSearch synthesis, unattributed</td><td>unknown</td><td>2026-10-25</td><td><span class="badge unverified">Low / unverified</span></td></tr><tr id="src-32"><td>[32]</td><td>get_it v9.2.1, 4.7K likes, 1.7M downloads/30d</td><td>pub.dev / FlutterGems mirror</td><td>Feb 2026</td><td>2026-10-25</td><td><span class="badge medium">Medium-high</span></td></tr><tr id="src-33"><td>[33]</td><td>injectable v3.0.0, LeanBuilder since 2.12.0+</td><td>pub.dev documentation / FlutterGems</td><td>Apr 2026</td><td>2026-10-25</td><td><span class="badge medium">Medium-high</span></td></tr><tr id="src-34"><td>[34]</td><td><a href="https://blog.gskinner.com/archives/2021/11/flutter-comparing-getit-provider-and-riverpod.html" target="_blank" rel="noopener">get_it vs riverpod DI comparison</a></td><td>gskinner blog</td><td>Nov 2021</td><td>2026-10-25</td><td><span class="badge low">Low (stale)</span></td></tr><tr id="src-35"><td>[35]</td><td>Clean Architecture + get_it + injectable + mocktail pairing</td><td>aggregated dev.to/Medium tutorials, unattributed</td><td>unknown</td><td>2026-10-25</td><td><span class="badge low">Low-medium</span></td></tr><tr id="src-36"><td>[36]</td><td><a href="https://startdebugging.net/2026/07/go-router-vs-auto-route-vs-navigator-2-0-in-flutter/" target="_blank" rel="noopener">"go_router vs auto_route vs Navigator 2.0 in Flutter"</a> — independent 2026 confirmation of [27]</td><td>startdebugging.net</td><td>2026-07</td><td>2026-10-25</td><td><span class="badge high">High (fresh, independent)</span></td></tr>
+      </tbody>
+    </table>
+  </details>
+</section>
+
+<section id="staleness">
+  <h2>Staleness map</h2>
+  <table class="matrix">
+    <tr><th>Claim group</th><th>Class</th><th>Pub. date range</th><th>Freshness bar</th><th>Re-check by</th></tr>
+    <tr><td>Version/adoption numbers for all 6 picks</td><td>version/compatibility</td><td>2026-04 to 2026-10</td><td>≤ 1 month</td><td class="staleness-earliest">2026-11-25</td></tr>
+    <tr><td>Ecosystem/maintenance health signals</td><td>ecosystem health</td><td>2022–2026</td><td>≤ 6 months</td><td>2027-04-25</td></tr>
+    <tr><td>Pattern-level claims</td><td>pattern</td><td>2021–current</td><td>≤ 2 years</td><td>2027-10 ([34] from Nov 2021 is already past this bar — background context only)</td></tr>
+  </table>
+  <p><b>Earliest re-check: <span class="staleness-earliest">2026-11-25</span></b> — version/compatibility numbers age fastest; re-verify current pub.dev figures directly (not via mirrors) before F000 implementation locks in dependencies.</p>
+</section>
+
+<footer class="caveat">
+  <b>Research firewall note:</b> picks were screened against a constraints frame derived from this project's own docs (flutter_bloc, Clean Architecture/RNF06, fpdart/Either, mocktail, iOS-only, solo-dev timeline) — that frame was the only project-sourced input. Every factual claim traces to an external source in the appendix above, never to project documentation. Full markdown report: <code>research.md</code> in the same folder.
+</footer>
+
+</div>
+</body>
+</html>
