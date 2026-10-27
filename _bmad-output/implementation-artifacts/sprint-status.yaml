@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-26-2026 00:00
-last_updated: 10-27-2026 16:00
+last_updated: 10-27-2026 21:15
 project: cerne-ciclo-b
 project_key: NOKEY
 tracking_system: file-system
@@ -38,8 +38,8 @@ development_status:
   epic-1: in-progress
   1-1-project-scaffold-stack-integration-core-infrastructure: done
   1-2-design-token-system-core-component-library: done
-  1-3-account-creation-and-login: review
-  1-4-silent-session-refresh-persistence: backlog
+  1-3-account-creation-and-login: done
+  1-4-silent-session-refresh-persistence: review
   1-5-expired-session-recovery-overlay: backlog
   1-6-base-navigation-shell-with-feature-placeholders: backlog
   epic-1-retrospective: optional

@@ -25,3 +25,19 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-3-account-creation-and-login.md`
   summary: Neither the e-mail nor senha `AppTextField` on Tela 0.1a sets `autofillHints` (`AutofillHints.email`/`.password`), so iOS's Keychain/password-manager autofill won't surface suggestions on this screen.
   evidence: Not required by any requirement or acceptance criterion; a minor iOS-platform completeness gap worth picking up alongside the `AppTextField` widening above rather than as a one-off change now.
+
+## Deferred from: code review of spec-1-2-design-token-system-core-component-library, round 2 (2026-10-27)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-2-design-token-system-core-component-library.md`
+  summary: The new `test/core/widgets/component_library_interaction_test.dart` harness sets `textInputAction: TextInputAction.done` on the senha field, but `AppTextField` exposes no `onSubmitted` param to wire a handler to it.
+  evidence: Same pre-existing gap already tracked under "Deferred from: code review of story-1-3-account-creation-and-login" above (`AppTextField` widening deliberately deferred to whichever story is willing to extend the shared primitive) — not a new gap, just re-surfaced by this new test harness.
+
+## Deferred from: code review of story-1-4-silent-session-refresh-persistence (2026-10-27)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-silent-session-refresh-persistence.md`
+  summary: `AuthCubit.toggleMode()`'s uncommitted fix (switched from a raw `AuthState(...)` constructor to `state.copyWith(...)` so an in-flight `status` survives a mode toggle) has no test that can actually observe the regression it fixes — every existing `toggleMode()` call site in the test suite toggles while `status` is already the default idle value.
+  evidence: Root cause is in `lib/features/auth/presentation/cubit/auth_cubit.dart`, pre-existing uncommitted work carried over from story 1.3's review loop, not touched by story 1.4's diff — surfaced incidentally by story 1.4's review because the dirty working tree put it in the reviewed diff. Needs a test that calls `submit()` to put `status` in a non-idle state, then `toggleMode()`, then asserts `status` is unchanged.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-4-silent-session-refresh-persistence.md`
+  summary: `AuthCubit.passwordChanged()`'s uncommitted fix (now also clears `emailError`, matching `emailChanged`'s existing symmetric clear) has no test asserting it actually clears a pre-existing e-mail error.
+  evidence: Same pre-existing-uncommitted-work category as the `toggleMode` entry above (`lib/features/auth/presentation/cubit/auth_cubit.dart`, carried over from story 1.3's review loop) — not caused by story 1.4. Needs a test that first drives `emailError` non-null (e.g. a failed local-validation submit with a malformed e-mail), then calls `passwordChanged`, then asserts `emailError` is now null.

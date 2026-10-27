@@ -19,19 +19,18 @@ Map<String, dynamic> _successBody({
   String userId = 'user-1',
   String email = 'wagner@cerne.app',
   String accessToken = 'access-token-abc',
-}) =>
-    {
-      'data': {
-        'session': {
-          'accessToken': accessToken,
-          'refreshToken': 'refresh-token-abc',
-          'expiresIn': 3600,
-          'expiresAt': 1999999999,
-          'tokenType': 'bearer',
-        },
-        'user': {'id': userId, 'email': email},
-      },
-    };
+}) => {
+  'data': {
+    'session': {
+      'accessToken': accessToken,
+      'refreshToken': 'refresh-token-abc',
+      'expiresIn': 3600,
+      'expiresAt': 1999999999,
+      'tokenType': 'bearer',
+    },
+    'user': {'id': userId, 'email': email},
+  },
+};
 
 void main() {
   late MockApiClient mockApiClient;
@@ -41,8 +40,12 @@ void main() {
   setUp(() {
     mockApiClient = MockApiClient();
     mockAccessTokenProvider = MockAccessTokenProvider();
-    when(() => mockAccessTokenProvider.saveAccessToken(any()))
-        .thenAnswer((_) async {});
+    when(
+      () => mockAccessTokenProvider.saveSession(
+        accessToken: any(named: 'accessToken'),
+        refreshToken: any(named: 'refreshToken'),
+      ),
+    ).thenAnswer((_) async {});
     repository = AuthRepositoryImpl(
       remoteDataSource: AuthRemoteDataSource(mockApiClient),
       accessTokenProvider: mockAccessTokenProvider,
@@ -53,44 +56,44 @@ void main() {
   // `auth-login`, 3 failure types each.
   runWriteFailureMatrix<AuthenticatedUser>(
     endpointName: 'auth-signup',
-    stubNetworkTimeout: () => when(
-      () => mockApiClient.post(any(), data: any(named: 'data')),
-    ).thenAnswer(
-      (_) async => left(const Failure.networkTimeout(message: 'Timed out')),
-    ),
-    stubMalformedResponse: () => when(
-      () => mockApiClient.post(any(), data: any(named: 'data')),
-    ).thenAnswer((_) async => right({'unexpected': 'shape'})),
-    stubNoConnection: () => when(
-      () => mockApiClient.post(any(), data: any(named: 'data')),
-    ).thenAnswer(
-      (_) async => left(const Failure.networkOffline(message: 'Offline')),
-    ),
-    invoke: () => repository.signUp(
-      email: 'wagner@cerne.app',
-      password: 'segredo123',
-    ),
+    stubNetworkTimeout: () =>
+        when(() => mockApiClient.post(any(), data: any(named: 'data')))
+            .thenAnswer(
+              (_) async =>
+                  left(const Failure.networkTimeout(message: 'Timed out')),
+            ),
+    stubMalformedResponse: () =>
+        when(() => mockApiClient.post(any(), data: any(named: 'data')))
+            .thenAnswer((_) async => right({'unexpected': 'shape'})),
+    stubNoConnection: () =>
+        when(() => mockApiClient.post(any(), data: any(named: 'data')))
+            .thenAnswer(
+              (_) async =>
+                  left(const Failure.networkOffline(message: 'Offline')),
+            ),
+    invoke: () =>
+        repository.signUp(email: 'wagner@cerne.app', password: 'segredo123'),
   );
 
   runWriteFailureMatrix<AuthenticatedUser>(
     endpointName: 'auth-login',
-    stubNetworkTimeout: () => when(
-      () => mockApiClient.post(any(), data: any(named: 'data')),
-    ).thenAnswer(
-      (_) async => left(const Failure.networkTimeout(message: 'Timed out')),
-    ),
-    stubMalformedResponse: () => when(
-      () => mockApiClient.post(any(), data: any(named: 'data')),
-    ).thenAnswer((_) async => right({'unexpected': 'shape'})),
-    stubNoConnection: () => when(
-      () => mockApiClient.post(any(), data: any(named: 'data')),
-    ).thenAnswer(
-      (_) async => left(const Failure.networkOffline(message: 'Offline')),
-    ),
-    invoke: () => repository.logIn(
-      email: 'wagner@cerne.app',
-      password: 'segredo123',
-    ),
+    stubNetworkTimeout: () =>
+        when(() => mockApiClient.post(any(), data: any(named: 'data')))
+            .thenAnswer(
+              (_) async =>
+                  left(const Failure.networkTimeout(message: 'Timed out')),
+            ),
+    stubMalformedResponse: () =>
+        when(() => mockApiClient.post(any(), data: any(named: 'data')))
+            .thenAnswer((_) async => right({'unexpected': 'shape'})),
+    stubNoConnection: () =>
+        when(() => mockApiClient.post(any(), data: any(named: 'data')))
+            .thenAnswer(
+              (_) async =>
+                  left(const Failure.networkOffline(message: 'Offline')),
+            ),
+    invoke: () =>
+        repository.logIn(email: 'wagner@cerne.app', password: 'segredo123'),
   );
 
   group('AuthRepositoryImpl — success mapping and token persistence', () {
@@ -98,14 +101,14 @@ void main() {
         'before resolving', () async {
       when(() => mockApiClient.post('auth-signup', data: any(named: 'data')))
           .thenAnswer(
-        (_) async => right(
-          _successBody(
-            userId: 'user-42',
-            email: 'nova@cerne.app',
-            accessToken: 'token-xyz',
-          ),
-        ),
-      );
+            (_) async => right(
+              _successBody(
+                userId: 'user-42',
+                email: 'nova@cerne.app',
+                accessToken: 'token-xyz',
+              ),
+            ),
+          );
 
       final result = await repository.signUp(
         email: 'nova@cerne.app',
@@ -120,18 +123,19 @@ void main() {
           const AuthenticatedUser(id: 'user-42', email: 'nova@cerne.app'),
         ),
       );
-      verify(() => mockAccessTokenProvider.saveAccessToken('token-xyz'))
-          .called(1);
+      verify(
+        () => mockAccessTokenProvider.saveSession(
+          accessToken: 'token-xyz',
+          refreshToken: 'refresh-token-abc',
+        ),
+      ).called(1);
     });
 
     test('logIn posts exactly {email, password} to auth-login', () async {
       when(() => mockApiClient.post('auth-login', data: any(named: 'data')))
           .thenAnswer((_) async => right(_successBody()));
 
-      await repository.logIn(
-        email: 'wagner@cerne.app',
-        password: 'segredo123',
-      );
+      await repository.logIn(email: 'wagner@cerne.app', password: 'segredo123');
 
       final captured = verify(
         () => mockApiClient.post('auth-login', data: captureAny(named: 'data')),
@@ -145,9 +149,9 @@ void main() {
     test('a backend failure never saves a token', () async {
       when(() => mockApiClient.post('auth-login', data: any(named: 'data')))
           .thenAnswer(
-        (_) async =>
-            left(const Failure.authInvalid(message: 'Invalid credentials')),
-      );
+            (_) async =>
+                left(const Failure.authInvalid(message: 'Invalid credentials')),
+          );
 
       final result = await repository.logIn(
         email: 'wagner@cerne.app',
@@ -159,28 +163,38 @@ void main() {
         (failure) => expect(failure, isA<AuthInvalid>()),
         (_) => fail('expected Left'),
       );
-      verifyNever(() => mockAccessTokenProvider.saveAccessToken(any()));
+      verifyNever(
+        () => mockAccessTokenProvider.saveSession(
+          accessToken: any(named: 'accessToken'),
+          refreshToken: any(named: 'refreshToken'),
+        ),
+      );
     });
 
     test(
-        'a thrown exception while saving the token maps to '
-        'Left(MalformedResponse) instead of escaping unmapped (RNF09)',
-        () async {
-      when(() => mockApiClient.post('auth-login', data: any(named: 'data')))
-          .thenAnswer((_) async => right(_successBody()));
-      when(() => mockAccessTokenProvider.saveAccessToken(any()))
-          .thenThrow(Exception('secure storage unavailable'));
+      'a thrown exception while saving the token maps to '
+      'Left(MalformedResponse) instead of escaping unmapped (RNF09)',
+      () async {
+        when(() => mockApiClient.post('auth-login', data: any(named: 'data')))
+            .thenAnswer((_) async => right(_successBody()));
+        when(
+          () => mockAccessTokenProvider.saveSession(
+            accessToken: any(named: 'accessToken'),
+            refreshToken: any(named: 'refreshToken'),
+          ),
+        ).thenThrow(Exception('secure storage unavailable'));
 
-      final result = await repository.logIn(
-        email: 'wagner@cerne.app',
-        password: 'segredo123',
-      );
+        final result = await repository.logIn(
+          email: 'wagner@cerne.app',
+          password: 'segredo123',
+        );
 
-      expect(result.isLeft(), isTrue);
-      result.match(
-        (failure) => expect(failure, isA<MalformedResponse>()),
-        (_) => fail('expected Left'),
-      );
-    });
+        expect(result.isLeft(), isTrue);
+        result.match(
+          (failure) => expect(failure, isA<MalformedResponse>()),
+          (_) => fail('expected Left'),
+        );
+      },
+    );
   });
 }

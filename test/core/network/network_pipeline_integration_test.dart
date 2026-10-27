@@ -61,6 +61,7 @@ class _FakeHttpClientAdapter implements HttpClientAdapter {
 /// (already covered by `access_token_provider_test.dart`).
 class _InMemoryAccessTokenProvider implements AccessTokenProvider {
   String? _token;
+  String? _refreshToken;
 
   @override
   Future<String?> readAccessToken() async => _token;
@@ -70,6 +71,24 @@ class _InMemoryAccessTokenProvider implements AccessTokenProvider {
 
   @override
   Future<void> clearAccessToken() async => _token = null;
+
+  @override
+  Future<String?> readRefreshToken() async => _refreshToken;
+
+  @override
+  Future<void> saveSession({
+    required String accessToken,
+    required String refreshToken,
+  }) async {
+    _token = accessToken;
+    _refreshToken = refreshToken;
+  }
+
+  @override
+  Future<void> clearSession() async {
+    _token = null;
+    _refreshToken = null;
+  }
 }
 
 void main() {
@@ -97,8 +116,7 @@ void main() {
   });
 
   group('network pipeline — real Dio + real interceptors, faked transport', () {
-    test(
-        'an anon-only operation (auth-login) goes out at the x-cerne-function '
+    test('an anon-only operation (auth-login) goes out at the x-cerne-function '
         'URL with apikey + anon Authorization, and the success body maps to '
         'Right', () async {
       adapter.queueJsonResponse(200, {'accessToken': 'tok-1'});
@@ -121,8 +139,33 @@ void main() {
       expect(sent.headers['Authorization'], 'Bearer $anonKey');
     });
 
-    test(
-        'a bearer operation with a stored user token sends that token, not '
+    test('auth-refresh goes out with the anon-key bearer even when a '
+        '(possibly dead) user access token is already stored — refresh must '
+        'never need it (Story 1.4)', () async {
+      await tokenProvider.saveAccessToken('stale-access-token');
+      adapter.queueJsonResponse(200, {
+        'session': {
+          'accessToken': 'new-access-token',
+          'refreshToken': 'new-refresh-token',
+          'expiresIn': 3600,
+          'expiresAt': 1999999999,
+          'tokenType': 'bearer',
+        },
+      });
+
+      final result = await apiClient.post(
+        'auth-refresh',
+        data: {'refreshToken': 'stored-refresh-token'},
+      );
+
+      expect(result.isRight(), isTrue);
+      final sent = adapter.requests.single;
+      expect(sent.path, '$baseUrl/auth-refresh');
+      expect(sent.headers['apikey'], anonKey);
+      expect(sent.headers['Authorization'], 'Bearer $anonKey');
+    });
+
+    test('a bearer operation with a stored user token sends that token, not '
         'the anon key — and trailing path params are appended as real URL '
         'segments, never the literal openapi.yaml path (AD-5)', () async {
       await tokenProvider.saveAccessToken('user-token-1');
@@ -140,13 +183,13 @@ void main() {
       expect(sent.headers['Authorization'], 'Bearer user-token-1');
     });
 
-    test(
-        'a retryable server error (RATE_LIMITED) is genuinely retried over '
+    test('a retryable server error (RATE_LIMITED) is genuinely retried over '
         'the wire and the eventual success maps to Right', () async {
-      adapter.queueJsonResponse(
-        429,
-        {'code': 'RATE_LIMITED', 'message': 'slow down', 'retryable': true},
-      );
+      adapter.queueJsonResponse(429, {
+        'code': 'RATE_LIMITED',
+        'message': 'slow down',
+        'retryable': true,
+      });
       adapter.queueJsonResponse(200, {'items': <dynamic>[]});
 
       final result = await apiClient.get('entries-list');
@@ -162,41 +205,34 @@ void main() {
       expect(adapter.requests, hasLength(2));
     });
 
-    test(
-        'a retryable error that never recovers is retried exactly '
+    test('a retryable error that never recovers is retried exactly '
         'maxRetries times and then surfaces as the matching Left', () async {
       for (var i = 0; i <= RetryInterceptor.maxRetries; i++) {
-        adapter.queueJsonResponse(
-          504,
-          {
-            'code': 'NETWORK_TIMEOUT',
-            'message': 'gateway timeout',
-            'retryable': true,
-          },
-        );
+        adapter.queueJsonResponse(504, {
+          'code': 'NETWORK_TIMEOUT',
+          'message': 'gateway timeout',
+          'retryable': true,
+        });
       }
 
       final result = await apiClient.get('entries-list');
 
       expect(result.isLeft(), isTrue);
-      result.match(
-        (failure) {
-          expect(failure, isA<NetworkTimeout>());
-          expect(failure.retryable, isTrue);
-        },
-        (_) => fail('expected Left'),
-      );
+      result.match((failure) {
+        expect(failure, isA<NetworkTimeout>());
+        expect(failure.retryable, isTrue);
+      }, (_) => fail('expected Left'));
       // Initial attempt + maxRetries retries, all real requests.
       expect(adapter.requests, hasLength(1 + RetryInterceptor.maxRetries));
     });
 
-    test(
-        'a non-retryable error (AUTH_INVALID) surfaces immediately as the '
+    test('a non-retryable error (AUTH_INVALID) surfaces immediately as the '
         'matching Left, with no retry request ever sent', () async {
-      adapter.queueJsonResponse(
-        401,
-        {'code': 'AUTH_INVALID', 'message': 'bad credentials', 'retryable': false},
-      );
+      adapter.queueJsonResponse(401, {
+        'code': 'AUTH_INVALID',
+        'message': 'bad credentials',
+        'retryable': false,
+      });
 
       final result = await apiClient.post(
         'auth-login',
@@ -204,13 +240,10 @@ void main() {
       );
 
       expect(result.isLeft(), isTrue);
-      result.match(
-        (failure) {
-          expect(failure, isA<AuthInvalid>());
-          expect(failure.retryable, isFalse);
-        },
-        (_) => fail('expected Left'),
-      );
+      result.match((failure) {
+        expect(failure, isA<AuthInvalid>());
+        expect(failure.retryable, isFalse);
+      }, (_) => fail('expected Left'));
       expect(adapter.requests, hasLength(1));
     });
   });

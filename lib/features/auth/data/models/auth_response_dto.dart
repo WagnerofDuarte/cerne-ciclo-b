@@ -43,10 +43,9 @@ class AuthSessionDto {
 
   final String accessToken;
 
-  /// Not persisted by this story — `AccessTokenProvider.saveAccessToken`
-  /// only; refresh-token persistence is Story 1.4's job. Still decoded here
-  /// so a missing/malformed field surfaces as `MalformedResponse` rather
-  /// than being silently dropped.
+  /// Persisted via `AccessTokenProvider.saveSession` (Story 1.4). Decoded
+  /// here regardless, so a missing/malformed field surfaces as
+  /// `MalformedResponse` rather than being silently dropped.
   final String refreshToken;
   final int expiresIn;
   final int expiresAt;
