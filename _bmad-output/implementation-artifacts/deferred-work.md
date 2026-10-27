@@ -5,3 +5,23 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-2-design-token-system-core-component-library.md`
   summary: `lib/core/widgets/avatar.dart`'s `Avatar` renders raw initials text with no `Semantics` wrapper, so a screen reader announces e.g. "W D" instead of something like "Avatar, Wagner Duarte".
   evidence: Accessibility semantics were never required by Story 1.2's spec (no boundary, acceptance criterion, or epic-context requirement mentions it) and the prototype gives no guidance either, so adding it now would be scope creep beyond the frozen intent. Worth a deliberate pass across all shared widgets (button/text-field/avatar) once an accessibility requirement exists, rather than bolting it onto one widget ad hoc.
+
+## Deferred from: code review of story-1-2-design-token-system-core-component-library (2026-10-27)
+
+- `AppButton` has no loading/busy state, even though most of its real call sites (login submit, insertion-modal "Salvar", export actions) are async network calls. Not required by Story 1.2's boundaries (§6's button component table lists only normal/pressed/disabled variations) — pick up when the first async-submit screen (Story 1.3) needs it, rather than letting each feature improvise its own busy treatment.
+- `AppTextField` exposes no `enabled`/`readOnly`, `onSubmitted`, `autofocus`, `textCapitalization`, or `inputFormatters` — all plausible needs for the upcoming login/signup and inline-name-edit screens. Not required by Story 1.2's acceptance criteria; let Story 1.3 (its first real consumer) request exactly what it needs instead of speculatively widening the shared primitive now.
+- `lib/core/design_tokens.dart` now imports `package:flutter/widgets.dart` (needed for `Color`/`TextStyle`/`EdgeInsets`/`BoxShadow`), but nothing in the repo (lint rule or architecture test) would catch a future `domain/` layer importing it for a color/style constant, which would transitively violate RNF06. No domain code exists yet to violate this, so it's not a bug today — worth a lint rule or architecture test once the first feature's `domain/` layer is scaffolded.
+
+## Deferred from: code review of story-1-3-account-creation-and-login (2026-10-27)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-3-account-creation-and-login.md`
+  summary: `Failure.message` is rendered verbatim as the inline form error on `AuthScreen`, but `ApiClient`'s own fallback messages (`'Empty response body'`, `'Malformed response'`, raw `DioException.message`, `'Unknown error'`) are hardcoded English technical strings, so a user can see raw English on an otherwise all-Portuguese screen.
+  evidence: Root cause is in `lib/core/network/api_client.dart` (Story 1.1), not this story's diff — `AuthScreen` is simply the first screen to render `Failure.message` directly to an end user, surfacing a pre-existing gap. No `Failure`→localized-copy mapping layer exists anywhere in the project; worth addressing once more than one screen needs to render failures, rather than inventing a one-off mapping for auth alone.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-3-account-creation-and-login.md`
+  summary: Neither `AppTextField` on Tela 0.1a reacts to the keyboard's "done"/"next" action to submit the form, and both fields stay fully editable while a signup/login request is in flight (the submitted values can be edited before the response returns).
+  evidence: Fixing either requires extending `AppTextField` with `onSubmitted` and `enabled`/`readOnly` params, which this story's frozen spec explicitly rules out ("No new params on `AppButton`/`AppTextField`"). Story 1.2 already flagged both gaps and deferred them to "whichever story needs them first" — Story 1.3 needs them but deliberately didn't request the widening to stay in scope; revisit when a story is willing to extend the shared text field.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-3-account-creation-and-login.md`
+  summary: Neither the e-mail nor senha `AppTextField` on Tela 0.1a sets `autofillHints` (`AutofillHints.email`/`.password`), so iOS's Keychain/password-manager autofill won't surface suggestions on this screen.
+  evidence: Not required by any requirement or acceptance criterion; a minor iOS-platform completeness gap worth picking up alongside the `AppTextField` widening above rather than as a one-off change now.

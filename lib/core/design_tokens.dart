@@ -228,4 +228,8 @@ class DesignTokens {
   );
 
   static const EdgeInsets avatarInitialsPadding = EdgeInsets.all(spacingXs);
+
+  /// Outer content padding for a single-column form screen (Tela 0.1a's
+  /// login/signup, Story 1.3).
+  static const EdgeInsets screenPadding = EdgeInsets.all(spacingLg);
 }

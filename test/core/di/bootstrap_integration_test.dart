@@ -7,6 +7,9 @@ import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/network/api_client.dart';
 import 'package:cerne/core/network/header_interceptor.dart';
 import 'package:cerne/core/network/retry_interceptor.dart';
+import 'package:cerne/features/auth/data/datasources/auth_remote_data_source.dart';
+import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
+import 'package:cerne/features/auth/presentation/cubit/auth_cubit.dart';
 
 /// AC4 — proves the `dio` + `flutter_secure_storage` + `get_it` integration
 /// spike works together in one bootstrap, before anything else is built on
@@ -75,6 +78,24 @@ void main() {
 
       // Resolving twice returns the same singleton — one container, one Dio.
       expect(sl<Dio>(), same(dio));
+    },
+  );
+
+  test(
+    'setupCoreDependencies also wires the auth feature (Story 1.3) — a '
+    'broken registration/dependency cycle must surface here, not only at '
+    'real app launch (no device/CI exists yet to catch that otherwise)',
+    () {
+      expect(sl.isRegistered<AuthRemoteDataSource>(), isTrue);
+      expect(sl.isRegistered<AuthRepository>(), isTrue);
+      expect(sl.isRegistered<AuthCubit>(), isTrue);
+
+      // Actually resolves the whole chain (AuthCubit -> AuthRepository ->
+      // AuthRemoteDataSource/AccessTokenProvider -> ApiClient/Dio) rather
+      // than just checking the registration exists — `get_it`'s
+      // `registerLazySingleton` only evaluates its factory on first
+      // resolution.
+      expect(() => sl<AuthCubit>(), returnsNormally);
     },
   );
 
