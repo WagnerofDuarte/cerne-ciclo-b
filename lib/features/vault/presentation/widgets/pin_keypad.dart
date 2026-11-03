@@ -24,11 +24,19 @@ import '../../../../core/design_tokens.dart';
 /// [FittedBox] so the largest Dynamic Type size shrinks them to fit rather
 /// than clipping or truncating (UX-DR22).
 class PinKeypad extends StatefulWidget {
-  const PinKeypad({required this.onSubmit, super.key});
+  const PinKeypad({required this.onSubmit, this.enabled = true, super.key});
 
   /// Invoked once, 350ms after the 4th digit — never while a 1st-3rd digit
   /// is the most recent entry.
   final ValueChanged<String> onSubmit;
+
+  /// When `false`, every digit/backspace tap is ignored. The caller sets
+  /// this while a previous [onSubmit] call is still being resolved, so a
+  /// fast second entry can't build up and silently race the in-flight
+  /// submission (review finding: the buffer clears for a new attempt
+  /// immediately after auto-advance, before the caller's own async work
+  /// finishes).
+  final bool enabled;
 
   /// The epic's one PIN length — no screen anywhere in `docs/input/`
   /// shows a different digit count.
@@ -49,6 +57,9 @@ class _PinKeypadState extends State<PinKeypad> {
   }
 
   void _onDigitTap(String digit) {
+    if (!widget.enabled) {
+      return;
+    }
     if (_digits.length >= PinKeypad.pinLength) {
       // Defensive — the 350ms auto-advance window already clears the
       // buffer before a 5th tap could land, but a very fast double-tap on
@@ -69,6 +80,9 @@ class _PinKeypadState extends State<PinKeypad> {
   }
 
   void _onBackspaceTap() {
+    if (!widget.enabled) {
+      return;
+    }
     // Unconditional, before the `isEmpty` check below — a backspace
     // during the 350ms auto-advance window must always invalidate the
     // scheduled submit, even though the buffer itself isn't touched until

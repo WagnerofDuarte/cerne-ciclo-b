@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
@@ -43,14 +45,27 @@ class _VaultLockScreenState extends State<VaultLockScreen> {
   /// own tone.
   static const _pinMismatchMessage = 'PIN incorreto. Tente novamente.';
 
+  /// No specific copy is given anywhere in `docs/input/` for a
+  /// `submitPin` call that never resolves (decided here, Design Notes) —
+  /// review finding: without a bound, a hung secure-storage channel call
+  /// would leave [_submittingPin] stuck `true` forever, permanently
+  /// blocking every future attempt and contradicting the spec's own
+  /// "never a dead end" boundary.
+  static const _submitTimeoutMessage =
+      'Não foi possível verificar o PIN. Tente novamente.';
+
+  static const _submitPinTimeout = Duration(seconds: 10);
+
   bool _showPinKeypad = false;
   String? _errorMessage;
 
-  /// Re-entrancy guard for [_submitPin] — [PinKeypad] clears its own
-  /// buffer and accepts new taps immediately after calling `onSubmit`,
-  /// before the awaited [VaultRepository.submitPin] below resolves, so a
-  /// fast second 4-digit entry could otherwise fire a second concurrent
-  /// call.
+  /// Re-entrancy guard for [_submitPin], also passed to [PinKeypad] as
+  /// `enabled: !_submittingPin` — [PinKeypad] clears its own buffer and
+  /// accepts new taps immediately after calling `onSubmit`, before the
+  /// awaited [VaultRepository.submitPin] below resolves, so a fast second
+  /// 4-digit entry could otherwise be accepted and then silently dropped
+  /// here with no feedback; gating the keypad itself means it's never
+  /// accepted in the first place.
   bool _submittingPin = false;
 
   @override
@@ -110,9 +125,11 @@ class _VaultLockScreenState extends State<VaultLockScreen> {
     if (_submittingPin) {
       return;
     }
-    _submittingPin = true;
+    setState(() => _submittingPin = true);
     try {
-      final result = await widget.vaultRepository.submitPin(pin);
+      final result = await widget.vaultRepository
+          .submitPin(pin)
+          .timeout(_submitPinTimeout);
       if (!mounted) {
         return;
       }
@@ -126,8 +143,22 @@ class _VaultLockScreenState extends State<VaultLockScreen> {
       // On a match (first-use or later), `currentStatus` is already
       // `unlocked` and the router navigates away on its own, same as a
       // successful `authenticate()`.
+    } on TimeoutException {
+      if (!mounted) {
+        return;
+      }
+      // Bounds the wait so a hung secure-storage call can never leave
+      // `_submittingPin` stuck `true` forever — the `finally` below still
+      // runs because this `await` has now actually completed (with a
+      // thrown `TimeoutException`), same retryable outcome as a mismatch.
+      setState(() => _errorMessage = _submitTimeoutMessage);
+      await _announce(_submitTimeoutMessage);
     } finally {
-      _submittingPin = false;
+      if (mounted) {
+        setState(() => _submittingPin = false);
+      } else {
+        _submittingPin = false;
+      }
     }
   }
 
@@ -156,7 +187,11 @@ class _VaultLockScreenState extends State<VaultLockScreen> {
           // (biometric failure, PIN mismatch) are already covered
           // explicitly and reliably by `_announce()` below.
           child: _showPinKeypad
-              ? _PinView(errorMessage: _errorMessage, onSubmit: _submitPin)
+              ? _PinView(
+                  errorMessage: _errorMessage,
+                  onSubmit: _submitPin,
+                  enabled: !_submittingPin,
+                )
               : _BiometricView(onUsePin: _useManualPin),
         ),
       ),
@@ -207,10 +242,15 @@ class _BiometricView extends StatelessWidget {
 }
 
 class _PinView extends StatelessWidget {
-  const _PinView({required this.errorMessage, required this.onSubmit});
+  const _PinView({
+    required this.errorMessage,
+    required this.onSubmit,
+    required this.enabled,
+  });
 
   final String? errorMessage;
   final ValueChanged<String> onSubmit;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -235,7 +275,7 @@ class _PinView extends StatelessWidget {
           ),
         ],
         const SizedBox(height: DesignTokens.spacingLg),
-        PinKeypad(onSubmit: onSubmit),
+        PinKeypad(onSubmit: onSubmit, enabled: enabled),
       ],
     );
   }

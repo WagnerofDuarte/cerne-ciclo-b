@@ -179,6 +179,84 @@ void main() {
     },
   );
 
+  group('enabled: false — every tap is ignored', () {
+    testWidgets(
+      'digit taps do nothing while disabled: no onSubmit even after the '
+      '350ms window, no exception',
+      (tester) async {
+        await tester.pumpWidget(
+          _wrap(
+            PinKeypad(
+              enabled: false,
+              onSubmit: (_) => fail('should not submit while disabled'),
+            ),
+          ),
+        );
+
+        for (final digit in '1234'.split('')) {
+          await _tapDigit(tester, digit);
+        }
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'backspace does nothing while disabled (no exception)',
+      (tester) async {
+        await tester.pumpWidget(
+          _wrap(PinKeypad(enabled: false, onSubmit: (_) {})),
+        );
+
+        await tester.tap(find.byIcon(Icons.backspace_outlined));
+        await tester.pump();
+
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'digits ignored while disabled are not silently queued — toggling '
+      'back to enabled still starts from an empty buffer',
+      (tester) async {
+        final submittedPins = <String>[];
+        const key = Key('pin-keypad');
+
+        await tester.pumpWidget(
+          _wrap(
+            PinKeypad(
+              key: key,
+              enabled: false,
+              onSubmit: submittedPins.add,
+            ),
+          ),
+        );
+        for (final digit in '12'.split('')) {
+          await _tapDigit(tester, digit);
+        }
+
+        // Same key -> same State -> any buffered digits from the
+        // disabled taps above would still be present here if the guard
+        // only blocked onSubmit rather than the buffer write itself.
+        await tester.pumpWidget(
+          _wrap(
+            PinKeypad(
+              key: key,
+              onSubmit: submittedPins.add,
+            ),
+          ),
+        );
+        for (final digit in '9876'.split('')) {
+          await _tapDigit(tester, digit);
+        }
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(submittedPins, ['9876']);
+      },
+    );
+  });
+
   testWidgets(
     'every digit/backspace tap target is at least 44pt (UX-DR23)',
     (tester) async {

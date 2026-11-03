@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
@@ -23,7 +24,19 @@ class MockFlutterSecureStorage extends Mock implements FlutterSecureStorage {}
 /// - `submitPin`, stored PIN matches -> `unlocked`, `Right(unit)`.
 /// - `submitPin`, stored PIN mismatch -> stays `locked`,
 ///   `Left(Failure.malformedResponse(...))`, no attempt cap.
+///
+/// Plus spec-2-3's own additions (see the dedicated
+/// `didChangeAppLifecycleState() — idle re-authentication` group below):
+/// idle re-lock after backgrounding for >= 5 minutes while unlocked, no
+/// re-lock below the threshold, no duplicate emission while already
+/// locked, and no crash on a bare `resumed` with no prior `paused`.
 void main() {
+  // Story 2.3's constructor now calls `WidgetsBinding.instance.
+  // addObserver(this)` — unlike the rest of this file's plain `test()`
+  // blocks (no `testWidgets`, which would initialize this implicitly), the
+  // binding needs explicit, idempotent initialization up front.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late MockLocalAuthentication mockLocalAuthentication;
   late MockFlutterSecureStorage mockSecureStorage;
   late VaultRepositoryImpl repository;
@@ -36,6 +49,12 @@ void main() {
       secureStorage: mockSecureStorage,
     );
   });
+
+  // Each VaultRepositoryImpl registers itself as a WidgetsBindingObserver
+  // in its constructor (Story 2.3) — dispose() here removes it again so a
+  // stale observer doesn't linger on the shared
+  // TestWidgetsFlutterBinding.instance across test runs.
+  tearDown(() => repository.dispose());
 
   /// Same rationale as `session_repository_impl_test.dart`'s own
   /// `emittedDuring` helper, with one difference: unlike
@@ -167,6 +186,33 @@ void main() {
       expect(repository.currentStatus, VaultStatus.locked);
       expect(result!.isLeft(), isTrue);
       result!.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
+
+    test('authenticate() throws LocalAuthException with an OS-lockout '
+        'code (biometricLockout) -> same fail-closed outcome as any '
+        'other LocalAuthException, no code-specific branch (AC2: no '
+        'second biometric-retry affordance, always routes to the PIN '
+        'fallback)', () async {
+      when(
+        () => mockLocalAuthentication.authenticate(
+          localizedReason: any(named: 'localizedReason'),
+          biometricOnly: any(named: 'biometricOnly'),
+          persistAcrossBackgrounding: any(named: 'persistAcrossBackgrounding'),
+        ),
+      ).thenThrow(
+        const LocalAuthException(
+          code: LocalAuthExceptionCode.biometricLockout,
+        ),
+      );
+
+      final result = await repository.authenticate();
+
+      expect(repository.currentStatus, VaultStatus.locked);
+      expect(result.isLeft(), isTrue);
+      result.match(
         (failure) => expect(failure, isA<MalformedResponse>()),
         (_) => fail('expected Left'),
       );
@@ -325,6 +371,192 @@ void main() {
 
       expect(result.isRight(), isTrue);
       expect(repository.currentStatus, VaultStatus.locked);
+    });
+  });
+
+  /// Covers spec-2-3's I/O & Edge-Case Matrix exactly, via a repository
+  /// built with an injectable fake clock — no real `WidgetsBinding`
+  /// lifecycle event or device/simulator needed (AGENTS.md: none exists
+  /// yet). `didChangeAppLifecycleState` is called directly since it's a
+  /// public override.
+  group('didChangeAppLifecycleState() — idle re-authentication (spec-2-3)', () {
+    late DateTime currentTime;
+    late VaultRepositoryImpl idleRepository;
+
+    setUp(() {
+      currentTime = DateTime(2026, 1, 1, 12);
+      idleRepository = VaultRepositoryImpl(
+        localAuthentication: mockLocalAuthentication,
+        secureStorage: mockSecureStorage,
+        now: () => currentTime,
+      );
+    });
+
+    // Same observer-leak rationale as the top-level tearDown above — this
+    // group constructs its own repository instance per test.
+    tearDown(() => idleRepository.dispose());
+
+    Future<void> unlockRepository() async {
+      when(
+        () => mockLocalAuthentication.authenticate(
+          localizedReason: any(named: 'localizedReason'),
+          biometricOnly: any(named: 'biometricOnly'),
+          persistAcrossBackgrounding: any(named: 'persistAcrossBackgrounding'),
+        ),
+      ).thenAnswer((_) async => true);
+      await idleRepository.authenticate();
+      expect(idleRepository.currentStatus, VaultStatus.unlocked);
+    }
+
+    test('backgrounded < 5 min, then resumed -> currentStatus stays '
+        'unlocked, no emission', () async {
+      await unlockRepository();
+
+      final emitted = <VaultStatus>[];
+      final subscription = idleRepository.statusStream.listen(emitted.add);
+      await Future<void>.delayed(Duration.zero);
+      emitted.clear();
+
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.paused);
+      currentTime = currentTime.add(const Duration(minutes: 4));
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await Future<void>.delayed(Duration.zero);
+      await subscription.cancel();
+
+      expect(emitted, isEmpty);
+      expect(idleRepository.currentStatus, VaultStatus.unlocked);
+    });
+
+    test('backgrounded >= 5 min, then resumed -> statusStream emits '
+        'locked, currentStatus flips to locked', () async {
+      await unlockRepository();
+
+      final emitted = <VaultStatus>[];
+      final subscription = idleRepository.statusStream.listen(emitted.add);
+      await Future<void>.delayed(Duration.zero);
+      emitted.clear();
+
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.paused);
+      currentTime = currentTime.add(const Duration(minutes: 5));
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await Future<void>.delayed(Duration.zero);
+      await subscription.cancel();
+
+      expect(emitted, [VaultStatus.locked]);
+      expect(idleRepository.currentStatus, VaultStatus.locked);
+    });
+
+    test('backgrounded >= 5 min while already locked -> stays locked, no '
+        'duplicate emission', () async {
+      // Never unlocked in this test — currentStatus starts at locked
+      // (VaultStatus's own default).
+      expect(idleRepository.currentStatus, VaultStatus.locked);
+
+      final emitted = <VaultStatus>[];
+      final subscription = idleRepository.statusStream.listen(emitted.add);
+      await Future<void>.delayed(Duration.zero);
+      emitted.clear();
+
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.paused);
+      currentTime = currentTime.add(const Duration(minutes: 10));
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await Future<void>.delayed(Duration.zero);
+      await subscription.cancel();
+
+      expect(emitted, isEmpty);
+      expect(idleRepository.currentStatus, VaultStatus.locked);
+    });
+
+    test('driven through the real WidgetsBinding dispatch path (not a '
+        'direct method call) -> still re-locks after >= 5 min, proving '
+        'the constructor\'s addObserver(this) wiring is actually in '
+        'effect, not just the override logic in isolation', () async {
+      await unlockRepository();
+
+      final emitted = <VaultStatus>[];
+      final subscription = idleRepository.statusStream.listen(emitted.add);
+      await Future<void>.delayed(Duration.zero);
+      emitted.clear();
+
+      TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(
+        AppLifecycleState.paused,
+      );
+      currentTime = currentTime.add(const Duration(minutes: 5));
+      TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(
+        AppLifecycleState.resumed,
+      );
+      await Future<void>.delayed(Duration.zero);
+      await subscription.cancel();
+
+      expect(emitted, [VaultStatus.locked]);
+      expect(idleRepository.currentStatus, VaultStatus.locked);
+    });
+
+    test('backgrounded 4 minutes 59 seconds, then resumed -> still below '
+        'the 5-minute threshold, currentStatus stays unlocked, no '
+        'emission (pins the >= boundary tightly, one second short)', () async {
+      await unlockRepository();
+
+      final emitted = <VaultStatus>[];
+      final subscription = idleRepository.statusStream.listen(emitted.add);
+      await Future<void>.delayed(Duration.zero);
+      emitted.clear();
+
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.paused);
+      currentTime = currentTime.add(
+        const Duration(minutes: 4, seconds: 59),
+      );
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await Future<void>.delayed(Duration.zero);
+      await subscription.cancel();
+
+      expect(emitted, isEmpty);
+      expect(idleRepository.currentStatus, VaultStatus.unlocked);
+    });
+
+    test('inactive and hidden are ignored on their own -> no emission, '
+        'currentStatus stays unlocked, _backgroundedAt neither set nor '
+        'read (Boundaries: inactive/hidden are not "backgrounded" on '
+        'their own)', () async {
+      await unlockRepository();
+
+      final emitted = <VaultStatus>[];
+      final subscription = idleRepository.statusStream.listen(emitted.add);
+      await Future<void>.delayed(Duration.zero);
+      emitted.clear();
+
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.inactive);
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.hidden);
+      currentTime = currentTime.add(const Duration(minutes: 10));
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.inactive);
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.hidden);
+      await Future<void>.delayed(Duration.zero);
+      await subscription.cancel();
+
+      expect(emitted, isEmpty);
+      expect(idleRepository.currentStatus, VaultStatus.unlocked);
+    });
+
+    test('resumed fires with no prior paused -> no-op, no emission, no '
+        'crash', () async {
+      await unlockRepository();
+
+      final emitted = <VaultStatus>[];
+      final subscription = idleRepository.statusStream.listen(emitted.add);
+      await Future<void>.delayed(Duration.zero);
+      emitted.clear();
+
+      expect(
+        () => idleRepository.didChangeAppLifecycleState(
+          AppLifecycleState.resumed,
+        ),
+        returnsNormally,
+      );
+      await Future<void>.delayed(Duration.zero);
+      await subscription.cancel();
+
+      expect(emitted, isEmpty);
+      expect(idleRepository.currentStatus, VaultStatus.unlocked);
     });
   });
 }

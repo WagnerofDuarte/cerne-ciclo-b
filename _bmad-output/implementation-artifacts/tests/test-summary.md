@@ -333,3 +333,181 @@ backend contract surface for this story to exercise.
   this same screen — extend `vault_lock_screen_test.dart` in place rather
   than starting a parallel suite, since the fake repository and `_wrap`
   helper here already generalize to that case.
+- **Superseded by Story 2.2** (see below): the "Tentar novamente"-based
+  cases this section describes (decline → retry → success loop,
+  repeated-decline loop) no longer exist — Story 2.2 replaced the retry
+  button with a PIN keypad entirely, per spec-2-2's own frozen intent, and
+  rewrote this suite's cases accordingly rather than keeping both paths.
+  This section is left as-is as the historical record of what Story 2.1's
+  own test-generation pass produced at the time.
+
+---
+
+# Story 2.2 — Biometric-Failure Fallback to PIN
+
+## Context
+
+Story 2.2 replaces `VaultLockScreen`'s "Tentar novamente" biometric-retry
+button with a real `PinKeypad` fallback: every `authenticate()` failure
+(decline/cancel/any OS lockout — no code-specific branch) now falls
+through to the keypad, a new "Usar PIN" link reaches it directly, and
+`VaultRepository.submitPin` implements set-on-first-use/compare PIN
+semantics. The code-review pass on this diff also fixed a dropped-input
+risk, a hang-induced dead end, a test-naming overclaim, and a verification
+gap around screen-reader announcements — see "Generated Tests" below for
+what was added for those findings specifically.
+
+## Generated Tests
+
+### Unit (`VaultRepositoryImpl`)
+
+- [x] `test/features/vault/data/repositories/vault_repository_impl_test.dart`
+  — **extended**: `submitPin`'s full I/O matrix (no-PIN-yet stores and
+  unlocks, match unlocks, mismatch stays locked with no attempt cap,
+  storage-exception fails closed); `authenticate()`'s generic
+  (non-`LocalAuthException`) catch branch; a real `LocalAuthException`
+  with `LocalAuthExceptionCode.biometricLockout` proving the lockout code
+  routes through the exact same generic catch as any other code (review
+  finding: closes the gap where only `userCanceled`/`noBiometricsEnrolled`
+  were exercised).
+
+### Widget (`PinKeypad`, new)
+
+- [x] `test/features/vault/presentation/widgets/pin_keypad_test.dart` —
+  **new**: digit entry/backspace/auto-advance/no-overflow at the largest
+  `TextScaler`; backspace-during-the-350ms-auto-advance-window regression
+  (cancels the pending submit instead of racing it).
+
+### E2E/widget (`VaultLockScreen`)
+
+- [x] `test/features/vault/presentation/screens/vault_lock_screen_test.dart`
+  — **rewritten**: the obsolete retry-button cases are gone, replaced
+  with: biometric failure → PIN keypad + error band, never a retry
+  affordance; an OS-lockout-flavored failure (a distinct `Failure.
+  message`) routes identically, proving the "no code-specific branch"
+  claim instead of asserting it only by comment (review finding — the
+  original test reused the plain-decline fake under a misleading name);
+  "Usar PIN" reachable pre-failure, including when a still-pending
+  `authenticate()` later fails without clobbering the keypad; the full
+  `submitPin` flow (first-use store, match, mismatch-with-retry, re-
+  entrancy guard against a fast second entry).
+  — **added by the code-review pass**: a dedicated group mocking
+  `SystemChannels.accessibility` directly to assert the real announcement
+  *content* fires on biometric failure and on PIN mismatch, and that
+  tapping "Usar PIN" pre-failure sends none at all (review finding — every
+  pre-existing assertion only read visible `Text` widgets, so a deleted or
+  inverted `_announce()` call would have passed every test unnoticed).
+
+## Coverage
+
+- `submitPin` I/O matrix ✅, PIN keypad entry/backspace/auto-advance/
+  Dynamic-Type ✅, biometric-failure→keypad fallthrough (plain decline and
+  lockout-flavored) ✅, "Usar PIN" direct path ✅, re-entrancy guard ✅,
+  screen-reader announcement content for both real transitions ✅ (all
+  added or extended this pass)
+- Already covered elsewhere (unchanged by this pass): `VaultStatus`-ahead-
+  of-`SessionStatus` routing (`app_router_test.dart`), cold-start
+  composition-root wiring (`test/main_test.dart`) — both only needed a
+  `submitPin` override added to their existing fakes for the interface
+  change.
+- Implemented feature scope (per `sprint-status.yaml`): stories 1.1–1.6,
+  2.1, and 2.2 — all covered. Stories 2.3+ are still `backlog`, so out of
+  scope for this pass.
+
+## Verification
+
+- `fvm flutter test` → all passing (pre-existing suite + this pass's new/
+  extended cases)
+- `fvm flutter analyze` → 0 issues
+
+## Next Steps
+
+- Story 2.3 (fixed 5-minute idle re-authentication timeout) is the next
+  consumer of this same lock-screen surface — no new gap identified here
+  for it to inherit.
+
+---
+
+# QA Generate E2E Tests Pass (2026-11-03)
+
+## Context
+
+Re-ran this skill against the current working tree. Found the working
+tree already had an uncommitted code-review round on top of Story 2.2
+(`vault_lock_screen.dart`, `pin_keypad.dart`) that this file's own Story
+2.2 section above doesn't mention: a 10-second `.timeout()` bound on
+`VaultRepository.submitPin()` (so a hung secure-storage call can't leave
+`_submittingPin` stuck `true` forever) and a new `PinKeypad.enabled` flag
+that the screen wires as `enabled: !_submittingPin`, so a fast second PIN
+entry is rejected by the keypad itself rather than only by the screen's
+own re-entrancy guard. The test files for both had already been edited in
+the same uncommitted change (a lockout-code case and the screen-reader
+announcement group), but neither the timeout path nor the `enabled` flag
+itself had any coverage anywhere in the suite — confirmed by reading
+`pin_keypad_test.dart` (no mention of `enabled`) and
+`vault_lock_screen_test.dart` (the existing re-entrancy test only proves
+the call count stays flat, which the screen-level guard alone would also
+produce, so it can't distinguish "keypad disabled" from "keypad enabled
+but guarded upstream").
+
+## Generated Tests
+
+### Unit (`PinKeypad`, new `enabled` flag)
+
+- [x] `test/features/vault/presentation/widgets/pin_keypad_test.dart` —
+  **new** `enabled: false` group: digit taps and backspace are both
+  no-ops (no `onSubmit`, no exception) while disabled; digits ignored
+  while disabled aren't silently queued in the buffer — toggling back to
+  `enabled: true` on the same `State` (same `Key`) and entering a fresh 4
+  digits submits only the new PIN, never a stale mix of the ignored ones.
+
+### E2E/widget (`VaultLockScreen`)
+
+- [x] `test/features/vault/presentation/screens/vault_lock_screen_test.dart`
+  — **extended** the existing re-entrancy test with a direct
+  `tester.widget<PinKeypad>(...).enabled` assertion (`isFalse` while
+  `submitPin()` is gated open), closing the gap where the call-count-only
+  assertion couldn't tell the keypad-level guard from the screen-level one.
+  — **new** group "submitPin() timeout": a `submitPin()` held open past
+  the 10s bound shows the timeout message, keeps the vault `locked`, and
+  — critically — resets `_submittingPin`/re-enables the keypad so a fresh
+  entry is accepted afterward even though the original call is still
+  hung (proves the review finding's actual guarantee, not just that the
+  message appears).
+  — **new** case in the "AC3 — screen-reader announcements" group: the
+  timeout path sends its message as a real `SystemChannels.accessibility`
+  announcement, same proof-by-real-channel standard as the file's
+  existing biometric-failure/PIN-mismatch cases.
+
+No API test was generated — `VaultRepository` still makes zero network
+calls (unchanged boundary from Story 2.1/2.2).
+
+## Coverage
+
+- `PinKeypad.enabled` semantics (digit/backspace no-ops, no queued input)
+  ✅ (added)
+- `VaultLockScreen` ↔ `PinKeypad` `enabled` wiring, checked directly
+  rather than inferred ✅ (added)
+- `submitPin()` 10s timeout: message, retryability, re-enabled keypad,
+  screen-reader announcement ✅ (all added)
+- Everything else already covered by prior passes (`VaultRepositoryImpl`
+  I/O matrix, biometric-failure→keypad fallthrough, "Usar PIN" direct
+  path, PIN mismatch/match, routing) — unchanged by this pass.
+- Implemented feature scope (per `sprint-status.yaml`): stories 1.1–1.6,
+  2.1, and 2.2 — all covered, including this pass's uncommitted
+  review-round diff. Stories 2.3+ are still `backlog`.
+
+## Verification
+
+- `fvm flutter test` → 309/309 passing
+- `fvm flutter analyze` → 0 issues
+
+## Next Steps
+
+- When Story 2.2's uncommitted changes land in a commit, this section's
+  findings should be folded into that story's own record rather than kept
+  as a separate dated pass, to avoid the same "section missing from a
+  prior pass" drift the Story 1.6 section above already called out once.
+- Story 2.3 (fixed 5-minute idle re-authentication timeout) is still the
+  next consumer of this lock-screen surface — no new gap identified here
+  for it to inherit.

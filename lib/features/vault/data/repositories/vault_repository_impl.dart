@@ -5,15 +5,17 @@
 import 'dart:async';
 
 import 'package:fpdart/fpdart.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 
 import '../../../../core/failure/failure.dart';
 import '../../domain/entities/vault_status.dart';
 import '../../domain/repositories/vault_repository.dart';
+import '../../domain/vault_idle_timeout.dart';
 
 /// Owns the one broadcast [VaultStatus] stream the epic's AD-14 seam
-/// requires. Covers the I/O matrix (spec-2-1 + spec-2-2):
+/// requires. Covers the I/O matrix (spec-2-1 + spec-2-2 + spec-2-3):
 /// - biometrics succeed -> [VaultStatus.unlocked] emitted, `Right(unit)`.
 /// - biometrics fail/cancelled/unavailable (`authenticate()` returns
 ///   `false`, or throws `LocalAuthException`, including any OS lockout) ->
@@ -27,6 +29,10 @@ import '../../domain/repositories/vault_repository.dart';
 ///   `Right(unit)`.
 /// - [submitPin], stored PIN mismatch -> status stays locked, `Left(Failure.
 ///   malformedResponse(...))`, always retryable (no attempt cap).
+/// - spec-2-3: backgrounded (`AppLifecycleState.paused`) for >= 5 minutes
+///   while [VaultStatus.unlocked], then resumed -> [VaultStatus.locked]
+///   emitted via [didChangeAppLifecycleState]; below that threshold, or
+///   while already locked, no emission at all.
 ///
 /// Zero network calls anywhere in this class (Boundaries: "Vault makes zero
 /// network calls") and never produces [Failure.authInvalid] (Boundaries:
@@ -36,19 +42,42 @@ import '../../domain/repositories/vault_repository.dart';
 /// `package:crypto` isn't a pinned dependency) stored under [_pinStorageKey]
 /// via the same [FlutterSecureStorage] instance
 /// `SecureStorageAccessTokenProvider` uses for the access/refresh tokens.
-class VaultRepositoryImpl implements VaultRepository {
+class VaultRepositoryImpl
+    with WidgetsBindingObserver
+    implements VaultRepository {
   VaultRepositoryImpl({
     required LocalAuthentication localAuthentication,
     required FlutterSecureStorage secureStorage,
+    DateTime Function() now = DateTime.now,
   }) : _localAuthentication = localAuthentication,
-       _secureStorage = secureStorage;
+       _secureStorage = secureStorage,
+       _now = now {
+    // Story 2.3 — observes app-lifecycle transitions directly so idle
+    // re-lock works with zero DI changes and zero new VaultRepository
+    // methods. Removed in dispose() below. Safe only because
+    // `WidgetsFlutterBinding.ensureInitialized()` (or an equivalent, e.g.
+    // `TestWidgetsFlutterBinding.ensureInitialized()` in tests) must
+    // already have run before this constructor executes — true today
+    // because `get_it` constructs this lazily, well after `main()`'s own
+    // binding initialization.
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   static const _pinStorageKey = 'vault_pin';
 
   final LocalAuthentication _localAuthentication;
   final FlutterSecureStorage _secureStorage;
+  final DateTime Function() _now;
   final StreamController<VaultStatus> _statusController =
       StreamController<VaultStatus>.broadcast();
+
+  /// Set on `AppLifecycleState.paused`, read and cleared on
+  /// `AppLifecycleState.resumed` (Boundaries: `inactive`/`hidden` are not
+  /// "backgrounded" on their own — only this pair bounds iOS's actual
+  /// background/foreground transition). `null` means either the app has
+  /// never been backgrounded, or the last `paused`->`resumed` cycle already
+  /// consumed it.
+  DateTime? _backgroundedAt;
 
   /// The last status emitted. Starts at [VaultStatus.locked] — not
   /// nullable, see [VaultStatus]'s own doc — so [currentStatus] is correct
@@ -85,6 +114,37 @@ class VaultRepositoryImpl implements VaultRepository {
     }
     _lastStatus = status;
     _statusController.add(status);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Story 2.3's I/O & Edge-Case Matrix, exactly:
+    // - `paused` -> record the backgrounded timestamp (only meaningful read
+    //   on the next `resumed`).
+    // - `resumed` with no prior `paused` recorded -> no-op (e.g. the very
+    //   first lifecycle callback ever observed).
+    // - `resumed` with elapsed time < 5 minutes -> no-op, `currentStatus`
+    //   stays whatever it was.
+    // - `resumed` with elapsed time >= 5 minutes AND `currentStatus` is
+    //   currently `unlocked` -> emit `locked` exactly once; never
+    //   redundantly if already `locked` (no duplicate emission).
+    // `inactive`/`hidden` are intentionally ignored (Boundaries) — they
+    // don't bound the real background/foreground transition on their own.
+    if (state == AppLifecycleState.paused) {
+      _backgroundedAt = _now();
+      return;
+    }
+    if (state == AppLifecycleState.resumed) {
+      final backgroundedAt = _backgroundedAt;
+      _backgroundedAt = null;
+      if (backgroundedAt == null) {
+        return;
+      }
+      final elapsed = _now().difference(backgroundedAt);
+      if (elapsed >= vaultIdleTimeout && _lastStatus == VaultStatus.unlocked) {
+        _emit(VaultStatus.locked);
+      }
+    }
   }
 
   @override
@@ -161,6 +221,7 @@ class VaultRepositoryImpl implements VaultRepository {
 
   @override
   Future<void> dispose() async {
+    WidgetsBinding.instance.removeObserver(this);
     await _statusController.close();
   }
 }
