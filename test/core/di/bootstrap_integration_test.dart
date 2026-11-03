@@ -10,6 +10,7 @@ import 'package:cerne/core/network/retry_interceptor.dart';
 import 'package:cerne/features/auth/data/datasources/auth_remote_data_source.dart';
 import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
 import 'package:cerne/features/auth/presentation/cubit/auth_cubit.dart';
+import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 
 /// AC4 — proves the `dio` + `flutter_secure_storage` + `get_it` integration
 /// spike works together in one bootstrap, before anything else is built on
@@ -96,6 +97,25 @@ void main() {
       // `registerLazySingleton` only evaluates its factory on first
       // resolution.
       expect(() => sl<AuthCubit>(), returnsNormally);
+    },
+  );
+
+  test(
+    'setupCoreDependencies also wires the vault feature (spec-2-1, AD-14) — '
+    'a broken registration (bad factory, missing LocalAuthentication '
+    "dependency, broken dispose:) must surface here, not only at real app "
+    'launch (no device/CI exists yet to catch that otherwise)',
+    () {
+      expect(sl.isRegistered<VaultRepository>(), isTrue);
+
+      // Actually resolves VaultRepository -> VaultRepositoryImpl(
+      // localAuthentication: sl<LocalAuthentication>()) rather than just
+      // checking the registration exists. This only constructs the
+      // LocalAuthentication() instance and stores it — it never calls any
+      // of its methods, so no platform-channel mock is needed here (same
+      // reasoning that already applies to AuthCubit's forced resolution
+      // above).
+      expect(() => sl<VaultRepository>(), returnsNormally);
     },
   );
 

@@ -14,6 +14,9 @@ import 'package:cerne/features/auth/domain/entities/authenticated_user.dart';
 import 'package:cerne/features/auth/domain/entities/session_status.dart';
 import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
 import 'package:cerne/features/auth/domain/repositories/session_repository.dart';
+import 'package:cerne/features/vault/domain/entities/vault_status.dart';
+import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
+import 'package:cerne/features/vault/presentation/screens/vault_lock_screen.dart';
 import 'package:cerne/main.dart';
 
 class MockAuthRepository extends Mock implements AuthRepository {}
@@ -53,10 +56,50 @@ class _FakeSessionRepository implements SessionRepository {
   }
 }
 
+/// A plain (non-mocktail) fake for [VaultRepository], same rationale as
+/// [_FakeSessionRepository] above. [authenticateSucceeds] defaults to
+/// `false` so mounting `VaultLockScreen` — which auto-calls [authenticate]
+/// once in `initState` — never silently unlocks the vault on its own;
+/// [setStatus] stays the single, explicit way a test flips vault state.
+class _FakeVaultRepository implements VaultRepository {
+  _FakeVaultRepository({VaultStatus initialStatus = VaultStatus.unlocked})
+    : _status = initialStatus;
+
+  VaultStatus _status;
+  final _controller = StreamController<VaultStatus>.broadcast();
+  bool authenticateSucceeds = false;
+
+  @override
+  VaultStatus get currentStatus => _status;
+
+  @override
+  Stream<VaultStatus> get statusStream => _controller.stream;
+
+  @override
+  Future<Either<Failure, Unit>> authenticate() async {
+    if (authenticateSucceeds) {
+      setStatus(VaultStatus.unlocked);
+      return right(unit);
+    }
+    return left(
+      const Failure.malformedResponse(message: 'fake: biometrics declined'),
+    );
+  }
+
+  @override
+  Future<void> dispose() => _controller.close();
+
+  void setStatus(VaultStatus status) {
+    _status = status;
+    _controller.add(status);
+  }
+}
+
 /// Proves the one real production composition root — `CerneApp` resolving
-/// `sl<AuthCubit>()`/`sl<SessionRepository>()`, building the one `go_router`
-/// (Story 1.6), and wrapping it with `ExpiryOverlayHost` — actually works
-/// end to end. Every other test either stops at DI registration
+/// `sl<AuthCubit>()`/`sl<SessionRepository>()`/`sl<VaultRepository>()`,
+/// building the one `go_router` (Story 1.6; AD-14's vault gate), and
+/// wrapping it with `ExpiryOverlayHost` — actually works end to end. Every
+/// other test either stops at DI registration
 /// (`bootstrap_integration_test.dart`) or supplies its own
 /// `AuthCubit`/`onAuthenticated` (`auth_screen_test.dart`), so neither
 /// exercises `main.dart`'s own wiring.
@@ -94,6 +137,14 @@ void main() {
         );
     await resetCoreDependencies();
     await setupCoreDependencies();
+    // `setupCoreDependencies()` registers the real `VaultRepositoryImpl`
+    // (backed by the actual `local_auth` plugin, with no platform channel
+    // mocked here) — swapped for a fake pre-`unlocked` one so every
+    // existing auth/session test case (which predates AD-14's vault gate)
+    // is unaffected; a test that wants to exercise the vault gate itself
+    // swaps this for its own locked fake.
+    sl.unregister<VaultRepository>();
+    sl.registerLazySingleton<VaultRepository>(() => _FakeVaultRepository());
     // `ConfirmationDialog.isOpen` is a static single-overlay guard (shared
     // across every instance by design, Story 1.5) — reset it so one test's
     // unclosed dialog never leaks into the next.
@@ -419,4 +470,93 @@ void main() {
       );
     },
   );
+
+  group('AD-14 — VaultStatus gate composed ahead of SessionStatus (spec-2-1)', () {
+    testWidgets(
+      'cold start stays on /vault (VaultLockScreen) until a fake '
+      'authenticate() success flips VaultStatus to unlocked, at which '
+      'point the existing SessionStatus logic takes over and routes to '
+      'Home',
+      (tester) async {
+        final fakeVaultRepository = _FakeVaultRepository(
+          initialStatus: VaultStatus.locked,
+        );
+        addTearDown(fakeVaultRepository.dispose);
+        sl.unregister<VaultRepository>();
+        sl.registerLazySingleton<VaultRepository>(() => fakeVaultRepository);
+
+        final fakeSessionRepository = _FakeSessionRepository()
+          ..setStatus(SessionStatus.authenticated);
+        addTearDown(fakeSessionRepository.dispose);
+        sl.unregister<SessionRepository>();
+        sl.registerLazySingleton<SessionRepository>(
+          () => fakeSessionRepository,
+        );
+
+        await tester.pumpWidget(const CerneApp());
+        await tester.pumpAndSettle();
+
+        // Still locked: the vault gate wins over the already-authenticated
+        // session, and VaultLockScreen's own auto-triggered authenticate()
+        // call (the fake defaults `authenticateSucceeds: false`) left it
+        // that way.
+        expect(find.byType(VaultLockScreen), findsOneWidget);
+        expect(find.byType(HomeChatPlaceholderScreen), findsNothing);
+
+        // Simulates the OS biometric prompt succeeding: flips VaultStatus
+        // straight to unlocked (same effect `VaultRepositoryImpl.
+        // authenticate()` would have), which the router's
+        // `refreshListenable` picks up and re-runs `_redirect` with no
+        // further vault gate in the way.
+        fakeVaultRepository.setStatus(VaultStatus.unlocked);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
+        expect(find.byType(VaultLockScreen), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'tapping "Tentar novamente" re-invokes authenticate() through the '
+      'real VaultLockScreen wiring: the initial auto-attempt fails '
+      '(authenticateSucceeds starts false) and shows the retry button, '
+      'then flipping authenticateSucceeds to true and tapping it unlocks '
+      'the vault and routes through to Home',
+      (tester) async {
+        final fakeVaultRepository = _FakeVaultRepository(
+          initialStatus: VaultStatus.locked,
+        );
+        addTearDown(fakeVaultRepository.dispose);
+        sl.unregister<VaultRepository>();
+        sl.registerLazySingleton<VaultRepository>(() => fakeVaultRepository);
+
+        final fakeSessionRepository = _FakeSessionRepository()
+          ..setStatus(SessionStatus.authenticated);
+        addTearDown(fakeSessionRepository.dispose);
+        sl.unregister<SessionRepository>();
+        sl.registerLazySingleton<SessionRepository>(
+          () => fakeSessionRepository,
+        );
+
+        await tester.pumpWidget(const CerneApp());
+        await tester.pumpAndSettle();
+
+        // The initial auto-triggered authenticate() call used the fake's
+        // default authenticateSucceeds == false, so the retry button is
+        // now visible and the vault is still locked.
+        expect(find.byType(VaultLockScreen), findsOneWidget);
+        expect(find.text('Tentar novamente'), findsOneWidget);
+
+        // Now let the next authenticate() call succeed, and drive it
+        // through the real button wiring (_attemptAuthenticate) rather
+        // than setStatus directly.
+        fakeVaultRepository.authenticateSucceeds = true;
+        await tester.tap(find.text('Tentar novamente'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
+        expect(find.byType(VaultLockScreen), findsNothing);
+      },
+    );
+  });
 }

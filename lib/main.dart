@@ -9,6 +9,7 @@ import 'core/failure/failure.dart';
 import 'core/navigation/app_router.dart';
 import 'core/navigation/expiry_overlay_host.dart';
 import 'features/auth/domain/repositories/session_repository.dart';
+import 'features/vault/domain/repositories/vault_repository.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,6 +47,7 @@ class CerneApp extends StatefulWidget {
 
 class _CerneAppState extends State<CerneApp> {
   late final SessionRepository _sessionRepository;
+  late final VaultRepository _vaultRepository;
   late final GoRouter _router;
 
   // Created here (not left for `GoRouter` to generate internally) and
@@ -61,7 +63,9 @@ class _CerneAppState extends State<CerneApp> {
   void initState() {
     super.initState();
     _sessionRepository = sl<SessionRepository>();
+    _vaultRepository = sl<VaultRepository>();
     _router = buildAppRouter(
+      vaultRepository: _vaultRepository,
       sessionRepository: _sessionRepository,
       navigatorKey: _navigatorKey,
     );

@@ -15,6 +15,9 @@ import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
 import 'package:cerne/features/auth/domain/repositories/session_repository.dart';
 import 'package:cerne/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:cerne/features/auth/presentation/screens/auth_screen.dart';
+import 'package:cerne/features/vault/domain/entities/vault_status.dart';
+import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
+import 'package:cerne/features/vault/presentation/screens/vault_lock_screen.dart';
 
 class MockAuthRepository extends Mock implements AuthRepository {}
 
@@ -49,15 +52,58 @@ class _FakeSessionRepository implements SessionRepository {
   }
 }
 
+/// A plain (non-mocktail) fake for [VaultRepository], same rationale as
+/// [_FakeSessionRepository] above — defaults to [VaultStatus.unlocked] so
+/// every pre-existing (Story 1.6) test case is unaffected by AD-14's new
+/// gate unless a test explicitly locks it.
+class _FakeVaultRepository implements VaultRepository {
+  VaultStatus _status = VaultStatus.unlocked;
+  final _controller = StreamController<VaultStatus>.broadcast();
+
+  /// Controls what [authenticate] resolves to. Defaults to `false` (a
+  /// quiet failure) so that mounting `VaultLockScreen` in a test — which
+  /// auto-calls [authenticate] once in `initState` — never silently
+  /// unlocks the vault on its own; [setStatus] stays the single, explicit
+  /// way a test flips vault state.
+  bool authenticateSucceeds = false;
+
+  @override
+  VaultStatus get currentStatus => _status;
+
+  @override
+  Stream<VaultStatus> get statusStream => _controller.stream;
+
+  @override
+  Future<Either<Failure, Unit>> authenticate() async {
+    if (authenticateSucceeds) {
+      setStatus(VaultStatus.unlocked);
+      return right(unit);
+    }
+    return left(
+      const Failure.malformedResponse(message: 'fake: biometrics declined'),
+    );
+  }
+
+  @override
+  Future<void> dispose() => _controller.close();
+
+  void setStatus(VaultStatus status) {
+    _status = status;
+    _controller.add(status);
+  }
+}
+
 /// Proves the epic's ONE `GoRouter`/`redirect` (Boundaries) resolves the
-/// I/O & Edge-Case Matrix from spec-1-6 exactly — composing only
-/// [SessionStatus] for now, with the AD-14 seam left as a comment, never a
-/// hardcoded assumption baked into the matrix itself.
+/// I/O & Edge-Case Matrix from spec-1-6/spec-2-1 exactly — composing
+/// [VaultStatus] first, then [SessionStatus] (AD-14), never a hardcoded
+/// assumption baked into either matrix.
 void main() {
   late _FakeSessionRepository fakeSessionRepository;
+  late _FakeVaultRepository fakeVaultRepository;
 
   setUp(() {
     fakeSessionRepository = _FakeSessionRepository();
+    fakeVaultRepository = _FakeVaultRepository();
     // `/auth`'s `GoRoute.builder` resolves `sl<AuthCubit>()` — registered
     // directly (no full `setupCoreDependencies()`) since this suite only
     // exercises the router, not the auth call itself.
@@ -72,10 +118,12 @@ void main() {
   tearDown(() async {
     await sl.reset();
     await fakeSessionRepository.dispose();
+    await fakeVaultRepository.dispose();
   });
 
   Future<GoRouter> pumpRouter(WidgetTester tester) async {
     final router = buildAppRouter(
+      vaultRepository: fakeVaultRepository,
       sessionRepository: fakeSessionRepository,
       navigatorKey: GlobalKey<NavigatorState>(),
     );
@@ -180,5 +228,58 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(location(router), destination);
     }
+  });
+
+  group('AD-14 — VaultStatus composed first (spec-2-1)', () {
+    testWidgets(
+      'VaultStatus.locked overrides any SessionStatus — even an already '
+      '`authenticated` session is bounced to /vault, never reaching Home',
+      (tester) async {
+        fakeVaultRepository.setStatus(VaultStatus.locked);
+        final router = await pumpRouter(tester);
+        fakeSessionRepository.setStatus(SessionStatus.authenticated);
+        await tester.pumpAndSettle();
+
+        expect(location(router), AppRoutePaths.vaultLock);
+        expect(find.byType(VaultLockScreen), findsOneWidget);
+        expect(find.byType(HomeChatPlaceholderScreen), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'an explicit navigation attempt to any other route while locked is '
+      'redirected straight back to /vault',
+      (tester) async {
+        fakeVaultRepository.setStatus(VaultStatus.locked);
+        final router = await pumpRouter(tester);
+        fakeSessionRepository.setStatus(SessionStatus.unauthenticated);
+        await tester.pumpAndSettle();
+        expect(location(router), AppRoutePaths.vaultLock);
+
+        router.go(AppRoutePaths.meusRegistros);
+        await tester.pumpAndSettle();
+
+        expect(location(router), AppRoutePaths.vaultLock);
+      },
+    );
+
+    testWidgets(
+      'VaultStatus.unlocked + SessionStatus.authenticated while still at '
+      '/vault (the cold-start happy path once authenticate() succeeds) '
+      'routes through to Home via the existing session logic',
+      (tester) async {
+        fakeVaultRepository.setStatus(VaultStatus.locked);
+        final router = await pumpRouter(tester);
+        fakeSessionRepository.setStatus(SessionStatus.authenticated);
+        await tester.pumpAndSettle();
+        expect(location(router), AppRoutePaths.vaultLock);
+
+        fakeVaultRepository.setStatus(VaultStatus.unlocked);
+        await tester.pumpAndSettle();
+
+        expect(location(router), AppRoutePaths.home);
+        expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
+      },
+    );
   });
 }
