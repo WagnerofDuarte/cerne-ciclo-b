@@ -364,6 +364,16 @@ class DesignTokens {
     vertical: 10,
   );
 
+  /// Top padding of the drawer's second, static-nav section (Meus
+  /// Registros/Planos de Ação/Configurações), below its own `border-top`
+  /// divider — `border-top:1px solid #E1DACB;padding-top:12px` (code
+  /// review, Story 1.6) in the drawer markup's second block, distinct from
+  /// the scrollable first block holding "Novo Chat" (ground truth:
+  /// `cerne-prototype.html`'s `<!-- OVERLAY: Drawer -->` block).
+  static const EdgeInsets drawerSectionDividerPadding = EdgeInsets.only(
+    top: 12,
+  );
+
   /// Kanban board's scrollable row padding — `padding:0 16px 16px`.
   static const EdgeInsets kanbanBoardPadding = EdgeInsets.fromLTRB(
     spacingMd,

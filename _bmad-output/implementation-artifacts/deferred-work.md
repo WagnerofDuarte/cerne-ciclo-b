@@ -69,3 +69,13 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-6-base-navigation-shell-with-feature-placeholders.md`
   summary: No test asserts that the side-menu `Drawer` is reachable only from `HomeChatPlaceholderScreen` — the three back-arrow placeholder screens (`MeusRegistrosPlaceholderScreen`/`ActionPlansPlaceholderScreen`/`ConfiguracoesPlaceholderScreen`) have no `drawer:`/`Scaffold.drawer` wiring at all, and nothing would fail today if that asymmetry regressed.
   evidence: Intentional per the prototype and this story's own boundaries ("no drawer-within-drawer," side menu is the sole hub reached only from Home) — not a bug today, just an unguarded invariant. A regression test would catch an accidental divergence (e.g. a future story adding a drawer to one of the other three) earlier than manual QA would.
+
+## Deferred from: code review of story-1-6-base-navigation-shell-with-feature-placeholders (2026-11-03)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-6-base-navigation-shell-with-feature-placeholders.md`
+  summary: `_GoRouterRefreshStream` (`lib/core/navigation/app_router.dart`) is constructed inline as `GoRouter`'s `refreshListenable` with no external reference kept anywhere, and its own `dispose()` cancels the `statusStream` subscription with no `_disposed` guard before any in-flight `notifyListeners()`.
+  evidence: Whether go_router 18.1.1 actually calls `.dispose()` on a `refreshListenable` it didn't create itself isn't confirmed from this diff alone — if it doesn't, the subscription could leak; if it does, a `statusStream` emission racing that teardown could in theory throw `ChangeNotifier used after being disposed` in debug builds. No test or production run has surfaced this, and the fix depends on first confirming go_router's actual disposal contract for an externally-supplied `Listenable` — revisit once that's verified rather than guessing at a guard.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-1-6-base-navigation-shell-with-feature-placeholders.md`
+  summary: `ios/Runner/Info.plist`'s portrait-only orientation lock has no `UIRequiresFullScreen` — iPadOS Split View/Slide Over can still resize this fixed-390×844-frame app regardless of the declared orientation restriction.
+  evidence: Not in this story's own stated boundaries (which only ask for the orientation keys), and no device/simulator exists yet (AGENTS.md) to verify the actual iPad behavior either way. Revisit once iPad support is an explicit target or device testing exists.

@@ -378,6 +378,45 @@ void main() {
           expect(find.text('Biometria'), findsOneWidget);
         },
       );
+
+      testWidgets(
+        'tapping "Entrar novamente" twice in quick succession before its '
+        'exit fade settles does not throw and routes to /reauth only once',
+        (tester) async {
+          final fakeSessionRepository = _FakeSessionRepository();
+          addTearDown(fakeSessionRepository.dispose);
+          sl.unregister<SessionRepository>();
+          sl.registerLazySingleton<SessionRepository>(
+            () => fakeSessionRepository,
+          );
+
+          await tester.pumpWidget(const CerneApp());
+          fakeSessionRepository.setStatus(SessionStatus.authenticated);
+          await tester.pumpAndSettle();
+
+          fakeSessionRepository.setStatus(SessionStatus.expired);
+          await tester.pumpAndSettle();
+          expect(find.text('Sessão expirada'), findsOneWidget);
+
+          // `tapAt` the same screen offset twice, with only `pump()` (not
+          // `pumpAndSettle()`) between taps, so the second one lands while
+          // the dialog's own exit fade/teardown is still in flight — the
+          // exact window `_reauthRouteRequested` guards against (code
+          // review, Story 1.6). `tapAt` (rather than re-resolving
+          // `find.text(...)`) tolerates the button no longer being present
+          // by the second tap without failing the test on that alone.
+          final confirmButtonCenter = tester.getCenter(
+            find.text('Entrar novamente'),
+          );
+          await tester.tapAt(confirmButtonCenter);
+          await tester.pump();
+          await tester.tapAt(confirmButtonCenter);
+          await tester.pumpAndSettle();
+
+          expect(tester.takeException(), isNull);
+          expect(find.text('Biometria'), findsOneWidget);
+        },
+      );
     },
   );
 }

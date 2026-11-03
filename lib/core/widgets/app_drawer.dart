@@ -14,8 +14,20 @@ import 'avatar.dart';
 /// deferred-work.md for why). There is no `CONVERSAS`/past-session list
 /// (RF04/RF07 aren't built) — only the static "Novo Chat" action (closes
 /// the drawer, no-op) and the three nav items.
-class AppDrawer extends StatelessWidget {
+class AppDrawer extends StatefulWidget {
   const AppDrawer({super.key});
+
+  @override
+  State<AppDrawer> createState() => _AppDrawerState();
+}
+
+class _AppDrawerState extends State<AppDrawer> {
+  // Guards every action below against a rapid double-tap (on the same
+  // item, or a different one) firing `Navigator.of(context).pop()` twice —
+  // the second call would land after the drawer's own pop already started
+  // closing it, popping the route beneath the drawer instead of being a
+  // no-op (code review, Story 1.6).
+  bool _actionTaken = false;
 
   @override
   Widget build(BuildContext context) {
@@ -55,23 +67,44 @@ class AppDrawer extends StatelessWidget {
               label: 'Novo Chat',
               // No real chat yet (RF04/RF07) — closes the drawer, stays
               // on `/` (I/O matrix: "drawer closes, stays on /").
-              onTap: () => Navigator.of(context).pop(),
+              onTap: () => _closeDrawer(context),
             ),
             const SizedBox(height: DesignTokens.spacingSm),
-            _DrawerNavItem(
-              icon: Icons.menu_book_outlined,
-              label: 'Meus Registros',
-              onTap: () => _navigate(context, AppRoutePaths.meusRegistros),
-            ),
-            _DrawerNavItem(
-              icon: Icons.view_kanban_outlined,
-              label: 'Planos de Ação',
-              onTap: () => _navigate(context, AppRoutePaths.planosDeAcao),
-            ),
-            _DrawerNavItem(
-              icon: Icons.settings_outlined,
-              label: 'Configurações',
-              onTap: () => _navigate(context, AppRoutePaths.configuracoes),
+            // Second drawer block (code review, Story 1.6): the prototype's
+            // own markup groups "Novo Chat" separately from the three
+            // static nav items below, via a `border-top` + `padding-top`
+            // on this section (ground truth: `cerne-prototype.html`'s
+            // `<!-- OVERLAY: Drawer -->` block) — not reproduced until now.
+            Container(
+              padding: DesignTokens.drawerSectionDividerPadding,
+              decoration: const BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: DesignTokens.colorBorder),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _DrawerNavItem(
+                    icon: Icons.menu_book_outlined,
+                    label: 'Meus Registros',
+                    onTap: () =>
+                        _navigate(context, AppRoutePaths.meusRegistros),
+                  ),
+                  _DrawerNavItem(
+                    icon: Icons.view_kanban_outlined,
+                    label: 'Planos de Ação',
+                    onTap: () =>
+                        _navigate(context, AppRoutePaths.planosDeAcao),
+                  ),
+                  _DrawerNavItem(
+                    icon: Icons.settings_outlined,
+                    label: 'Configurações',
+                    onTap: () =>
+                        _navigate(context, AppRoutePaths.configuracoes),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -79,7 +112,19 @@ class AppDrawer extends StatelessWidget {
     );
   }
 
+  void _closeDrawer(BuildContext context) {
+    if (_actionTaken) {
+      return;
+    }
+    _actionTaken = true;
+    Navigator.of(context).pop();
+  }
+
   void _navigate(BuildContext context, String location) {
+    if (_actionTaken) {
+      return;
+    }
+    _actionTaken = true;
     Navigator.of(context).pop();
     context.go(location);
   }

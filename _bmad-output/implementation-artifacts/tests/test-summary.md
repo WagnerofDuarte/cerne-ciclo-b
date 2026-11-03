@@ -188,3 +188,81 @@ reflecting review-round test additions landed since) and
 - Re-run this pass once Story 1.6 lands — it's the next story expected to
   add a composition-root surface worth the same E2E-equivalent proof this
   file's login/signup/session-expiry sections already establish.
+
+---
+
+# Story 1.6 — Base Navigation Shell with Feature Placeholders
+
+## Context
+
+Story 1.6 replaces `main.dart`'s ad hoc `StreamBuilder`/`Navigator` shell
+with the pinned `go_router`, adds the side-menu `Drawer` (the sole
+navigation hub), five placeholder screens (including the static Planos de
+Ação kanban), and the `SessionRepository.markAuthenticated()` fix that
+keeps a fresh login's redirect correct. This is the first story with real
+app-shell UI, so it is also the first to lock portrait-only orientation
+(deferred from Story 1.1).
+
+This section was missing from a prior pass of this document (the "QA
+Verification Pass (2026-11-02)" entry above still says "Story 1.6+ is
+still backlog... out of scope", which went stale the moment this story's
+diff actually landed in the same commit) — added here during code review
+rather than when the story itself was implemented.
+
+## Generated Tests
+
+### Unit (new core/feature code)
+
+- [x] `test/core/navigation/app_router_test.dart` — **new**: the full
+  redirect matrix (boot/auth/authenticated/expired transitions, the
+  `/reauth`-while-`expired` case, and — post-review — the
+  `/reauth`-while-`authenticated` bounce-home case), zero-broken-links
+  across all seven routes.
+- [x] `test/core/navigation/expiry_overlay_host_test.dart` — **new**: the
+  go_router-based rework of Story 1.5's overlay wiring, including the
+  not-yet-mounted-`Navigator` regression case.
+- [x] `test/core/widgets/app_drawer_test.dart` — **new**: nav-item taps,
+  "Novo Chat" no-op, generic header identity.
+- [x] `test/core/navigation/placeholder_screens_test.dart` — **new**: all
+  five placeholder screens, including the kanban's static rendering and
+  the drawer-scrim token wiring.
+- [x] `test/core/design_tokens_test.dart` — **extended**: every new
+  Story 1.6 token (drawer, nav header, kanban) individually asserted.
+- [x] `test/features/auth/data/repositories/session_repository_impl_test.dart`
+  / `test/features/auth/presentation/cubit/auth_cubit_test.dart` —
+  **extended**: `currentStatus`/`markAuthenticated()`, and
+  `AuthCubit.submit()` calling `markAuthenticated()` on success only.
+
+### E2E Tests (composition-root, `test/main_test.dart`)
+
+- [x] `test/main_test.dart` — **rewritten** for `MaterialApp.router`: boot
+  → auth → home, and the Story 1.5 overlay/confirm/re-route flow, now
+  go_router-based.
+- [x] `test/main_test.dart` — **new** (code review): tapping "Entrar
+  novamente" twice in quick succession, before the dialog's exit fade
+  settles, does not throw and routes to `/reauth` only once — regression
+  test for the `_reauthRouteRequested` guard that had none.
+
+## Coverage
+
+- Composition-root E2E scenarios: boot→auth→home ✅, mid-session expiry
+  overlay (go_router-based) ✅, confirm-and-route ✅, double-tap-safe
+  confirm ✅ (added)
+- Core/unit coverage: full redirect matrix including the post-review
+  `/reauth`-while-`authenticated` guard, drawer nav, all five placeholder
+  screens, every new design token.
+- Implemented feature scope (per `sprint-status.yaml`): stories 1.1–1.6 —
+  all covered.
+
+## Verification
+
+- `fvm flutter pub get` — resolved, no conflicts
+- `fvm flutter test` → 264/264 passing
+- `fvm flutter analyze` → 0 issues
+
+## Next Steps
+
+- Epic 2's real biometric/PIN re-auth flow is the next thing to transition
+  `SessionStatus` back out of `expired` — re-home the overlay's one-shot
+  guards' coverage there once that path exists (tracked in
+  `deferred-work.md`).

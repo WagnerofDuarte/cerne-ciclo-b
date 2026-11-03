@@ -1,0 +1,31 @@
+PODS:
+  - ffmpeg_kit_flutter_new_min (7.1.1):
+    - ffmpeg_kit_flutter_new_min/min (= 7.1.1)
+    - Flutter
+  - ffmpeg_kit_flutter_new_min/min (7.1.1):
+    - Flutter
+  - Flutter (1.0.0)
+  - whisper_ggml (1.0.1):
+    - Flutter
+
+DEPENDENCIES:
+  - ffmpeg_kit_flutter_new_min (from `.symlinks/plugins/ffmpeg_kit_flutter_new_min/ios`)
+  - Flutter (from `Flutter`)
+  - whisper_ggml (from `.symlinks/plugins/whisper_ggml/ios`)
+
+EXTERNAL SOURCES:
+  ffmpeg_kit_flutter_new_min:
+    :path: ".symlinks/plugins/ffmpeg_kit_flutter_new_min/ios"
+  Flutter:
+    :path: Flutter
+  whisper_ggml:
+    :path: ".symlinks/plugins/whisper_ggml/ios"
+
+SPEC CHECKSUMS:
+  ffmpeg_kit_flutter_new_min: 85493896be79f45e846b5c9b23a3bf73eb284c4a
+  Flutter: 71a624a5bc0c04062bf19101d501e466baf2fb47
+  whisper_ggml: 1dba862ae7983d1865e32f8729eb33843cc2d520
+
+PODFILE CHECKSUM: decd37170f2ba36fefda016813e28384f760777f
+
+COCOAPODS: 1.17.0

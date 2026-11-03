@@ -84,10 +84,12 @@ GoRouter buildAppRouter({
 /// - status not yet known (`null`) -> `/boot`, unless already there.
 /// - `unauthenticated` -> `/auth`, unless already there.
 /// - `authenticated`/`expired` -> leaves `/boot`/`/auth` for `/`; every
-///   other location (including `/reauth`, reached only by the expiry
-///   overlay's own explicit navigation) is left alone — a mid-session
-///   expiry never navigates away (Story 1.5 behavior preserved), and the
-///   three non-Home destinations stay reachable while `expired`.
+///   other location is left alone *except* `/reauth` while already
+///   `authenticated` (bounced home below — `/reauth` is meant to be
+///   reached only by the expiry overlay's own explicit navigation while
+///   `expired`, code review Story 1.6) — a mid-session expiry never
+///   navigates away (Story 1.5 behavior preserved), and the three
+///   non-Home destinations stay reachable while `expired`.
 ///
 /// AD-14 seam: Epic 2 (RF03) plugs a local `VaultStatus` gate in here,
 /// checked *before* this session check (Cross-Story Dependencies: "vault
@@ -108,6 +110,13 @@ String? _redirect(SessionRepository sessionRepository, GoRouterState state) {
 
   // status is authenticated or expired.
   if (location == AppRoutePaths.boot || location == AppRoutePaths.auth) {
+    return AppRoutePaths.home;
+  }
+  // `/reauth` is a throwaway placeholder standing in for Epic 2's real
+  // reauth flow; it should never be sitting open once the session is back
+  // to fully `authenticated` (code review, Story 1.6).
+  if (location == AppRoutePaths.reauth &&
+      status == SessionStatus.authenticated) {
     return AppRoutePaths.home;
   }
   return null;

@@ -41,7 +41,7 @@ development_status:
   1-3-account-creation-and-login: done
   1-4-silent-session-refresh-persistence: done
   1-5-expired-session-recovery-overlay: done
-  1-6-base-navigation-shell-with-feature-placeholders: review
+  1-6-base-navigation-shell-with-feature-placeholders: done
   epic-1-retrospective: optional
 
   epic-2: backlog
