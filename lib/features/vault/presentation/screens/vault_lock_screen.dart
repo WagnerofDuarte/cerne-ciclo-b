@@ -27,9 +27,21 @@ import '../widgets/pin_keypad.dart';
 /// widget navigates away on that exactly the same way, with no branch for
 /// "which path unlocked it".
 class VaultLockScreen extends StatefulWidget {
-  const VaultLockScreen({required this.vaultRepository, super.key});
+  const VaultLockScreen({
+    required this.vaultRepository,
+    required this.attemptBiometricFirst,
+    super.key,
+  });
 
   final VaultRepository vaultRepository;
+
+  /// Story 2.4 — `AccountSettingsRepository.currentBiometricEnabled`, read
+  /// by `core/navigation/app_router.dart`'s `/vault` builder. `true`
+  /// (including the default before the boot fetch resolves, Design Notes)
+  /// auto-triggers [VaultRepository.authenticate] in [initState] exactly
+  /// as before this story; `false` skips straight to the PIN keypad — PIN
+  /// remains the access method regardless (Boundaries).
+  final bool attemptBiometricFirst;
 
   @override
   State<VaultLockScreen> createState() => _VaultLockScreenState();
@@ -71,7 +83,15 @@ class _VaultLockScreenState extends State<VaultLockScreen> {
   @override
   void initState() {
     super.initState();
-    _attemptAuthenticate();
+    if (widget.attemptBiometricFirst) {
+      _attemptAuthenticate();
+    } else {
+      // Story 2.4 — the preference is already `false` by the time this
+      // screen builds: skip the OS biometric prompt entirely and show the
+      // PIN keypad directly, with no error band (same "pre-failure" look
+      // as tapping "Usar PIN" manually).
+      _showPinKeypad = true;
+    }
   }
 
   Future<void> _attemptAuthenticate() async {
@@ -121,11 +141,46 @@ class _VaultLockScreenState extends State<VaultLockScreen> {
     });
   }
 
+  @override
+  void didUpdateWidget(covariant VaultLockScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Review finding: `attemptBiometricFirst` was only ever consulted
+    // once, in `initState` — defensive future-proofing in case this
+    // already-mounted widget is ever rebuilt with a new value (today,
+    // nothing actually does: `app_router.dart` reads `currentBiometricEnabled`
+    // fresh only when `/vault` is newly built, not while already resident
+    // there — see its own doc comment). If that ever changes, e.g. a boot-
+    // time `fetchBiometricEnabled()` resolving to `false` while `/vault` is
+    // already mounted (with the default `true`) and already auto-triggered
+    // the OS biometric prompt: that in-flight prompt can't be retracted
+    // from here, but the preference can still be honored going forward: if
+    // we're still waiting on it (haven't fallen through to the keypad yet),
+    // switch to it proactively — exactly as if the user had tapped "Usar
+    // PIN" themselves. A `false` -> `true` change is deliberately left
+    // alone: re-triggering biometric out from under a user who's already
+    // on the keypad (whether because it failed or because they chose "Usar
+    // PIN") would be a surprise, not a fix, and PIN remains the access
+    // method regardless either way (Boundaries).
+    if (oldWidget.attemptBiometricFirst &&
+        !widget.attemptBiometricFirst &&
+        !_showPinKeypad) {
+      _useManualPin();
+    }
+  }
+
   Future<void> _submitPin(String pin) async {
     if (_submittingPin) {
       return;
     }
-    setState(() => _submittingPin = true);
+    // Review finding: previously left in place, a stale mismatch/timeout
+    // message from a prior attempt lingered unchanged through this new
+    // attempt, with nothing distinguishing "old error, nothing happening"
+    // from "new attempt in flight" — cleared here so only this attempt's
+    // own outcome (or the keypad's disabled/dimmed state) is visible.
+    setState(() {
+      _submittingPin = true;
+      _errorMessage = null;
+    });
     try {
       final result = await widget.vaultRepository
           .submitPin(pin)

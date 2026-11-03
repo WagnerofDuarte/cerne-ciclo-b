@@ -508,6 +508,128 @@ calls (unchanged boundary from Story 2.1/2.2).
   findings should be folded into that story's own record rather than kept
   as a separate dated pass, to avoid the same "section missing from a
   prior pass" drift the Story 1.6 section above already called out once.
-- Story 2.3 (fixed 5-minute idle re-authentication timeout) is still the
-  next consumer of this lock-screen surface — no new gap identified here
-  for it to inherit.
+- Superseded by Story 2.3 below: Story 2.2's uncommitted changes landed in
+  commit `81d7509`, bundled alongside Story 2.3's own idle-timeout work
+  (code review finding — see spec-2-3's own Review Findings and Spec
+  Change Log). Story 2.3 is no longer "next" — it's covered in its own
+  section immediately below.
+
+---
+
+# Story 2.3 — Fixed 5-Minute Idle Re-Authentication Timeout
+
+## Context
+
+Story 2.3 adds idle-based re-authentication: `VaultRepositoryImpl` observes
+app-lifecycle transitions directly (`WidgetsBindingObserver`), records a
+timestamp on `AppLifecycleState.paused`, and on `resumed` re-emits
+`VaultStatus.locked` if `vaultIdleTimeout` (a fixed 5-minute,
+domain-owned constant) has elapsed while the vault was `unlocked`. The
+code-review pass on this diff fixed six issues found in that logic and
+its neighbors (including two in the Story 2.2 surfaces bundled into this
+same commit — see spec-2-3's own Review Findings) — see "Generated
+Tests" below for what was added for each.
+
+## Generated Tests
+
+### Unit (`VaultRepositoryImpl`)
+
+- [x] `test/features/vault/data/repositories/vault_repository_impl_test.dart`
+  — **new** `didChangeAppLifecycleState() — idle re-authentication
+  (spec-2-3)` group: all four frozen I/O-matrix rows (backgrounded < 5min
+  stays unlocked, >= 5min re-locks, already-locked has no duplicate
+  emission, bare `resumed` with no prior `paused` no-ops) via an
+  injectable fake clock; a real `WidgetsBinding`-dispatched case proving
+  the constructor's `addObserver(this)` wiring is actually in effect;
+  `inactive`/`hidden` confirmed as no-ops; a tight boundary case one
+  second short of the threshold.
+  — **added by the code-review pass**: a case proving a mid-background
+  unlock (e.g. a persisted biometric call resolving while still `paused`)
+  resets the idle clock rather than immediately re-locking on the next
+  `resume`; a case proving a second `paused` before any `resumed` keeps
+  the earliest timestamp instead of resetting it; a case proving a
+  superseded (stale) `submitPin` call — one whose UI-level timeout already
+  fired and was retried — never mutates storage or emits `unlocked`.
+
+### Widget (`PinKeypad`, `VaultLockScreen`)
+
+- [x] `test/features/vault/presentation/widgets/pin_keypad_test.dart` —
+  **added by the code-review pass**: a case proving `enabled: false`
+  buttons report `Semantics(enabled: false)` and are visually dimmed
+  (`Opacity`), and report `enabled: true`/full opacity again once
+  re-enabled — closes the gap where the `enabled` flag (added in Story
+  2.2's review pass) had no visual or semantic cue at all.
+- [x] `test/features/vault/presentation/screens/vault_lock_screen_test.dart`
+  — **added by the code-review pass**: a case proving a fresh PIN
+  attempt immediately clears the previous mismatch error, rather than
+  leaving it on screen unchanged through the new attempt.
+
+## Coverage
+
+- Idle re-lock I/O matrix (all four frozen rows) ✅, real-dispatch wiring
+  proof ✅, `inactive`/`hidden` no-op ✅, tight threshold boundary ✅ (all
+  from the story's own implementation pass)
+- Mid-background unlock resets the idle clock ✅, double-`paused` keeps
+  the earliest timestamp ✅, superseded `submitPin` call is a safe no-op
+  ✅, `PinKeypad.enabled` has a visual/semantic disabled cue ✅, stale
+  error message is cleared on a fresh attempt ✅ (all added by the
+  code-review pass)
+- Implemented feature scope (per `sprint-status.yaml`): stories 1.1–1.6,
+  2.1, 2.2, and 2.3 — all covered.
+
+## Verification
+
+- `fvm flutter test` → all passing (pre-existing suite + this pass's new
+  idle-timeout and code-review cases)
+- `fvm flutter analyze` → 0 issues
+
+## Next Steps
+
+- Story 2.4 (biometric preference persistence) is the next `backlog`
+  story in Epic 2.
+
+---
+
+# QA Verification Pass (2026-11-03, second)
+
+## Context
+
+Re-ran this skill against the current working tree. The working tree
+still carries the uncommitted Story 2.3 code-review round described in
+this file's own section immediately above (the `addObserver` →
+`StateError` guard, `_backgroundedAt` reset-on-unlock, `??=` on `paused`,
+the `submitPin` generation counter, `_errorMessage` cleared on a fresh
+attempt, `PinKeypad`'s `Opacity`/`Semantics.enabled` treatment) — verified
+by diff that every one of those changes has a matching test already in
+place (`vault_repository_impl_test.dart`'s "superseded (stale) call",
+"resets the idle clock", earliest-timestamp-kept cases;
+`vault_lock_screen_test.dart`'s stale-error-cleared and timeout groups;
+`pin_keypad_test.dart`'s `enabled: false` opacity/semantics case).
+
+The one new-code path with no test, and left that way: the constructor's
+`try`/`on FlutterError catch` around `WidgetsBinding.instance.addObserver(this)`
+that rethrows as a named `StateError`. `TestWidgetsFlutterBinding
+.ensureInitialized()` runs once per test process and a real binding is
+already live by the time any test's `VaultRepositoryImpl` is constructed,
+so there is no way to reach the `catch` branch from this suite — forcing
+it would require faking the static `WidgetsBinding.instance` getter
+itself, not a seam this codebase exposes. Treated as an unreachable-in-test
+defensive guard (same category as other framework-guarantee checks this
+project doesn't add tests for), not a gap.
+
+## Result
+
+No new API or E2E test was generated — no reachable gap was found.
+
+## Verification
+
+- `fvm flutter pub get` — resolved, no conflicts
+- `fvm flutter test` → 321/321 passing
+- `fvm flutter analyze` → 0 issues
+
+## Next Steps
+
+- Commit the Story 2.3 code-review round (currently uncommitted) so its
+  test coverage stops being re-verified every pass.
+- Story 2.4 (biometric preference persistence) is the next `backlog`
+  story in Epic 2.

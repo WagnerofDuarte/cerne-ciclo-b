@@ -3,6 +3,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:get_it/get_it.dart';
 
+import '../../features/account/account_injection.dart';
 import '../../features/auth/auth_injection.dart';
 import '../../features/vault/vault_injection.dart';
 import '../network/access_token_provider.dart';
@@ -79,6 +80,7 @@ Future<void> setupCoreDependencies() async {
 
   registerAuthFeature();
   registerVaultFeature();
+  registerAccountFeature();
 }
 
 /// Test/teardown helper — resets the single `get_it` instance so each test

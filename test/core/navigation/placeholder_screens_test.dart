@@ -74,7 +74,7 @@ void main() {
     );
   });
 
-  group('MeusRegistrosPlaceholderScreen / ConfiguracoesPlaceholderScreen', () {
+  group('MeusRegistrosPlaceholderScreen', () {
     testWidgets(
       'Meus Registros: shows a back-arrow header titled "Meus Registros", '
       'never a broken/unfinished look',
@@ -107,26 +107,6 @@ void main() {
 
         expect(router.state.uri.toString(), '/');
         expect(find.text('Home'), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      'Configurações: shows a back-arrow header titled "Configurações", '
-      'and its back arrow also targets /',
-      (tester) async {
-        final router = _routerFrom(
-          '/configuracoes',
-          const ConfiguracoesPlaceholderScreen(),
-        );
-        addTearDown(router.dispose);
-        await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-
-        expect(find.text('Configurações'), findsOneWidget);
-
-        await tester.tap(find.byIcon(Icons.chevron_left));
-        await tester.pumpAndSettle();
-
-        expect(router.state.uri.toString(), '/');
       },
     );
   });

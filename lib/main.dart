@@ -8,6 +8,7 @@ import 'core/di/injection_container.dart';
 import 'core/failure/failure.dart';
 import 'core/navigation/app_router.dart';
 import 'core/navigation/expiry_overlay_host.dart';
+import 'features/account/domain/repositories/account_settings_repository.dart';
 import 'features/auth/domain/repositories/session_repository.dart';
 import 'features/vault/domain/repositories/vault_repository.dart';
 
@@ -48,6 +49,7 @@ class CerneApp extends StatefulWidget {
 class _CerneAppState extends State<CerneApp> {
   late final SessionRepository _sessionRepository;
   late final VaultRepository _vaultRepository;
+  late final AccountSettingsRepository _accountSettingsRepository;
   late final GoRouter _router;
 
   // Created here (not left for `GoRouter` to generate internally) and
@@ -64,9 +66,11 @@ class _CerneAppState extends State<CerneApp> {
     super.initState();
     _sessionRepository = sl<SessionRepository>();
     _vaultRepository = sl<VaultRepository>();
+    _accountSettingsRepository = sl<AccountSettingsRepository>();
     _router = buildAppRouter(
       vaultRepository: _vaultRepository,
       sessionRepository: _sessionRepository,
+      accountSettingsRepository: _accountSettingsRepository,
       navigatorKey: _navigatorKey,
     );
     // Fire-and-forget: the outcome reaches the UI through
@@ -81,6 +85,18 @@ class _CerneAppState extends State<CerneApp> {
     // an unhandled zone exception.
     unawaited(
       _sessionRepository.restoreSession().catchError(_asUnauthenticated),
+    );
+    // Story 2.4 — boot-time read of `biometricEnabled`, same
+    // fire-and-forget rationale as `restoreSession()` above: the outcome
+    // reaches `VaultLockScreen` through `AccountSettingsRepository.
+    // currentBiometricEnabled`/`biometricEnabledStream` (which the router's
+    // `refreshListenable` already watches), never through this call's
+    // return value, and a failure leaves `currentBiometricEnabled`
+    // unchanged (I/O matrix) rather than surfacing anywhere.
+    unawaited(
+      _accountSettingsRepository.fetchBiometricEnabled().catchError(
+        _asUnchangedPreference,
+      ),
     );
   }
 
@@ -99,6 +115,18 @@ class _CerneAppState extends State<CerneApp> {
     StackTrace stackTrace,
   ) {
     debugPrint('CerneApp: restoreSession() threw unexpectedly ($error)');
+    return left(Failure.malformedResponse(message: error.toString()));
+  }
+
+  // Same rationale as `_asUnauthenticated` above, for
+  // `fetchBiometricEnabled()`'s own "never throws" contract.
+  static Either<Failure, Unit> _asUnchangedPreference(
+    Object error,
+    StackTrace stackTrace,
+  ) {
+    debugPrint(
+      'CerneApp: fetchBiometricEnabled() threw unexpectedly ($error)',
+    );
     return left(Failure.malformedResponse(message: error.toString()));
   }
 

@@ -7,6 +7,8 @@ import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/network/api_client.dart';
 import 'package:cerne/core/network/header_interceptor.dart';
 import 'package:cerne/core/network/retry_interceptor.dart';
+import 'package:cerne/features/account/domain/repositories/account_settings_repository.dart';
+import 'package:cerne/features/account/presentation/cubit/account_settings_cubit.dart';
 import 'package:cerne/features/auth/data/datasources/auth_remote_data_source.dart';
 import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
 import 'package:cerne/features/auth/presentation/cubit/auth_cubit.dart';
@@ -116,6 +118,22 @@ void main() {
       // reasoning that already applies to AuthCubit's forced resolution
       // above).
       expect(() => sl<VaultRepository>(), returnsNormally);
+    },
+  );
+
+  test(
+    'setupCoreDependencies also wires the account feature (spec-2-4) — a '
+    'broken registration/dependency cycle must surface here, not only at '
+    'real app launch (no device/CI exists yet to catch that otherwise)',
+    () {
+      expect(sl.isRegistered<AccountSettingsRepository>(), isTrue);
+      expect(sl.isRegistered<AccountSettingsCubit>(), isTrue);
+
+      // Actually resolves the whole chain (AccountSettingsCubit ->
+      // AccountSettingsRepository -> AccountRemoteDataSource -> ApiClient/
+      // Dio) rather than just checking the registration exists — same
+      // rationale as `AuthCubit`'s own forced resolution above.
+      expect(() => sl<AccountSettingsCubit>(), returnsNormally);
     },
   );
 

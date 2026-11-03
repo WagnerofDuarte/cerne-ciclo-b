@@ -101,9 +101,15 @@ class _FakeVaultRepository implements VaultRepository {
   Future<void> dispose() => _controller.close();
 }
 
-Widget _wrap(VaultRepository vaultRepository) {
+Widget _wrap(
+  VaultRepository vaultRepository, {
+  bool attemptBiometricFirst = true,
+}) {
   return MaterialApp(
-    home: VaultLockScreen(vaultRepository: vaultRepository),
+    home: VaultLockScreen(
+      vaultRepository: vaultRepository,
+      attemptBiometricFirst: attemptBiometricFirst,
+    ),
   );
 }
 
@@ -141,6 +147,124 @@ void main() {
       expect(fakeVaultRepository.authenticateCallCount, 1);
     },
   );
+
+  group('attemptBiometricFirst (spec-2-4)', () {
+    testWidgets(
+      'attemptBiometricFirst: false -> never calls authenticate(), shows '
+      'the PIN keypad directly with no error band (PIN remains the access '
+      'method regardless)',
+      (tester) async {
+        await tester.pumpWidget(
+          _wrap(fakeVaultRepository, attemptBiometricFirst: false),
+        );
+        await tester.pumpAndSettle();
+
+        expect(fakeVaultRepository.authenticateCallCount, 0);
+        expect(find.text('Digite seu PIN'), findsOneWidget);
+        expect(
+          find.text('Não foi possível reconhecer — digite seu PIN'),
+          findsNothing,
+        );
+      },
+    );
+
+    testWidgets(
+      'attemptBiometricFirst: true -> calls authenticate() exactly once, '
+      'unchanged from the default behavior',
+      (tester) async {
+        await tester.pumpWidget(
+          _wrap(fakeVaultRepository, attemptBiometricFirst: true),
+        );
+        await tester.pumpAndSettle();
+
+        expect(fakeVaultRepository.authenticateCallCount, 1);
+      },
+    );
+
+    testWidgets(
+      'attemptBiometricFirst: false still lets submitPin() unlock the '
+      'vault normally — only the initial auto-prompt is skipped',
+      (tester) async {
+        await tester.pumpWidget(
+          _wrap(fakeVaultRepository, attemptBiometricFirst: false),
+        );
+        await tester.pumpAndSettle();
+
+        await _enterPin(tester, '1234');
+        await tester.pumpAndSettle();
+
+        expect(fakeVaultRepository.storedPin, '1234');
+        expect(fakeVaultRepository.currentStatus, VaultStatus.unlocked);
+      },
+    );
+
+    testWidgets(
+      'a rebuild changing attemptBiometricFirst from true to false while '
+      'the initial authenticate() attempt is still pending switches to the '
+      'PIN keypad proactively (review finding: previously only consulted '
+      'once, in initState, and silently ignored on any later rebuild)',
+      (tester) async {
+        fakeVaultRepository.authenticateGate = Completer<void>();
+
+        await tester.pumpWidget(
+          _wrap(fakeVaultRepository, attemptBiometricFirst: true),
+        );
+        await tester.pump();
+
+        expect(fakeVaultRepository.authenticateCallCount, 1);
+        expect(find.text('Cerne bloqueado'), findsOneWidget);
+        expect(find.text('Digite seu PIN'), findsNothing);
+
+        // Same widget type, no key — Flutter calls didUpdateWidget on the
+        // existing State rather than remounting it, exactly as
+        // `app_router.dart`'s refreshListenable-driven rebuild would.
+        await tester.pumpWidget(
+          _wrap(fakeVaultRepository, attemptBiometricFirst: false),
+        );
+        await tester.pump();
+
+        expect(find.text('Digite seu PIN'), findsOneWidget);
+        expect(
+          find.text('Não foi possível reconhecer — digite seu PIN'),
+          findsNothing,
+        );
+        // The pending attempt is still only the one from initState — the
+        // rebuild itself must never trigger a second authenticate() call.
+        expect(fakeVaultRepository.authenticateCallCount, 1);
+
+        fakeVaultRepository.authenticateGate!.complete();
+        await tester.pumpAndSettle();
+
+        // The now-superseded attempt's failure must not clobber the
+        // keypad the rebuild already switched to.
+        expect(find.text('Digite seu PIN'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a rebuild changing attemptBiometricFirst from false to true while '
+      'already on the PIN keypad does not retroactively trigger '
+      'authenticate() — re-prompting out from under a user already typing '
+      'a PIN would be a surprise, not a fix',
+      (tester) async {
+        await tester.pumpWidget(
+          _wrap(fakeVaultRepository, attemptBiometricFirst: false),
+        );
+        await tester.pumpAndSettle();
+
+        expect(fakeVaultRepository.authenticateCallCount, 0);
+        expect(find.text('Digite seu PIN'), findsOneWidget);
+
+        await tester.pumpWidget(
+          _wrap(fakeVaultRepository, attemptBiometricFirst: true),
+        );
+        await tester.pumpAndSettle();
+
+        expect(fakeVaultRepository.authenticateCallCount, 0);
+        expect(find.text('Digite seu PIN'), findsOneWidget);
+      },
+    );
+  });
 
   testWidgets(
     'while authenticate() is still pending, the biometric copy is shown '
@@ -315,6 +439,34 @@ void main() {
 
         expect(fakeVaultRepository.currentStatus, VaultStatus.unlocked);
         expect(fakeVaultRepository.submitPinCallCount, 2);
+      },
+    );
+
+    testWidgets(
+      'a fresh attempt immediately clears the previous mismatch error — '
+      "it doesn't linger, unchanged, while the new attempt is still "
+      'pending (review finding)',
+      (tester) async {
+        fakeVaultRepository.storedPin = '1234';
+
+        await tester.pumpWidget(_wrap(fakeVaultRepository));
+        await tester.pumpAndSettle();
+
+        await _enterPin(tester, '0000');
+        await tester.pumpAndSettle();
+        expect(find.text('PIN incorreto. Tente novamente.'), findsOneWidget);
+
+        fakeVaultRepository.submitPinGate = Completer<void>();
+        await _enterPin(tester, '1234');
+
+        // The new attempt is still pending (gated), but the stale error
+        // from the previous attempt must already be gone, not lingering
+        // unchanged through this attempt.
+        expect(find.text('PIN incorreto. Tente novamente.'), findsNothing);
+
+        fakeVaultRepository.submitPinGate!.complete();
+        await tester.pumpAndSettle();
+        expect(fakeVaultRepository.currentStatus, VaultStatus.unlocked);
       },
     );
 

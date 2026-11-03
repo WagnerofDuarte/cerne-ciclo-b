@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -348,6 +350,60 @@ void main() {
       expect(repository.currentStatus, VaultStatus.locked);
       expect(result.isLeft(), isTrue);
     });
+
+    test('a superseded (stale) call -- one whose own UI-level timeout '
+        'already fired and was retried -- never writes its PIN or emits '
+        'unlocked once it finally resolves (review finding: the UI '
+        "timeout only stops waiting, it doesn't cancel this call)", () async {
+      final firstRead = Completer<String?>();
+      final secondRead = Completer<String?>();
+      final pendingReads = [firstRead, secondRead];
+      when(
+        () => mockSecureStorage.read(key: any(named: 'key')),
+      ).thenAnswer((_) => pendingReads.removeAt(0).future);
+      when(
+        () => mockSecureStorage.write(
+          key: any(named: 'key'),
+          value: any(named: 'value'),
+        ),
+      ).thenAnswer((_) async {});
+
+      final emitted = <VaultStatus>[];
+      final subscription = repository.statusStream.listen(emitted.add);
+      await Future<void>.delayed(Duration.zero);
+      emitted.clear();
+
+      // The first call's `read()` is still pending (simulating a hang)
+      // when the caller retries with a second call.
+      final firstResultFuture = repository.submitPin('1111');
+      final secondResultFuture = repository.submitPin('2222');
+
+      // The retry's own read resolves first and completes normally.
+      secondRead.complete(null);
+      final secondResult = await secondResultFuture;
+      await Future<void>.delayed(Duration.zero);
+      expect(secondResult.isRight(), isTrue);
+      verify(
+        () => mockSecureStorage.write(key: 'vault_pin', value: '2222'),
+      ).called(1);
+      expect(repository.currentStatus, VaultStatus.unlocked);
+      expect(emitted, [VaultStatus.unlocked]);
+      emitted.clear();
+
+      // The original (now superseded) call finally resolves -- must be a
+      // no-op: no write with the stale PIN, no re-emission.
+      firstRead.complete(null);
+      final firstResult = await firstResultFuture;
+      await Future<void>.delayed(Duration.zero);
+      await subscription.cancel();
+
+      expect(firstResult.isLeft(), isTrue);
+      verifyNever(
+        () => mockSecureStorage.write(key: 'vault_pin', value: '1111'),
+      );
+      expect(emitted, isEmpty);
+      expect(repository.currentStatus, VaultStatus.unlocked);
+    });
   });
 
   group('dispose()', () {
@@ -390,6 +446,15 @@ void main() {
         secureStorage: mockSecureStorage,
         now: () => currentTime,
       );
+      // Review finding: the outer-level `repository` (built in the
+      // top-level `setUp` above) also registers itself as a
+      // WidgetsBindingObserver on this same shared
+      // TestWidgetsFlutterBinding.instance, but no test in this group uses
+      // it — disposed immediately so only `idleRepository` receives this
+      // group's lifecycle dispatches, instead of both silently. The
+      // top-level `tearDown`'s own `repository.dispose()` call afterward is
+      // then a safe no-op repeat.
+      repository.dispose();
     });
 
     // Same observer-leak rationale as the top-level tearDown above — this
@@ -530,6 +595,61 @@ void main() {
       currentTime = currentTime.add(const Duration(minutes: 10));
       idleRepository.didChangeAppLifecycleState(AppLifecycleState.inactive);
       idleRepository.didChangeAppLifecycleState(AppLifecycleState.hidden);
+      await Future<void>.delayed(Duration.zero);
+      await subscription.cancel();
+
+      expect(emitted, isEmpty);
+      expect(idleRepository.currentStatus, VaultStatus.unlocked);
+    });
+
+    test('a second paused fires before any resumed -> keeps the earliest '
+        'timestamp rather than resetting it, so elapsed is still measured '
+        'from the first paused (review finding)', () async {
+      await unlockRepository();
+
+      final emitted = <VaultStatus>[];
+      final subscription = idleRepository.statusStream.listen(emitted.add);
+      await Future<void>.delayed(Duration.zero);
+      emitted.clear();
+
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.paused);
+      currentTime = currentTime.add(const Duration(minutes: 4));
+      // A second `paused` fires without an intervening `resumed` (e.g. a
+      // lifecycle quirk) -- must not reset the clock to this later time.
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.paused);
+      currentTime = currentTime.add(const Duration(minutes: 1));
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.resumed);
+      await Future<void>.delayed(Duration.zero);
+      await subscription.cancel();
+
+      // Total elapsed since the FIRST paused is 5 minutes -- must re-lock.
+      // (Elapsed from the second paused alone would only be 1 minute.)
+      expect(emitted, [VaultStatus.locked]);
+      expect(idleRepository.currentStatus, VaultStatus.locked);
+    });
+
+    test('authenticate() succeeds while still backgrounded (a persisted '
+        'call resolving mid-background) resets the idle clock -> resumed '
+        'afterward does not immediately re-lock, even past the threshold '
+        '(review finding)', () async {
+      // Starts locked -- unlocks below while already `paused`, simulating
+      // persistAcrossBackgrounding: true resolving during a long call.
+      expect(idleRepository.currentStatus, VaultStatus.locked);
+
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.paused);
+      currentTime = currentTime.add(const Duration(minutes: 3));
+      await unlockRepository();
+
+      final emitted = <VaultStatus>[];
+      final subscription = idleRepository.statusStream.listen(emitted.add);
+      await Future<void>.delayed(Duration.zero);
+      emitted.clear();
+
+      // Total elapsed since the ORIGINAL paused is now 6 minutes (past the
+      // threshold), but the mid-background unlock above should have reset
+      // the clock -- no re-lock expected.
+      currentTime = currentTime.add(const Duration(minutes: 3));
+      idleRepository.didChangeAppLifecycleState(AppLifecycleState.resumed);
       await Future<void>.delayed(Duration.zero);
       await subscription.cancel();
 

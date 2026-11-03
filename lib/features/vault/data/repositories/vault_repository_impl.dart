@@ -60,7 +60,21 @@ class VaultRepositoryImpl
     // already have run before this constructor executes — true today
     // because `get_it` constructs this lazily, well after `main()`'s own
     // binding initialization.
-    WidgetsBinding.instance.addObserver(this);
+    //
+    // Review finding: `WidgetsBinding.instance` itself throws an opaque
+    // Flutter-internal assertion if no binding exists yet — caught here and
+    // rethrown with a message that names the actual root cause, so any
+    // future call site that breaks this ordering fails clearly instead of
+    // opaquely.
+    try {
+      WidgetsBinding.instance.addObserver(this);
+    } on FlutterError catch (error) {
+      throw StateError(
+        'VaultRepositoryImpl requires WidgetsFlutterBinding.ensureInitialized() '
+        '(or TestWidgetsFlutterBinding.ensureInitialized() in tests) to run '
+        'before construction. Original error: $error',
+      );
+    }
   }
 
   static const _pinStorageKey = 'vault_pin';
@@ -70,6 +84,16 @@ class VaultRepositoryImpl
   final DateTime Function() _now;
   final StreamController<VaultStatus> _statusController =
       StreamController<VaultStatus>.broadcast();
+
+  /// Incremented at the start of every [submitPin] call. Review finding:
+  /// the UI's own `.timeout()` only stops it from *waiting* — the call
+  /// here keeps running — so a user-triggered retry after that UI timeout
+  /// could otherwise race a still-in-flight earlier call against the same
+  /// storage key, or let its stale result emit [VaultStatus.unlocked]
+  /// behind the newer attempt's back. A call whose captured generation no
+  /// longer matches this field by the time its [_secureStorage.read]
+  /// resolves is superseded and must not mutate storage or emit.
+  int _submitPinGeneration = 0;
 
   /// Set on `AppLifecycleState.paused`, read and cleared on
   /// `AppLifecycleState.resumed` (Boundaries: `inactive`/`hidden` are not
@@ -112,6 +136,16 @@ class VaultRepositoryImpl
     if (_statusController.isClosed) {
       return;
     }
+    if (status == VaultStatus.unlocked) {
+      // Review finding: without this, a biometric/PIN call that resolves
+      // while the app is still backgrounded (persistAcrossBackgrounding:
+      // true covers exactly this) leaves the *original* `_backgroundedAt`
+      // in place; if `resumed` then arrives >= 5 minutes after that
+      // original timestamp, the idle check below immediately re-locks the
+      // vault the instant it was unlocked. Any unlock always starts the
+      // idle clock fresh instead.
+      _backgroundedAt = null;
+    }
     _lastStatus = status;
     _statusController.add(status);
   }
@@ -131,7 +165,11 @@ class VaultRepositoryImpl
     // `inactive`/`hidden` are intentionally ignored (Boundaries) — they
     // don't bound the real background/foreground transition on their own.
     if (state == AppLifecycleState.paused) {
-      _backgroundedAt = _now();
+      // Review finding: `??=` (not `=`) — keeps the *earliest* timestamp if
+      // `paused` ever fires twice before a `resumed` consumes it, so a
+      // lifecycle quirk can't reset the idle clock to a later start and
+      // undercount real elapsed background time.
+      _backgroundedAt ??= _now();
       return;
     }
     if (state == AppLifecycleState.resumed) {
@@ -189,8 +227,20 @@ class VaultRepositoryImpl
 
   @override
   Future<Either<Failure, Unit>> submitPin(String pin) async {
+    final generation = ++_submitPinGeneration;
     try {
       final storedPin = await _secureStorage.read(key: _pinStorageKey);
+      if (generation != _submitPinGeneration) {
+        // A newer `submitPin` call started while this one was still
+        // awaiting `read` (e.g. the caller's own UI timed out and the user
+        // retried) — never let this superseded attempt write a possibly
+        // stale PIN or emit `unlocked` behind the newer attempt's back.
+        return left(
+          const Failure.malformedResponse(
+            message: 'Superseded by a newer PIN attempt',
+          ),
+        );
+      }
       // No PIN-creation screen exists anywhere in `docs/input/` (Design
       // Notes) — the first ever `submitPin` call sets the stored PIN
       // instead of comparing against one.

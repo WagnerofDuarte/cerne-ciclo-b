@@ -4,6 +4,9 @@ import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
 import '../di/injection_container.dart';
+import '../../features/account/domain/repositories/account_settings_repository.dart';
+import '../../features/account/presentation/cubit/account_settings_cubit.dart';
+import '../../features/account/presentation/screens/account_settings_screen.dart';
 import '../../features/auth/domain/entities/session_status.dart';
 import '../../features/auth/domain/repositories/session_repository.dart';
 import '../../features/auth/presentation/cubit/auth_cubit.dart';
@@ -31,10 +34,32 @@ abstract final class AppRoutePaths {
 
 /// The epic's ONE `GoRouter`/`redirect` (Boundaries: "never a second
 /// competing `redirect`") — composes [VaultRepository.currentStatus] first,
-/// then [SessionRepository.currentStatus] (AD-14). Both repositories are
-/// taken as parameters (rather than this file reaching into `sl` itself)
-/// purely so a test can pass fakes/mocks directly, without touching the
-/// global DI container.
+/// then [SessionRepository.currentStatus] (AD-14). All three repositories
+/// are taken as parameters (rather than this file reaching into `sl`
+/// itself) purely so a test can pass fakes/mocks directly, without
+/// touching the global DI container; `AccountSettingsRepository` (Story
+/// 2.4) plays no part in `_redirect` and needs no `refreshListenable` entry
+/// of its own — `currentBiometricEnabled` is read synchronously at
+/// `/vault`'s own build time below, same convention `_redirect` already
+/// uses for `VaultStatus`/`SessionStatus`, so every fresh navigation into
+/// `/vault` (triggered by those two streams, as already happens today)
+/// already picks up the latest value correctly. (Review finding: a
+/// `biometricEnabledStream` entry was tried here to also cover a value
+/// changing while already resident at `/vault`, but go_router 18.1.1's
+/// `GoRouterDelegate.setNewRoutePath` short-circuits whenever the matched
+/// `RouteMatchList` is unchanged — which it always is here, since
+/// `_redirect` stays at `/vault` before and after — so the route's
+/// `builder` is never actually re-invoked that way; removed as dead code
+/// rather than kept as a misleading no-op. That's a one-time, benign gap —
+/// at most one extra biometric prompt on a slow-network cold boot, never a
+/// security or dead-end issue, since PIN fallback is untouched and there's
+/// no way to interrupt an in-flight native biometric dialog regardless —
+/// which the frozen spec's I/O matrix never promised to cover.
+/// `VaultLockScreen.didUpdateWidget` still defensively honors a changed
+/// `attemptBiometricFirst` if the widget is ever rebuilt by some other
+/// means.) The Configurações screen gets its own reactivity to this value
+/// directly from `AccountSettingsCubit`'s independent subscription to
+/// `biometricEnabledStream` — unrelated to routing.
 ///
 /// [navigatorKey] is accepted explicitly (rather than letting `GoRouter`
 /// generate its own internally) so the caller — `main.dart`'s
@@ -44,6 +69,7 @@ abstract final class AppRoutePaths {
 GoRouter buildAppRouter({
   required VaultRepository vaultRepository,
   required SessionRepository sessionRepository,
+  required AccountSettingsRepository accountSettingsRepository,
   required GlobalKey<NavigatorState> navigatorKey,
 }) {
   return GoRouter(
@@ -58,8 +84,16 @@ GoRouter buildAppRouter({
     routes: [
       GoRoute(
         path: AppRoutePaths.vaultLock,
-        builder: (context, state) =>
-            VaultLockScreen(vaultRepository: vaultRepository),
+        builder: (context, state) => VaultLockScreen(
+          vaultRepository: vaultRepository,
+          // Story 2.4 — read synchronously, same sync-getter convention
+          // `_redirect` already uses for `VaultStatus`/`SessionStatus`
+          // below: `true` (the default before the boot fetch resolves)
+          // attempts biometric first, `false` skips straight to the PIN
+          // keypad (Boundaries).
+          attemptBiometricFirst:
+              accountSettingsRepository.currentBiometricEnabled,
+        ),
       ),
       GoRoute(
         path: AppRoutePaths.boot,
@@ -90,7 +124,8 @@ GoRouter buildAppRouter({
       ),
       GoRoute(
         path: AppRoutePaths.configuracoes,
-        builder: (context, state) => const ConfiguracoesPlaceholderScreen(),
+        builder: (context, state) =>
+            AccountSettingsScreen(cubit: sl<AccountSettingsCubit>()),
       ),
     ],
   );

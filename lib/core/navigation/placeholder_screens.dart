@@ -1,11 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 
 import '../design_tokens.dart';
 import '../widgets/app_drawer.dart';
-import 'app_router.dart';
+import '../widgets/back_arrow_header.dart';
 
 /// Shown while `SessionRepository.statusStream` has no data yet. Moved
 /// verbatim from `main.dart`'s old `_BootLoadingScreen` (Story 1.4):
@@ -131,9 +130,11 @@ class HomeChatPlaceholderScreen extends StatelessWidget {
 }
 
 /// Tela 4 — Meus Registros. RF05/RF06 aren't built yet — shares
-/// [_BackArrowHeader]/[_FeaturePlaceholderBody] with
-/// [ConfiguracoesPlaceholderScreen] (Code Map: "shared back-arrow-header
-/// placeholder body").
+/// [BackArrowHeader]/[_FeaturePlaceholderBody] with
+/// [ActionPlansPlaceholderScreen]. Story 2.4 replaced the former
+/// `ConfiguracoesPlaceholderScreen` (which also shared this pair) with the
+/// real `AccountSettingsScreen` (`features/account/presentation/screens/
+/// account_settings_screen.dart`).
 class MeusRegistrosPlaceholderScreen extends StatelessWidget {
   const MeusRegistrosPlaceholderScreen({super.key});
 
@@ -143,41 +144,13 @@ class MeusRegistrosPlaceholderScreen extends StatelessWidget {
       backgroundColor: DesignTokens.colorSurfaceBg,
       body: Column(
         children: [
-          _BackArrowHeader(title: 'Meus Registros'),
+          BackArrowHeader(title: 'Meus Registros'),
           Expanded(
             child: _FeaturePlaceholderBody(
               icon: Icons.menu_book_outlined,
               headline: 'Seus registros chegam em breve',
               message:
                   'Em breve seus registros de texto, áudio e foto vão '
-                  'aparecer aqui.',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Tela 6 — Configurações. Epic 8 isn't built yet — shares
-/// [_BackArrowHeader]/[_FeaturePlaceholderBody] with
-/// [MeusRegistrosPlaceholderScreen].
-class ConfiguracoesPlaceholderScreen extends StatelessWidget {
-  const ConfiguracoesPlaceholderScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: DesignTokens.colorSurfaceBg,
-      body: Column(
-        children: [
-          _BackArrowHeader(title: 'Configurações'),
-          Expanded(
-            child: _FeaturePlaceholderBody(
-              icon: Icons.settings_outlined,
-              headline: 'Suas configurações chegam em breve',
-              message:
-                  'Em breve seu perfil, evolução e preferências vão '
                   'aparecer aqui.',
             ),
           ),
@@ -218,7 +191,7 @@ class ActionPlansPlaceholderScreen extends StatelessWidget {
       backgroundColor: DesignTokens.colorSurfaceBg,
       body: Column(
         children: [
-          const _BackArrowHeader(title: 'Planos de Ação'),
+          const BackArrowHeader(title: 'Planos de Ação'),
           Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -241,45 +214,7 @@ class ActionPlansPlaceholderScreen extends StatelessWidget {
   }
 }
 
-/// Shared back-arrow header (Meus Registros/Planos de Ação/Configurações) —
-/// the back arrow always targets `/` (Boundaries: "matches prototype's
-/// `goHome` on all three").
-class _BackArrowHeader extends StatelessWidget {
-  const _BackArrowHeader({required this.title});
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: DesignTokens.colorSurfaceBg,
-      padding: DesignTokens.navHeaderPadding,
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => context.go(AppRoutePaths.home),
-            child: const Icon(
-              Icons.chevron_left,
-              size: DesignTokens.navBackIconSize,
-              color: DesignTokens.colorTextPrimary,
-            ),
-          ),
-          const SizedBox(width: DesignTokens.navHeaderGap),
-          Expanded(
-            child: Text(
-              title,
-              style: DesignTokens.textHeadlineMd.copyWith(
-                color: DesignTokens.colorTextPrimary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Shared polished "not built yet" body (Meus Registros/Configurações/
+/// Shared polished "not built yet" body (Meus Registros/Planos de Ação/
 /// Home-Chat) — "visually distinct, fully-polished placeholder — never a
 /// broken link and never a visibly 'unfinished' look" (epic context).
 class _FeaturePlaceholderBody extends StatelessWidget {

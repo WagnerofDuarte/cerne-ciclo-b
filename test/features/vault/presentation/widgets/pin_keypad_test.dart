@@ -255,6 +255,61 @@ void main() {
         expect(submittedPins, ['9876']);
       },
     );
+
+    testWidgets(
+      'buttons report disabled semantics and are visually dimmed while '
+      'disabled, and report enabled/full opacity again once re-enabled '
+      "(review finding: enabled: false previously had no cue at all)",
+      (tester) async {
+        // Semantics are only computed while something is listening — a
+        // handle must be held open for `find.bySemanticsLabel`/
+        // `getSemantics` to see anything at all.
+        final semanticsHandle = tester.ensureSemantics();
+
+        const key = Key('pin-keypad');
+        await tester.pumpWidget(
+          _wrap(PinKeypad(key: key, enabled: false, onSubmit: (_) {})),
+        );
+
+        final disabledOpacity = tester.widget<Opacity>(
+          find.ancestor(
+            of: find.text('1'),
+            matching: find.byType(Opacity),
+          ),
+        );
+        expect(disabledOpacity.opacity, lessThan(1));
+
+        final disabledButtonSemantics = find
+            .ancestor(of: find.text('1'), matching: find.byType(Semantics))
+            .first;
+        expect(
+          tester.getSemantics(disabledButtonSemantics),
+          isSemantics(hasEnabledState: true, isEnabled: false),
+        );
+
+        await tester.pumpWidget(
+          _wrap(PinKeypad(key: key, onSubmit: (_) {})),
+        );
+
+        final enabledOpacity = tester.widget<Opacity>(
+          find.ancestor(
+            of: find.text('1'),
+            matching: find.byType(Opacity),
+          ),
+        );
+        expect(enabledOpacity.opacity, 1);
+
+        final enabledButtonSemantics = find
+            .ancestor(of: find.text('1'), matching: find.byType(Semantics))
+            .first;
+        expect(
+          tester.getSemantics(enabledButtonSemantics),
+          isSemantics(hasEnabledState: true, isEnabled: true),
+        );
+
+        semanticsHandle.dispose();
+      },
+    );
   });
 
   testWidgets(

@@ -10,6 +10,7 @@ import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/core/navigation/placeholder_screens.dart';
 import 'package:cerne/core/widgets/confirmation_dialog.dart';
+import 'package:cerne/features/account/domain/repositories/account_settings_repository.dart';
 import 'package:cerne/features/auth/domain/entities/authenticated_user.dart';
 import 'package:cerne/features/auth/domain/entities/session_status.dart';
 import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
@@ -110,6 +111,52 @@ class _FakeVaultRepository implements VaultRepository {
   }
 }
 
+/// A plain (non-mocktail) fake for [AccountSettingsRepository] (Story 2.4)
+/// — swapped in for the real `AccountSettingsRepositoryImpl` in every test
+/// below (same rationale as [_FakeVaultRepository] replacing the real
+/// `VaultRepositoryImpl`), so `CerneApp`'s boot-time
+/// `fetchBiometricEnabled()` call (`main.dart`) never reaches the real
+/// network pipeline. [fetchBiometricEnabledSucceeds] defaults to `true` so
+/// the fetch is a harmless no-op (the fake's own `currentBiometricEnabled`
+/// already starts `true`, matching production's own default) unless a
+/// test explicitly wants to exercise the failure row.
+class _FakeAccountSettingsRepository implements AccountSettingsRepository {
+  bool _value = true;
+  final _controller = StreamController<bool>.broadcast();
+
+  bool fetchBiometricEnabledSucceeds = true;
+
+  @override
+  bool get currentBiometricEnabled => _value;
+
+  @override
+  Stream<bool> get biometricEnabledStream => _controller.stream;
+
+  @override
+  Future<Either<Failure, Unit>> fetchBiometricEnabled() async {
+    if (!fetchBiometricEnabledSucceeds) {
+      return left(
+        const Failure.networkOffline(message: 'fake: boot fetch failed'),
+      );
+    }
+    return right(unit);
+  }
+
+  @override
+  Future<Either<Failure, Unit>> setBiometricEnabled(bool enabled) async {
+    setValue(enabled);
+    return right(unit);
+  }
+
+  @override
+  Future<void> dispose() => _controller.close();
+
+  void setValue(bool value) {
+    _value = value;
+    _controller.add(value);
+  }
+}
+
 /// Proves the one real production composition root — `CerneApp` resolving
 /// `sl<AuthCubit>()`/`sl<SessionRepository>()`/`sl<VaultRepository>()`,
 /// building the one `go_router` (Story 1.6; AD-14's vault gate), and
@@ -161,6 +208,16 @@ void main() {
     sl.unregister<VaultRepository>();
     sl.registerLazySingleton<VaultRepository>(
       () => _FakeVaultRepository(),
+      dispose: (repository) => repository.dispose(),
+    );
+    // Story 2.4 — same rationale as the `VaultRepository` swap above:
+    // `setupCoreDependencies()` also registers the real
+    // `AccountSettingsRepositoryImpl` (backed by the real `ApiClient`/`Dio`
+    // pipeline, no mock server here), swapped for a fake so `CerneApp`'s
+    // boot-time `fetchBiometricEnabled()` call never reaches the network.
+    sl.unregister<AccountSettingsRepository>();
+    sl.registerLazySingleton<AccountSettingsRepository>(
+      () => _FakeAccountSettingsRepository(),
       dispose: (repository) => repository.dispose(),
     );
     // `ConfirmationDialog.isOpen` is a static single-overlay guard (shared
@@ -578,6 +635,89 @@ void main() {
 
         expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
         expect(find.byType(VaultLockScreen), findsNothing);
+      },
+    );
+  });
+
+  group('Story 2.4 — AccountSettingsRepository feeds VaultLockScreen through '
+      'the real composition root', () {
+    testWidgets(
+      'currentBiometricEnabled: false (preference already fetched/changed '
+      'before /vault builds) -> VaultLockScreen never auto-triggers '
+      'authenticate(), shows the PIN keypad directly',
+      (tester) async {
+        final fakeVaultRepository = _FakeVaultRepository(
+          initialStatus: VaultStatus.locked,
+        );
+        addTearDown(fakeVaultRepository.dispose);
+        sl.unregister<VaultRepository>();
+        sl.registerLazySingleton<VaultRepository>(() => fakeVaultRepository);
+
+        final fakeAccountSettingsRepository = _FakeAccountSettingsRepository()
+          ..setValue(false);
+        addTearDown(fakeAccountSettingsRepository.dispose);
+        sl.unregister<AccountSettingsRepository>();
+        sl.registerLazySingleton<AccountSettingsRepository>(
+          () => fakeAccountSettingsRepository,
+        );
+
+        await tester.pumpWidget(const CerneApp());
+        await tester.pumpAndSettle();
+
+        expect(find.byType(VaultLockScreen), findsOneWidget);
+        expect(find.text('Digite seu PIN'), findsOneWidget);
+        expect(
+          find.text('Não foi possível reconhecer — digite seu PIN'),
+          findsNothing,
+        );
+
+        // Entering the PIN still unlocks the vault normally — PIN remains
+        // the access method regardless (Boundaries).
+        for (final digit in '1234'.split('')) {
+          await tester.tap(find.text(digit));
+          await tester.pump();
+        }
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+
+        expect(fakeVaultRepository.currentStatus, VaultStatus.unlocked);
+      },
+    );
+
+    testWidgets(
+      'a boot fetch failure leaves currentBiometricEnabled unchanged '
+      '(default true) -> VaultLockScreen still attempts biometric first, '
+      'same as pre-2.4 behavior',
+      (tester) async {
+        final fakeVaultRepository = _FakeVaultRepository(
+          initialStatus: VaultStatus.locked,
+        );
+        addTearDown(fakeVaultRepository.dispose);
+        sl.unregister<VaultRepository>();
+        sl.registerLazySingleton<VaultRepository>(() => fakeVaultRepository);
+
+        final fakeAccountSettingsRepository = _FakeAccountSettingsRepository()
+          ..fetchBiometricEnabledSucceeds = false;
+        addTearDown(fakeAccountSettingsRepository.dispose);
+        sl.unregister<AccountSettingsRepository>();
+        sl.registerLazySingleton<AccountSettingsRepository>(
+          () => fakeAccountSettingsRepository,
+        );
+
+        await tester.pumpWidget(const CerneApp());
+        await tester.pumpAndSettle();
+
+        // The fake's own `authenticateSucceeds` default is `false`, so a
+        // biometric attempt was made and declined -> PIN keypad with the
+        // biometric-failure band. Had `attemptBiometricFirst` wrongly been
+        // `false` here, no such attempt would ever happen and this band
+        // would never appear.
+        expect(find.byType(VaultLockScreen), findsOneWidget);
+        expect(
+          find.text('Não foi possível reconhecer — digite seu PIN'),
+          findsOneWidget,
+        );
+        expect(fakeAccountSettingsRepository.currentBiometricEnabled, isTrue);
       },
     );
   });

@@ -10,6 +10,9 @@ import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/core/navigation/app_router.dart';
 import 'package:cerne/core/navigation/placeholder_screens.dart';
+import 'package:cerne/features/account/domain/repositories/account_settings_repository.dart';
+import 'package:cerne/features/account/presentation/cubit/account_settings_cubit.dart';
+import 'package:cerne/features/account/presentation/screens/account_settings_screen.dart';
 import 'package:cerne/features/auth/domain/entities/session_status.dart';
 import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
 import 'package:cerne/features/auth/domain/repositories/session_repository.dart';
@@ -101,6 +104,39 @@ class _FakeVaultRepository implements VaultRepository {
   }
 }
 
+/// A plain (non-mocktail) fake for [AccountSettingsRepository] (Story 2.4,
+/// AD-14-style seam) — same rationale as [_FakeSessionRepository]/
+/// [_FakeVaultRepository]. Defaults to `true` (never `null`), matching
+/// [AccountSettingsRepository.currentBiometricEnabled]'s own documented
+/// default.
+class _FakeAccountSettingsRepository implements AccountSettingsRepository {
+  bool _value = true;
+  final _controller = StreamController<bool>.broadcast();
+
+  @override
+  bool get currentBiometricEnabled => _value;
+
+  @override
+  Stream<bool> get biometricEnabledStream => _controller.stream;
+
+  @override
+  Future<Either<Failure, Unit>> fetchBiometricEnabled() async => right(unit);
+
+  @override
+  Future<Either<Failure, Unit>> setBiometricEnabled(bool enabled) async {
+    setValue(enabled);
+    return right(unit);
+  }
+
+  @override
+  Future<void> dispose() => _controller.close();
+
+  void setValue(bool value) {
+    _value = value;
+    _controller.add(value);
+  }
+}
+
 /// Proves the epic's ONE `GoRouter`/`redirect` (Boundaries) resolves the
 /// I/O & Edge-Case Matrix from spec-1-6/spec-2-1 exactly — composing
 /// [VaultStatus] first, then [SessionStatus] (AD-14), never a hardcoded
@@ -108,10 +144,12 @@ class _FakeVaultRepository implements VaultRepository {
 void main() {
   late _FakeSessionRepository fakeSessionRepository;
   late _FakeVaultRepository fakeVaultRepository;
+  late _FakeAccountSettingsRepository fakeAccountSettingsRepository;
 
   setUp(() {
     fakeSessionRepository = _FakeSessionRepository();
     fakeVaultRepository = _FakeVaultRepository();
+    fakeAccountSettingsRepository = _FakeAccountSettingsRepository();
     // `/auth`'s `GoRoute.builder` resolves `sl<AuthCubit>()` — registered
     // directly (no full `setupCoreDependencies()`) since this suite only
     // exercises the router, not the auth call itself.
@@ -121,18 +159,27 @@ void main() {
     sl.registerLazySingleton<AuthCubit>(
       () => AuthCubit(MockAuthRepository(), mockSessionRepositoryForCubit),
     );
+    // `/configuracoes`'s `GoRoute.builder` resolves `sl<AccountSettingsCubit>
+    // ()` (Story 2.4) — same rationale as `AuthCubit` above, wired to the
+    // same fake repository `pumpRouter` passes into `buildAppRouter` so a
+    // test can also drive it through the cubit if ever needed.
+    sl.registerLazySingleton<AccountSettingsCubit>(
+      () => AccountSettingsCubit(fakeAccountSettingsRepository),
+    );
   });
 
   tearDown(() async {
     await sl.reset();
     await fakeSessionRepository.dispose();
     await fakeVaultRepository.dispose();
+    await fakeAccountSettingsRepository.dispose();
   });
 
   Future<GoRouter> pumpRouter(WidgetTester tester) async {
     final router = buildAppRouter(
       vaultRepository: fakeVaultRepository,
       sessionRepository: fakeSessionRepository,
+      accountSettingsRepository: fakeAccountSettingsRepository,
       navigatorKey: GlobalKey<NavigatorState>(),
     );
     addTearDown(router.dispose);
@@ -287,6 +334,56 @@ void main() {
 
         expect(location(router), AppRoutePaths.home);
         expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
+      },
+    );
+  });
+
+  group('Story 2.4 — AccountSettingsRepository feeds /vault and /configuracoes', () {
+    testWidgets(
+      '/configuracoes builds the real AccountSettingsScreen, not the old '
+      'placeholder',
+      (tester) async {
+        final router = await pumpRouter(tester);
+        fakeSessionRepository.setStatus(SessionStatus.authenticated);
+        await tester.pumpAndSettle();
+
+        router.go(AppRoutePaths.configuracoes);
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(find.byType(AccountSettingsScreen), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'default currentBiometricEnabled (true) is passed straight through '
+      'to VaultLockScreen.attemptBiometricFirst',
+      (tester) async {
+        fakeVaultRepository.setStatus(VaultStatus.locked);
+        await pumpRouter(tester);
+        await tester.pumpAndSettle();
+
+        final screen = tester.widget<VaultLockScreen>(
+          find.byType(VaultLockScreen),
+        );
+        expect(screen.attemptBiometricFirst, isTrue);
+      },
+    );
+
+    testWidgets(
+      'a false AccountSettingsRepository.currentBiometricEnabled, read at '
+      'the moment /vault builds, is passed through as attemptBiometricFirst: '
+      'false',
+      (tester) async {
+        fakeAccountSettingsRepository.setValue(false);
+        fakeVaultRepository.setStatus(VaultStatus.locked);
+        await pumpRouter(tester);
+        await tester.pumpAndSettle();
+
+        final screen = tester.widget<VaultLockScreen>(
+          find.byType(VaultLockScreen),
+        );
+        expect(screen.attemptBiometricFirst, isFalse);
       },
     );
   });

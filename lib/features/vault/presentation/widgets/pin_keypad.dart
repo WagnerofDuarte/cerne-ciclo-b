@@ -105,7 +105,11 @@ class _PinKeypadState extends State<PinKeypad> {
       children: [
         _ProgressDots(filledCount: _digits.length),
         const SizedBox(height: DesignTokens.spacingLg),
-        _KeypadGrid(onDigitTap: _onDigitTap, onBackspaceTap: _onBackspaceTap),
+        _KeypadGrid(
+          onDigitTap: _onDigitTap,
+          onBackspaceTap: _onBackspaceTap,
+          enabled: widget.enabled,
+        ),
       ],
     );
   }
@@ -146,10 +150,15 @@ class _ProgressDots extends StatelessWidget {
 }
 
 class _KeypadGrid extends StatelessWidget {
-  const _KeypadGrid({required this.onDigitTap, required this.onBackspaceTap});
+  const _KeypadGrid({
+    required this.onDigitTap,
+    required this.onBackspaceTap,
+    required this.enabled,
+  });
 
   final ValueChanged<String> onDigitTap;
   final VoidCallback onBackspaceTap;
+  final bool enabled;
 
   static const List<String> _digitRows1to9 = [
     '123',
@@ -161,6 +170,7 @@ class _KeypadGrid extends StatelessWidget {
     return _KeypadButton(
       onTap: () => onDigitTap(digit),
       semanticLabel: digit,
+      enabled: enabled,
       child: FittedBox(
         fit: BoxFit.scaleDown,
         child: Text(
@@ -193,6 +203,7 @@ class _KeypadGrid extends StatelessWidget {
     final backspaceButton = _KeypadButton(
       onTap: onBackspaceTap,
       semanticLabel: 'Apagar',
+      enabled: enabled,
       child: const Icon(
         Icons.backspace_outlined,
         size: DesignTokens.pinKeypadBackspaceIconSize,
@@ -221,33 +232,48 @@ class _KeypadButton extends StatelessWidget {
   const _KeypadButton({
     required this.onTap,
     required this.semanticLabel,
+    required this.enabled,
     required this.child,
   });
 
   final VoidCallback onTap;
   final String semanticLabel;
+  final bool enabled;
   final Widget child;
+
+  /// Review finding: `enabled: false` previously had zero visual or
+  /// semantic treatment — taps were silently swallowed upstream in
+  /// `_onDigitTap`/`_onBackspaceTap` with no sighted or VoiceOver cue that
+  /// anything was happening. `Opacity` dims every button, `Semantics.
+  /// enabled` reports the disabled state, and `onTap: null` (rather than a
+  /// no-op callback) is what actually makes `InkWell`/accessibility
+  /// services treat the button as disabled.
+  static const double _disabledOpacity = 0.4;
 
   @override
   Widget build(BuildContext context) {
-    return Semantics(
-      label: semanticLabel,
-      button: true,
-      child: SizedBox(
-        width: DesignTokens.pinKeypadButtonSize,
-        height: DesignTokens.pinKeypadButtonSize,
-        child: Material(
-          color: DesignTokens.colorSurfaceElevated,
-          shape: const CircleBorder(
-            side: BorderSide(
-              color: DesignTokens.colorBorder,
-              width: DesignTokens.borderWidthDefault,
+    return Opacity(
+      opacity: enabled ? 1 : _disabledOpacity,
+      child: Semantics(
+        label: semanticLabel,
+        button: true,
+        enabled: enabled,
+        child: SizedBox(
+          width: DesignTokens.pinKeypadButtonSize,
+          height: DesignTokens.pinKeypadButtonSize,
+          child: Material(
+            color: DesignTokens.colorSurfaceElevated,
+            shape: const CircleBorder(
+              side: BorderSide(
+                color: DesignTokens.colorBorder,
+                width: DesignTokens.borderWidthDefault,
+              ),
             ),
-          ),
-          child: InkWell(
-            onTap: onTap,
-            customBorder: const CircleBorder(),
-            child: Center(child: child),
+            child: InkWell(
+              onTap: enabled ? onTap : null,
+              customBorder: const CircleBorder(),
+              child: Center(child: child),
+            ),
           ),
         ),
       ),
