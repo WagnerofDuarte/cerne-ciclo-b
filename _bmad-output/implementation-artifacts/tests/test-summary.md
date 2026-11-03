@@ -266,3 +266,70 @@ rather than when the story itself was implemented.
   `SessionStatus` back out of `expired` — re-home the overlay's one-shot
   guards' coverage there once that path exists (tracked in
   `deferred-work.md`).
+
+---
+
+# Story 2.1 — Biometric/PIN App-Access Gate
+
+## Context
+
+Story 2.1 adds the AD-14 seam: `VaultRepository`/`VaultRepositoryImpl`
+(zero network calls, `local_auth` only, `biometricOnly: true`), the new
+`VaultStatus` entity, `VaultLockScreen` at `/vault`, and `app_router.dart`
+composing `VaultStatus` ahead of `SessionStatus` in `_redirect`. Before
+generating anything, checked for gaps across the whole implemented
+surface: `VaultRepositoryImpl` already had full unit coverage
+(`vault_repository_impl_test.dart`, the complete success/decline/
+exception/dispose matrix) and `app_router_test.dart` already proved the
+*routing* consequences of `VaultStatus` end-to-end (locked overrides an
+authenticated session, bounces any explicit navigation back to `/vault`,
+unlock routes through to Home). The one gap: `VaultLockScreen` itself —
+the epic's only new screen — had no widget test at all, so its own
+user-visible behavior (the auto-prompt-on-mount, the pending-vs-settled
+UI, and the decline → "Tentar novamente" → retry loop) was proved only
+indirectly, through the router/composition-root suites.
+
+## Generated Tests
+
+### E2E/widget (new screen, isolated from routing)
+
+- [x] `test/features/vault/presentation/screens/vault_lock_screen_test.dart`
+  — **new**: mounts and auto-triggers `authenticate()` exactly once with
+  no user interaction; while the call is still pending (held open via a
+  `Completer`-gated fake) the lock copy is shown and no retry button is
+  offered; a success on mount shows no retry button and flips
+  `currentStatus` to `unlocked` with no exception; a decline on mount
+  shows "Tentar novamente" and keeps the vault `locked`; tapping "Tentar
+  novamente" re-invokes `authenticate()` and a subsequent success hides
+  the button again; repeated declines keep the button available and keep
+  incrementing the call count on every tap.
+
+No API test was generated — `VaultRepository` makes zero network calls by
+design (Boundaries: "Vault makes zero network calls"), so there is no
+backend contract surface for this story to exercise.
+
+## Coverage
+
+- Widget-level E2E scenarios for `VaultLockScreen`: auto-prompt-on-mount
+  ✅, pending-state UI ✅, decline→retry→success loop ✅, repeated-decline
+  loop ✅ (all added)
+- Already covered elsewhere (unchanged by this pass): `VaultRepositoryImpl`
+  I/O matrix (`vault_repository_impl_test.dart`), `VaultStatus`-ahead-of-
+  `SessionStatus` routing (`app_router_test.dart`), full composition-root
+  proof of the cold-start-locked → retry → unlock → Home flow through the
+  real `main.dart` wiring (`test/main_test.dart`'s "AD-14" group).
+- Implemented feature scope (per `sprint-status.yaml`): stories 1.1–1.6
+  and 2.1 — all covered. Stories 2.2+ are still `backlog`, so out of scope
+  for this pass.
+
+## Verification
+
+- `fvm flutter test` → 284/284 passing (278 pre-existing + 6 new)
+- `fvm flutter analyze` → 0 issues
+
+## Next Steps
+
+- Story 2.2 (biometric-failure fallback to PIN) will add PIN-entry UI to
+  this same screen — extend `vault_lock_screen_test.dart` in place rather
+  than starting a parallel suite, since the fake repository and `_wrap`
+  helper here already generalize to that case.

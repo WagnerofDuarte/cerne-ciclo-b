@@ -1,3 +1,4 @@
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:local_auth/local_auth.dart';
@@ -9,19 +10,30 @@ import 'package:cerne/features/vault/domain/entities/vault_status.dart';
 
 class MockLocalAuthentication extends Mock implements LocalAuthentication {}
 
+class MockFlutterSecureStorage extends Mock implements FlutterSecureStorage {}
+
 /// Covers spec-2-1's I/O & Edge-Case Matrix exactly:
 /// - biometrics succeed -> `unlocked` emitted, `Right(unit)`.
 /// - biometrics fail/cancelled/unavailable (`false` or a thrown
 ///   `LocalAuthException`) -> status stays `locked`,
 ///   `Left(Failure.malformedResponse(...))`, no crash.
+///
+/// Plus spec-2-2's own additions:
+/// - `submitPin`, no PIN stored yet -> stores it, `unlocked`, `Right(unit)`.
+/// - `submitPin`, stored PIN matches -> `unlocked`, `Right(unit)`.
+/// - `submitPin`, stored PIN mismatch -> stays `locked`,
+///   `Left(Failure.malformedResponse(...))`, no attempt cap.
 void main() {
   late MockLocalAuthentication mockLocalAuthentication;
+  late MockFlutterSecureStorage mockSecureStorage;
   late VaultRepositoryImpl repository;
 
   setUp(() {
     mockLocalAuthentication = MockLocalAuthentication();
+    mockSecureStorage = MockFlutterSecureStorage();
     repository = VaultRepositoryImpl(
       localAuthentication: mockLocalAuthentication,
+      secureStorage: mockSecureStorage,
     );
   });
 
@@ -176,6 +188,116 @@ void main() {
       );
 
       final result = await repository.authenticate();
+
+      expect(repository.currentStatus, VaultStatus.locked);
+      expect(result.isLeft(), isTrue);
+    });
+
+    test('authenticate() throws a plain (non-LocalAuthException) '
+        'exception (e.g. the plugin channel itself failing) -> same '
+        'fail-closed outcome, Left(Failure.malformedResponse), no crash '
+        '(RNF09: never let a platform exception escape unmapped)', () async {
+      when(
+        () => mockLocalAuthentication.authenticate(
+          localizedReason: any(named: 'localizedReason'),
+          biometricOnly: any(named: 'biometricOnly'),
+          persistAcrossBackgrounding: any(named: 'persistAcrossBackgrounding'),
+        ),
+      ).thenThrow(Exception('plugin channel failed'));
+
+      final result = await repository.authenticate();
+
+      expect(repository.currentStatus, VaultStatus.locked);
+      expect(result.isLeft(), isTrue);
+    });
+  });
+
+  group('submitPin() — spec-2-2', () {
+    test('no PIN stored yet -> stores the submitted PIN, statusStream '
+        'emits unlocked, currentStatus flips to unlocked, Right(unit) '
+        'returned (no PIN-creation screen exists anywhere in '
+        'docs/input/ — Design Notes)', () async {
+      when(
+        () => mockSecureStorage.read(key: any(named: 'key')),
+      ).thenAnswer((_) async => null);
+      when(
+        () => mockSecureStorage.write(
+          key: any(named: 'key'),
+          value: any(named: 'value'),
+        ),
+      ).thenAnswer((_) async {});
+
+      Either<Failure, Unit>? result;
+      final emitted = await emittedDuring(() async {
+        result = await repository.submitPin('1234');
+      });
+
+      verify(
+        () => mockSecureStorage.write(key: 'vault_pin', value: '1234'),
+      ).called(1);
+      expect(emitted, [VaultStatus.unlocked]);
+      expect(repository.currentStatus, VaultStatus.unlocked);
+      expect(result!.isRight(), isTrue);
+    });
+
+    test('stored PIN matches -> statusStream emits unlocked, '
+        'currentStatus flips to unlocked, Right(unit) returned', () async {
+      when(
+        () => mockSecureStorage.read(key: any(named: 'key')),
+      ).thenAnswer((_) async => '1234');
+
+      Either<Failure, Unit>? result;
+      final emitted = await emittedDuring(() async {
+        result = await repository.submitPin('1234');
+      });
+
+      verifyNever(
+        () => mockSecureStorage.write(
+          key: any(named: 'key'),
+          value: any(named: 'value'),
+        ),
+      );
+      expect(emitted, [VaultStatus.unlocked]);
+      expect(repository.currentStatus, VaultStatus.unlocked);
+      expect(result!.isRight(), isTrue);
+    });
+
+    test('stored PIN mismatch -> status stays locked, no emission, '
+        'Left(Failure.malformedResponse(...)), never Failure.authInvalid '
+        '(Boundaries: reserved for password login), no attempt cap — '
+        'always retryable', () async {
+      when(
+        () => mockSecureStorage.read(key: any(named: 'key')),
+      ).thenAnswer((_) async => '1234');
+
+      Either<Failure, Unit>? result;
+      final emitted = await emittedDuring(() async {
+        result = await repository.submitPin('9999');
+      });
+
+      expect(emitted, isEmpty);
+      expect(repository.currentStatus, VaultStatus.locked);
+      expect(result!.isLeft(), isTrue);
+      result!.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+
+      // No attempt cap — a second mismatched attempt behaves identically,
+      // still retryable, never a dead end.
+      final secondResult = await repository.submitPin('0000');
+      expect(repository.currentStatus, VaultStatus.locked);
+      expect(secondResult.isLeft(), isTrue);
+    });
+
+    test('secure-storage throws on read -> Left(Failure.'
+        'malformedResponse), status stays locked, no crash (RNF09: never '
+        'let a platform exception escape unmapped)', () async {
+      when(
+        () => mockSecureStorage.read(key: any(named: 'key')),
+      ).thenThrow(Exception('keychain unavailable'));
+
+      final result = await repository.submitPin('1234');
 
       expect(repository.currentStatus, VaultStatus.locked);
       expect(result.isLeft(), isTrue);

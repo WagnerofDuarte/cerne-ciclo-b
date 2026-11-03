@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 
 import '../../../../core/design_tokens.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../domain/repositories/vault_repository.dart';
+import '../widgets/pin_keypad.dart';
 
 /// `/vault` — the epic's one lock screen, shown whenever
 /// `VaultRepository.currentStatus` isn't `VaultStatus.unlocked`
@@ -11,7 +13,17 @@ import '../../domain/repositories/vault_repository.dart';
 /// [VaultRepository.authenticate] call flips `currentStatus` to `unlocked`,
 /// which — via `statusStream`/`refreshListenable` — re-runs the redirect and
 /// navigates away from here on its own, so this widget never navigates
-/// imperatively itself. No PIN entry UI (Story 2.2).
+/// imperatively itself.
+///
+/// Story 2.2: every biometric failure (decline/cancel/any OS lockout — the
+/// generic `authenticate()` catches already cover it, spec-2-2) falls
+/// through to a real [PinKeypad] + error band, never a second biometric
+/// "Tentar novamente" affordance (AC2). The "Usar PIN" ghost link reaches
+/// the same keypad directly, with no error band, before any biometric
+/// failure has happened. [VaultRepository.submitPin]'s own success emits
+/// `VaultStatus.unlocked`, same as [VaultRepository.authenticate] — this
+/// widget navigates away on that exactly the same way, with no branch for
+/// "which path unlocked it".
 class VaultLockScreen extends StatefulWidget {
   const VaultLockScreen({required this.vaultRepository, super.key});
 
@@ -22,8 +34,24 @@ class VaultLockScreen extends StatefulWidget {
 }
 
 class _VaultLockScreenState extends State<VaultLockScreen> {
-  bool _authenticating = false;
-  bool _showRetry = false;
+  static const _biometricFailureMessage =
+      'Não foi possível reconhecer — digite seu PIN';
+
+  /// No specific copy is given anywhere in `docs/input/` for a PIN
+  /// mismatch (the I/O matrix only specifies the `Failure` returned) —
+  /// decided here (Design Notes), mirroring the biometric failure band's
+  /// own tone.
+  static const _pinMismatchMessage = 'PIN incorreto. Tente novamente.';
+
+  bool _showPinKeypad = false;
+  String? _errorMessage;
+
+  /// Re-entrancy guard for [_submitPin] — [PinKeypad] clears its own
+  /// buffer and accepts new taps immediately after calling `onSubmit`,
+  /// before the awaited [VaultRepository.submitPin] below resolves, so a
+  /// fast second 4-digit entry could otherwise fire a second concurrent
+  /// call.
+  bool _submittingPin = false;
 
   @override
   void initState() {
@@ -32,14 +60,6 @@ class _VaultLockScreenState extends State<VaultLockScreen> {
   }
 
   Future<void> _attemptAuthenticate() async {
-    if (_authenticating) {
-      return;
-    }
-    setState(() {
-      _authenticating = true;
-      _showRetry = false;
-    });
-
     final result = await widget.vaultRepository.authenticate();
     if (!mounted) {
       return;
@@ -49,14 +69,76 @@ class _VaultLockScreenState extends State<VaultLockScreen> {
     // own `refreshListenable` will navigate away from `/vault` on its own —
     // this widget has nothing further to do (and may already be in the
     // process of being disposed by the time that happens).
+    var shouldAnnounceFailure = false;
     result.match(
-      (_) => setState(() {
-        _authenticating = false;
-        _showRetry = true;
-      }),
-      (_) => setState(() {
-        _authenticating = false;
-      }),
+      (_) {
+        // If the user already reached the keypad manually (via "Usar
+        // PIN") before this pending call resolved, this late failure must
+        // never clobber whatever the keypad is currently showing — AC2's
+        // "no second biometric-retry affordance" only concerns the
+        // biometric view itself, which is no longer on screen.
+        final alreadyOnKeypad = _showPinKeypad;
+        shouldAnnounceFailure = !alreadyOnKeypad;
+        if (!alreadyOnKeypad) {
+          setState(() {
+            _showPinKeypad = true;
+            _errorMessage = _biometricFailureMessage;
+          });
+        }
+      },
+      (_) {},
+    );
+
+    // `sendAnnouncement()` (see `_announce` below) is honored on both
+    // Android and iOS — this app is iOS-only, where VoiceOver doesn't
+    // reliably treat a live-region subtree update as an announcement on
+    // its own, so the biometric->PIN transition is spoken explicitly
+    // here rather than relying on any ambient live region.
+    if (shouldAnnounceFailure && mounted) {
+      await _announce(_biometricFailureMessage);
+    }
+  }
+
+  void _useManualPin() {
+    setState(() {
+      _showPinKeypad = true;
+      _errorMessage = null;
+    });
+  }
+
+  Future<void> _submitPin(String pin) async {
+    if (_submittingPin) {
+      return;
+    }
+    _submittingPin = true;
+    try {
+      final result = await widget.vaultRepository.submitPin(pin);
+      if (!mounted) {
+        return;
+      }
+      if (result.isLeft()) {
+        // Mismatch: stays locked, no attempt cap — the keypad itself has
+        // already cleared its own buffer by the time this runs
+        // (PinKeypad's own contract), so the user can simply try again.
+        setState(() => _errorMessage = _pinMismatchMessage);
+        await _announce(_pinMismatchMessage);
+      }
+      // On a match (first-use or later), `currentStatus` is already
+      // `unlocked` and the router navigates away on its own, same as a
+      // successful `authenticate()`.
+    } finally {
+      _submittingPin = false;
+    }
+  }
+
+  Future<void> _announce(String message) async {
+    if (!mounted) {
+      return;
+    }
+    await SemanticsService.sendAnnouncement(
+      View.of(context),
+      message,
+      TextDirection.ltr,
     );
   }
 
@@ -67,48 +149,94 @@ class _VaultLockScreenState extends State<VaultLockScreen> {
       body: Center(
         child: Padding(
           padding: DesignTokens.screenPadding,
-          // `liveRegion: true` so a screen reader announces the subtree's
-          // content whenever it changes — in particular the "autenticando"
-          // -> retry-button transition below (_showRetry flipping true),
-          // instead of staying silent about that state change.
-          child: Semantics(
-            liveRegion: true,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.lock_outline,
-                  size: DesignTokens.spacing2xl,
-                  color: DesignTokens.colorTextSecondary,
-                ),
-                const SizedBox(height: DesignTokens.spacingMd),
-                Text(
-                  'Cerne bloqueado',
-                  textAlign: TextAlign.center,
-                  style: DesignTokens.textHeadlineMd.copyWith(
-                    color: DesignTokens.colorTextPrimary,
-                  ),
-                ),
-                const SizedBox(height: DesignTokens.spacingSm),
-                Text(
-                  'Use a biometria do seu dispositivo para continuar.',
-                  textAlign: TextAlign.center,
-                  style: DesignTokens.textBodyMd.copyWith(
-                    color: DesignTokens.colorTextSecondary,
-                  ),
-                ),
-                if (_showRetry) ...[
-                  const SizedBox(height: DesignTokens.spacingLg),
-                  AppButton(
-                    label: 'Tentar novamente',
-                    onPressed: _attemptAuthenticate,
-                  ),
-                ],
-              ],
-            ),
-          ),
+          // No ambient `Semantics(liveRegion: true)` wrapper here — it
+          // would re-trigger on every single digit tap inside `PinKeypad`
+          // (its own `_ProgressDots` label changes each tap), not just the
+          // two transitions that actually need announcing. Those two
+          // (biometric failure, PIN mismatch) are already covered
+          // explicitly and reliably by `_announce()` below.
+          child: _showPinKeypad
+              ? _PinView(errorMessage: _errorMessage, onSubmit: _submitPin)
+              : _BiometricView(onUsePin: _useManualPin),
         ),
       ),
+    );
+  }
+}
+
+class _BiometricView extends StatelessWidget {
+  const _BiometricView({required this.onUsePin});
+
+  final VoidCallback onUsePin;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(
+          Icons.lock_outline,
+          size: DesignTokens.spacing2xl,
+          color: DesignTokens.colorTextSecondary,
+        ),
+        const SizedBox(height: DesignTokens.spacingMd),
+        Text(
+          'Cerne bloqueado',
+          textAlign: TextAlign.center,
+          style: DesignTokens.textHeadlineMd.copyWith(
+            color: DesignTokens.colorTextPrimary,
+          ),
+        ),
+        const SizedBox(height: DesignTokens.spacingSm),
+        Text(
+          'Use a biometria do seu dispositivo para continuar.',
+          textAlign: TextAlign.center,
+          style: DesignTokens.textBodyMd.copyWith(
+            color: DesignTokens.colorTextSecondary,
+          ),
+        ),
+        const SizedBox(height: DesignTokens.spacingLg),
+        AppButton(
+          variant: AppButtonVariant.textGhost,
+          label: 'Usar PIN',
+          onPressed: onUsePin,
+        ),
+      ],
+    );
+  }
+}
+
+class _PinView extends StatelessWidget {
+  const _PinView({required this.errorMessage, required this.onSubmit});
+
+  final String? errorMessage;
+  final ValueChanged<String> onSubmit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          'Digite seu PIN',
+          textAlign: TextAlign.center,
+          style: DesignTokens.textHeadlineMd.copyWith(
+            color: DesignTokens.colorTextPrimary,
+          ),
+        ),
+        if (errorMessage != null) ...[
+          const SizedBox(height: DesignTokens.spacingSm),
+          Text(
+            errorMessage!,
+            textAlign: TextAlign.center,
+            style: DesignTokens.textBodyMd.copyWith(
+              color: DesignTokens.colorError,
+            ),
+          ),
+        ],
+        const SizedBox(height: DesignTokens.spacingLg),
+        PinKeypad(onSubmit: onSubmit),
+      ],
     );
   }
 }

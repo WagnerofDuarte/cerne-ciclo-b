@@ -289,6 +289,31 @@ class DesignTokens {
   static const double kanbanCardSpineWidth = 3;
 
   // ---------------------------------------------------------------------
+  // PIN keypad (Story 2.2) — prototype-extract.md §6 names the "PIN
+  // keypad" component (digits 0–9 + backspace, progress dots above) and
+  // UX-DR14 gives its behavior, but neither gives pixel values — decided
+  // here (Design Notes) rather than left hardcoded in the widget.
+  // ---------------------------------------------------------------------
+
+  /// Each digit/backspace button — a circle at least UX-DR23's 44pt tap
+  /// target, with headroom for a comfortable thumb target on a 390pt-wide
+  /// frame hosting a 3-column grid.
+  static const double pinKeypadButtonSize = 64;
+
+  /// Gap between keypad buttons, both axes.
+  static const double pinKeypadGap = spacingMd;
+
+  /// Backspace glyph (`Icons.backspace_outlined` — no new icon-font
+  /// dependency, same approximation rationale as [dialogIconSize]).
+  static const double pinKeypadBackspaceIconSize = 24;
+
+  /// Progress-dot diameter (4 dots above the grid, one per digit).
+  static const double pinProgressDotSize = 12;
+
+  /// Gap between progress dots.
+  static const double pinProgressDotGap = spacingSm;
+
+  // ---------------------------------------------------------------------
   // Layout insets — not named in prototype-extract.md §3, but every
   // `EdgeInsets.*` construction must live here (see Story 1.2
   // Verification's RNF08 literal grep), built from the spacing scale

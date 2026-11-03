@@ -79,3 +79,23 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-1-6-base-navigation-shell-with-feature-placeholders.md`
   summary: `ios/Runner/Info.plist`'s portrait-only orientation lock has no `UIRequiresFullScreen` — iPadOS Split View/Slide Over can still resize this fixed-390×844-frame app regardless of the declared orientation restriction.
   evidence: Not in this story's own stated boundaries (which only ask for the orientation keys), and no device/simulator exists yet (AGENTS.md) to verify the actual iPad behavior either way. Revisit once iPad support is an explicit target or device testing exists.
+
+## Deferred from: code review of story-2-1-biometric-pin-app-access-gate (2026-11-03)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-1-biometric-pin-app-access-gate.md`
+  summary: `VaultRepositoryImpl.authenticate()`'s single `on LocalAuthException` catch collapses every `LocalAuthExceptionCode` (including `lockedOut`/`biometryLockout`) into one generic `Failure.malformedResponse`, discarding the lockout-vs-other-failure distinction `epic-2-context.md` says is needed to route an OS-level lockout to the app's own PIN fallback rather than retrying the OS.
+  evidence: Not required by spec-2-1's own frozen Boundaries or I/O matrix — no PIN screen exists yet for this story to route to. Story 2.2 (Biometric-Failure Fallback to PIN) is the explicit, already-planned owner of this distinction; revisit there rather than widening 2.1's error mapping speculatively now.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-1-biometric-pin-app-access-gate.md`
+  summary: No timeout wraps the OS biometric prompt in `VaultLockScreen._attemptAuthenticate`; if `authenticate()` never resolves (a hung native call, not covered by `persistAcrossBackgrounding: true`), the lock screen stays on its initial "autenticando" state forever with no retry button and no escape — the one gate blocking every screen in the app.
+  evidence: Outside spec-2-1's own I/O & Edge-Case Matrix, which only covers success/declined-or-cancelled, not a hang. No device/simulator exists yet (AGENTS.md) to reproduce or verify a real-world hang either way; revisit if this proves reachable in practice or once device testing exists.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-1-biometric-pin-app-access-gate.md`
+  summary: `main.dart`'s `_CerneAppState.initState` fires `_sessionRepository.restoreSession()` (a real backend network call) unconditionally, with no gating on `VaultRepository.currentStatus` — in tension with `epic-2-context.md`'s own framing that "the vault gates whether anything may be shown at all, before any network/session state is considered."
+  evidence: Unchanged since Story 1.4 (pre-existing, not introduced by this diff) — `VaultRepository` makes zero network calls itself (spec-2-1's own boundary), and this call's outcome only ever reaches the UI through `SessionStatus`/`statusStream`, which the vault gate already overrides while locked. A real architectural tension worth a deliberate decision once a later epic cares about exactly when the first network call fires relative to the vault, not a correctness bug in 2.1 itself.
+
+## Deferred from: code review of story-2-2-biometric-failure-fallback-to-pin (2026-11-03)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-2-2-biometric-failure-fallback-to-pin.md`
+  summary: The prototype's `Tela 0.1 — Biometria` block (`docs/input/prototype/prototype-extract.md` §2.1) names two links — "Usar PIN" and a secondary "usar e-mail e senha" — but only the first is built; there is still no path from the vault screen back to the existing password login/signup screen (Story 1.3).
+  evidence: Pre-existing gap, not introduced by this story — spec-2-1 built `_BiometricView`'s predecessor with neither link (PIN didn't exist yet), and no story in Epic 2 (2.1-2.4) names this link in its own scope. No epic currently owns reconnecting the vault screen to password login; revisit once a story claims it rather than bolting it onto 2.2's own frozen intent (PIN fallback only).

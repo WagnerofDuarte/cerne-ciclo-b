@@ -35,6 +35,18 @@ abstract class VaultRepository {
   /// [VaultStatus.unlocked] and emits it on [statusStream].
   Future<Either<Failure, Unit>> authenticate();
 
+  /// Story 2.2's biometric-failure fallback. No PIN-creation screen exists
+  /// anywhere in `docs/input/` (Design Notes): the first call ever made to
+  /// this method — regardless of which screen reached the keypad — stores
+  /// [pin] as the vault's PIN and immediately succeeds; every later call
+  /// compares [pin] against that stored value. A match (first-use or
+  /// later) flips [currentStatus] to [VaultStatus.unlocked] and emits it on
+  /// [statusStream], same as a successful [authenticate]. A mismatch never
+  /// throws, never caps retries, and leaves [currentStatus] at
+  /// [VaultStatus.locked] — [Failure.malformedResponse] is returned instead
+  /// (RNF09), so the caller always has a retryable path, never a dead end.
+  Future<Either<Failure, Unit>> submitPin(String pin);
+
   /// Releases the underlying stream resource. Wired as `get_it`'s
   /// `dispose:` callback on registration, so `resetCoreDependencies()`
   /// (`sl.reset()`) closes it instead of leaking a `StreamController` on

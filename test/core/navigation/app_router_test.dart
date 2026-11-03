@@ -84,6 +84,14 @@ class _FakeVaultRepository implements VaultRepository {
     );
   }
 
+  /// Not exercised by this router-focused suite (spec-2-2's PIN flow has
+  /// its own dedicated coverage in `vault_lock_screen_test.dart`) — always
+  /// fails, so a stray call here never silently unlocks the vault.
+  @override
+  Future<Either<Failure, Unit>> submitPin(String pin) async {
+    return left(const Failure.malformedResponse(message: 'fake: unused'));
+  }
+
   @override
   Future<void> dispose() => _controller.close();
 

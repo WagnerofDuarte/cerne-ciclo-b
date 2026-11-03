@@ -1,3 +1,4 @@
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 
 import '../../core/di/injection_container.dart';
@@ -19,7 +20,14 @@ void registerVaultFeature() {
   // so `resetCoreDependencies()` (`sl.reset()`) closes its
   // `StreamController` instead of leaking one on every test teardown.
   sl.registerLazySingleton<VaultRepository>(
-    () => VaultRepositoryImpl(localAuthentication: sl<LocalAuthentication>()),
+    () => VaultRepositoryImpl(
+      localAuthentication: sl<LocalAuthentication>(),
+      // Already registered by `setupCoreDependencies()` (Code Map) — the
+      // same singleton `SecureStorageAccessTokenProvider` uses for the
+      // access/refresh tokens, now also holding the vault PIN (Story 2.2)
+      // under its own distinct key.
+      secureStorage: sl<FlutterSecureStorage>(),
+    ),
     dispose: (repository) => repository.dispose(),
   );
 }

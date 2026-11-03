@@ -69,6 +69,11 @@ class _FakeVaultRepository implements VaultRepository {
   final _controller = StreamController<VaultStatus>.broadcast();
   bool authenticateSucceeds = false;
 
+  /// The one PIN `submitPin()` treats as "stored" (spec-2-2) — `null`
+  /// means no PIN has been stored yet, mirroring `VaultRepositoryImpl`'s
+  /// own set-on-first-use behavior.
+  String? storedPin;
+
   @override
   VaultStatus get currentStatus => _status;
 
@@ -84,6 +89,16 @@ class _FakeVaultRepository implements VaultRepository {
     return left(
       const Failure.malformedResponse(message: 'fake: biometrics declined'),
     );
+  }
+
+  @override
+  Future<Either<Failure, Unit>> submitPin(String pin) async {
+    if (storedPin == null || storedPin == pin) {
+      storedPin = pin;
+      setStatus(VaultStatus.unlocked);
+      return right(unit);
+    }
+    return left(const Failure.malformedResponse(message: 'fake: PIN mismatch'));
   }
 
   @override
@@ -144,7 +159,10 @@ void main() {
     // is unaffected; a test that wants to exercise the vault gate itself
     // swaps this for its own locked fake.
     sl.unregister<VaultRepository>();
-    sl.registerLazySingleton<VaultRepository>(() => _FakeVaultRepository());
+    sl.registerLazySingleton<VaultRepository>(
+      () => _FakeVaultRepository(),
+      dispose: (repository) => repository.dispose(),
+    );
     // `ConfirmationDialog.isOpen` is a static single-overlay guard (shared
     // across every instance by design, Story 1.5) — reset it so one test's
     // unclosed dialog never leaks into the next.
@@ -517,11 +535,10 @@ void main() {
     );
 
     testWidgets(
-      'tapping "Tentar novamente" re-invokes authenticate() through the '
-      'real VaultLockScreen wiring: the initial auto-attempt fails '
-      '(authenticateSucceeds starts false) and shows the retry button, '
-      'then flipping authenticateSucceeds to true and tapping it unlocks '
-      'the vault and routes through to Home',
+      'biometric failure falls through to the real PinKeypad wiring '
+      '(spec-2-2): the initial auto-attempt fails (authenticateSucceeds '
+      'starts false) and shows the keypad, then entering 4 digits stores '
+      'them as the new PIN, unlocks the vault and routes through to Home',
       (tester) async {
         final fakeVaultRepository = _FakeVaultRepository(
           initialStatus: VaultStatus.locked,
@@ -542,16 +559,21 @@ void main() {
         await tester.pumpAndSettle();
 
         // The initial auto-triggered authenticate() call used the fake's
-        // default authenticateSucceeds == false, so the retry button is
-        // now visible and the vault is still locked.
+        // default authenticateSucceeds == false, so the PIN keypad is now
+        // visible (never a "Tentar novamente" biometric-retry affordance —
+        // AC2) and the vault is still locked.
         expect(find.byType(VaultLockScreen), findsOneWidget);
-        expect(find.text('Tentar novamente'), findsOneWidget);
+        expect(find.text('Digite seu PIN'), findsOneWidget);
+        expect(find.text('Tentar novamente'), findsNothing);
 
-        // Now let the next authenticate() call succeed, and drive it
-        // through the real button wiring (_attemptAuthenticate) rather
-        // than setStatus directly.
-        fakeVaultRepository.authenticateSucceeds = true;
-        await tester.tap(find.text('Tentar novamente'));
+        // Drive the real PinKeypad wiring (_submitPin) rather than
+        // setStatus directly — no PIN stored yet, so this first entry
+        // becomes the stored PIN (Design Notes).
+        for (final digit in '1234'.split('')) {
+          await tester.tap(find.text(digit));
+          await tester.pump();
+        }
+        await tester.pump(const Duration(milliseconds: 350));
         await tester.pumpAndSettle();
 
         expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
