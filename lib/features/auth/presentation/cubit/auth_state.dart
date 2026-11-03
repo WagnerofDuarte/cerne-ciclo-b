@@ -66,8 +66,9 @@ class AuthState {
       email: email ?? this.email,
       password: password ?? this.password,
       emailError: clearEmailError ? null : (emailError ?? this.emailError),
-      passwordError:
-          clearPasswordError ? null : (passwordError ?? this.passwordError),
+      passwordError: clearPasswordError
+          ? null
+          : (passwordError ?? this.passwordError),
       formError: clearFormError ? null : (formError ?? this.formError),
       status: status ?? this.status,
     );
@@ -87,14 +88,14 @@ class AuthState {
 
   @override
   int get hashCode => Object.hash(
-        mode,
-        email,
-        password,
-        emailError,
-        passwordError,
-        formError,
-        status,
-      );
+    mode,
+    email,
+    password,
+    emailError,
+    passwordError,
+    formError,
+    status,
+  );
 
   @override
   String toString() =>

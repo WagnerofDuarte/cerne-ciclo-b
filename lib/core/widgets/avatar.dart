@@ -6,7 +6,11 @@ import '../design_tokens.dart';
 /// circle with 1–2 uppercase initials, in two sizes — 40dp in the side
 /// menu (Story 1.6), 52dp in Configurações (Epic 8).
 class Avatar extends StatelessWidget {
-  const Avatar({super.key, required this.initials, this.size = AvatarSize.small});
+  const Avatar({
+    super.key,
+    required this.initials,
+    this.size = AvatarSize.small,
+  });
 
   /// Expected to be 1–2 characters; rendered as given (uppercased) with
   /// no truncation enforced here — the caller owns deriving initials
@@ -43,7 +47,9 @@ class Avatar extends StatelessWidget {
           padding: DesignTokens.avatarInitialsPadding,
           child: Text(
             initials.toUpperCase(),
-            style: DesignTokens.textTitleSm.copyWith(color: DesignTokens.colorOnPrimary),
+            style: DesignTokens.textTitleSm.copyWith(
+              color: DesignTokens.colorOnPrimary,
+            ),
             maxLines: 1,
             softWrap: false,
           ),

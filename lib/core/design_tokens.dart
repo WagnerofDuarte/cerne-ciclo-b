@@ -68,6 +68,22 @@ class DesignTokens {
   /// Text on category chips. Same provenance note as [colorChatBubbleUser].
   static const Color colorCategoryChipText = Color(0xFF3F4A38);
 
+  /// Scrim behind the session-expiry overlay specifically (Story 1.5) —
+  /// `rgba(36,31,25,.22)`, the exact value `cerne-prototype.html` uses for
+  /// *this* overlay. Its other overlays (drawer, insertion modal,
+  /// filter/export sheets, account-deletion confirm) use the heavier
+  /// `rgba(36,31,25,.4)` instead — that value belongs to whichever later
+  /// story builds those, never this one.
+  static const Color colorScrim = Color(0x38241F19);
+
+  /// Heavier scrim behind every *other* overlay (Story 1.6's drawer; a later
+  /// story's insertion modal/filter/export sheets, account-deletion
+  /// confirm) — `rgba(36,31,25,.4)` per `cerne-prototype.html`'s
+  /// `<!-- OVERLAY: Drawer -->` block. Distinct from [colorScrim], which
+  /// stays the session-expiry overlay's own lighter value (see that
+  /// constant's doc).
+  static const Color colorScrimHeavy = Color(0x66241F19);
+
   // ---------------------------------------------------------------------
   // Typography — prototype-extract.md §3 "Typography"
   // ---------------------------------------------------------------------
@@ -210,6 +226,68 @@ class DesignTokens {
   /// width — the prototype gives both states the same 1.5dp weight.
   static const double borderWidthEmphasis = 1.5;
 
+  /// Confirmation-dialog lock icon (Story 1.5) — the prototype's
+  /// `ph-lock-key` is `font-size:20px`; approximated here with a built-in
+  /// Material icon (Design Notes — no new icon-font dependency), sized to
+  /// match.
+  static const double dialogIconSize = 20;
+
+  /// Confirmation-dialog card's internal gap between stacked elements
+  /// (icon+title row, body text, button, caption) — the overlay's markup
+  /// (prototype-extract.md's "Sessão expirada" block) uses 14px, which
+  /// isn't on the existing 4dp spacing scale.
+  static const double dialogContentGap = 14;
+
+  // ---------------------------------------------------------------------
+  // Navigation shell (Story 1.6) — `cerne-prototype.html`'s
+  // `<!-- OVERLAY: Drawer -->` block, the `Tela 1/5/6` header blocks, and
+  // the `Tela 5 — Planos de Ação` kanban block.
+  // ---------------------------------------------------------------------
+
+  /// Side-menu `Drawer` width — 80% of the fixed 390 frame (312dp), per the
+  /// drawer markup's `width:80%`.
+  static const double drawerWidth = 312;
+
+  /// ☰ hamburger icon (Home/Chat's dark-green header) — `ph-list`,
+  /// `font-size:24px`.
+  static const double navMenuIconSize = 24;
+
+  /// Back-arrow icon on every non-Home destination's header (Meus
+  /// Registros/Planos de Ação/Configurações placeholders) — `ph-caret-left`,
+  /// `font-size:22px`.
+  static const double navBackIconSize = 22;
+
+  /// Icon-title gap shared by every app-shell header (Home/Chat's ☰+
+  /// wordmark grid gap is implicit via its 3-column grid, but the
+  /// back-arrow headers and the kanban column header all use an explicit
+  /// `gap:12px`) and by each drawer nav item's own icon-label gap.
+  static const double navHeaderGap = 12;
+
+  /// Drawer nav item icon size (`ph-notebook`/`ph-kanban`/`ph-gear`, and
+  /// the "Novo Chat" `ph-plus`) — `font-size:20px`.
+  static const double drawerItemIconSize = 20;
+
+  /// Drawer header row's avatar-label gap — `gap:10px`, distinct from
+  /// [navHeaderGap] (the drawer markup uses a different value here than
+  /// its own nav items do).
+  static const double drawerHeaderGap = 10;
+
+  /// Kanban board's column-to-column gap and each column's dot-title-count
+  /// gap — `gap:12px`/`gap:8px`; the latter is already [spacingSm].
+  static const double kanbanColumnGap = 12;
+
+  /// Kanban column width — `min-width:150px`.
+  static const double kanbanColumnMinWidth = 150;
+
+  /// Kanban column header's gap above its first card — `margin-bottom:10px`.
+  static const double kanbanColumnHeaderGap = 10;
+
+  /// Kanban column-color dot — `width/height:8px`.
+  static const double kanbanDotSize = 8;
+
+  /// Kanban card's left color spine — `width:3px`.
+  static const double kanbanCardSpineWidth = 3;
+
   // ---------------------------------------------------------------------
   // Layout insets — not named in prototype-extract.md §3, but every
   // `EdgeInsets.*` construction must live here (see Story 1.2
@@ -232,4 +310,74 @@ class DesignTokens {
   /// Outer content padding for a single-column form screen (Tela 0.1a's
   /// login/signup, Story 1.3).
   static const EdgeInsets screenPadding = EdgeInsets.all(spacingLg);
+
+  /// Confirmation-dialog card's horizontal distance from the screen edges
+  /// (Story 1.5) — `left:20px;right:20px` in the overlay's markup
+  /// (prototype-extract.md's "Sessão expirada" block).
+  static const EdgeInsets dialogScreenMargin = EdgeInsets.symmetric(
+    horizontal: 20,
+  );
+
+  /// Confirmation-dialog card's own internal padding (Story 1.5) —
+  /// `padding:24px 20px` in the same markup: vertical matches [spacingLg],
+  /// but the horizontal axis (20) isn't on the existing scale.
+  static const EdgeInsets dialogCardPadding = EdgeInsets.symmetric(
+    horizontal: 20,
+    vertical: spacingLg,
+  );
+
+  /// Shared app-shell header padding (Story 1.6) — Home/Chat's dark-green
+  /// header and every back-arrow header's `padding:59px 16px 16px`; 59
+  /// clears the status bar in the prototype's fixed frame and isn't on the
+  /// 4dp spacing scale.
+  static const EdgeInsets navHeaderPadding = EdgeInsets.fromLTRB(
+    spacingMd,
+    59,
+    spacingMd,
+    spacingMd,
+  );
+
+  /// Drawer's own outer content padding — `padding:59px 16px 24px`.
+  static const EdgeInsets drawerContentPadding = EdgeInsets.fromLTRB(
+    spacingMd,
+    59,
+    spacingMd,
+    spacingLg,
+  );
+
+  /// Drawer header row's bottom padding, above its `border-bottom` —
+  /// `padding-bottom:16px`.
+  static const EdgeInsets drawerHeaderPadding = EdgeInsets.only(
+    bottom: spacingMd,
+  );
+
+  /// Drawer's own nav items (Meus Registros/Planos de Ação/Configurações) —
+  /// `padding:10px 4px`; 10 isn't on the 4dp scale.
+  static const EdgeInsets drawerNavItemPadding = EdgeInsets.symmetric(
+    horizontal: 4,
+    vertical: 10,
+  );
+
+  /// Drawer's "Novo Chat" filled action — `padding:10px 12px`.
+  static const EdgeInsets drawerPrimaryActionPadding = EdgeInsets.symmetric(
+    horizontal: spacingSm + 4,
+    vertical: 10,
+  );
+
+  /// Kanban board's scrollable row padding — `padding:0 16px 16px`.
+  static const EdgeInsets kanbanBoardPadding = EdgeInsets.fromLTRB(
+    spacingMd,
+    0,
+    spacingMd,
+    spacingMd,
+  );
+
+  /// Kanban card's own padding — `padding:12px 12px 12px 18px` (extra left
+  /// clears the card's own color spine).
+  static const EdgeInsets kanbanCardPadding = EdgeInsets.fromLTRB(
+    18,
+    spacingSm + 4,
+    spacingSm + 4,
+    spacingSm + 4,
+  );
 }

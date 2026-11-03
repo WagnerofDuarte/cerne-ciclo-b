@@ -140,19 +140,140 @@ void main() {
     test('buttonPadding — horizontal spacingLg, vertical spacingSm', () {
       expect(
         DesignTokens.buttonPadding,
-        const EdgeInsets.symmetric(horizontal: DesignTokens.spacingLg, vertical: DesignTokens.spacingSm),
+        const EdgeInsets.symmetric(
+          horizontal: DesignTokens.spacingLg,
+          vertical: DesignTokens.spacingSm,
+        ),
       );
     });
 
-    test('textFieldContentPadding — horizontal spacingMd, vertical spacingSm', () {
-      expect(
-        DesignTokens.textFieldContentPadding,
-        const EdgeInsets.symmetric(horizontal: DesignTokens.spacingMd, vertical: DesignTokens.spacingSm),
-      );
-    });
+    test(
+      'textFieldContentPadding — horizontal spacingMd, vertical spacingSm',
+      () {
+        expect(
+          DesignTokens.textFieldContentPadding,
+          const EdgeInsets.symmetric(
+            horizontal: DesignTokens.spacingMd,
+            vertical: DesignTokens.spacingSm,
+          ),
+        );
+      },
+    );
 
     test('avatarInitialsPadding — spacingXs on all sides', () {
-      expect(DesignTokens.avatarInitialsPadding, const EdgeInsets.all(DesignTokens.spacingXs));
+      expect(
+        DesignTokens.avatarInitialsPadding,
+        const EdgeInsets.all(DesignTokens.spacingXs),
+      );
+    });
+
+    test(
+      'dialogScreenMargin — 20dp horizontal (Story 1.5 confirmation dialog)',
+      () {
+        expect(
+          DesignTokens.dialogScreenMargin,
+          const EdgeInsets.symmetric(horizontal: 20),
+        );
+      },
+    );
+
+    test(
+      'dialogCardPadding — 20dp horizontal, spacingLg vertical (Story 1.5)',
+      () {
+        expect(
+          DesignTokens.dialogCardPadding,
+          const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: DesignTokens.spacingLg,
+          ),
+        );
+      },
+    );
+  });
+
+  group('DesignTokens — Story 1.5 confirmation-dialog tokens', () {
+    test('colorScrim — rgba(36,31,25,.22)', () {
+      expect(DesignTokens.colorScrim, const Color(0x38241F19));
+    });
+
+    test('dialogIconSize — 20dp', () {
+      expect(DesignTokens.dialogIconSize, 20);
+    });
+
+    test('dialogContentGap — 14dp', () {
+      expect(DesignTokens.dialogContentGap, 14);
+    });
+  });
+
+  group('DesignTokens — Story 1.6 navigation shell tokens', () {
+    test('colorScrimHeavy — rgba(36,31,25,.4)', () {
+      expect(DesignTokens.colorScrimHeavy, const Color(0x66241F19));
+    });
+
+    test('drawerWidth — 312dp (80% of the 390 frame)', () {
+      expect(DesignTokens.drawerWidth, 312);
+    });
+
+    test('nav icon sizes', () {
+      expect(DesignTokens.navMenuIconSize, 24);
+      expect(DesignTokens.navBackIconSize, 22);
+      expect(DesignTokens.drawerItemIconSize, 20);
+    });
+
+    test('nav/drawer header gaps', () {
+      expect(DesignTokens.navHeaderGap, 12);
+      expect(DesignTokens.drawerHeaderGap, 10);
+    });
+
+    test('kanban sizing — column gap/min-width, header gap, dot, spine', () {
+      expect(DesignTokens.kanbanColumnGap, 12);
+      expect(DesignTokens.kanbanColumnMinWidth, 150);
+      expect(DesignTokens.kanbanColumnHeaderGap, 10);
+      expect(DesignTokens.kanbanDotSize, 8);
+      expect(DesignTokens.kanbanCardSpineWidth, 3);
+    });
+
+    test('navHeaderPadding — 59/16/16 (status-bar clearance + spacingMd)', () {
+      expect(
+        DesignTokens.navHeaderPadding,
+        const EdgeInsets.fromLTRB(
+          DesignTokens.spacingMd,
+          59,
+          DesignTokens.spacingMd,
+          DesignTokens.spacingMd,
+        ),
+      );
+    });
+
+    test('drawerContentPadding — 59/16/24', () {
+      expect(
+        DesignTokens.drawerContentPadding,
+        const EdgeInsets.fromLTRB(
+          DesignTokens.spacingMd,
+          59,
+          DesignTokens.spacingMd,
+          DesignTokens.spacingLg,
+        ),
+      );
+    });
+
+    test('kanbanBoardPadding — 0/16/16', () {
+      expect(
+        DesignTokens.kanbanBoardPadding,
+        const EdgeInsets.fromLTRB(
+          DesignTokens.spacingMd,
+          0,
+          DesignTokens.spacingMd,
+          DesignTokens.spacingMd,
+        ),
+      );
+    });
+
+    test('kanbanCardPadding — 18/12/12/12', () {
+      expect(
+        DesignTokens.kanbanCardPadding,
+        const EdgeInsets.fromLTRB(18, 12, 12, 12),
+      );
     });
   });
 }

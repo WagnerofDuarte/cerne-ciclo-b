@@ -6,7 +6,9 @@ import 'package:dio/dio.dart';
 import 'package:fpdart/fpdart.dart';
 
 import '../failure/failure.dart';
+import '../session/session_expiry_notifier.dart';
 import 'dio_error_code.dart';
+import 'header_interceptor.dart';
 import 'url_builder.dart';
 
 /// AD-2/AD-5 — the one network façade every repository's data source calls
@@ -15,15 +17,25 @@ import 'url_builder.dart';
 /// every outcome — success or failure — to `Either<Failure, T>`; no
 /// dio/native exception ever escapes unmapped (RNF09).
 ///
+/// Story 1.5: also the one detection point for a mid-session `AUTH_EXPIRED`
+/// — signals [SessionExpiryNotifier] when one is seen outside
+/// `HeaderInterceptor.anonKeyOnlyFunctions`, so the boot-time `auth-refresh`
+/// call (Story 1.4's `restoreSession()`) never triggers it.
+///
 /// Tests mock this interface directly (per the architecture spine's testing
 /// convention), not a fake transport layer underneath it.
 class ApiClient {
-  ApiClient({required Dio dio, required UrlBuilder urlBuilder})
-      : _dio = dio,
-        _urlBuilder = urlBuilder;
+  ApiClient({
+    required Dio dio,
+    required UrlBuilder urlBuilder,
+    required SessionExpiryNotifier sessionExpiryNotifier,
+  })  : _dio = dio,
+        _urlBuilder = urlBuilder,
+        _sessionExpiryNotifier = sessionExpiryNotifier;
 
   final Dio _dio;
   final UrlBuilder _urlBuilder;
+  final SessionExpiryNotifier _sessionExpiryNotifier;
 
   Future<Either<Failure, Map<String, dynamic>>> get(
     String function, {
@@ -104,9 +116,33 @@ class ApiClient {
     }
     final data = e.response?.data;
     final message = data is Map ? data['message'] : null;
-    return Failure.fromCode(
+    final failure = Failure.fromCode(
       code,
       (message is String ? message : null) ?? e.message ?? 'Unknown error',
     );
+    if (failure is AuthExpired && !_isAnonKeyOnlyCall(e)) {
+      _sessionExpiryNotifier.notifyExpired();
+    }
+    return failure;
+  }
+
+  /// Whether [e]'s request targeted one of the three `security: []`
+  /// operations (signup, login, refresh) — the only calls `AUTH_EXPIRED`
+  /// must never be treated as a mid-session expiry for, since those are the
+  /// anon-keyed calls Story 1.4's `restoreSession()` itself makes.
+  ///
+  /// Mirrors `HeaderInterceptor.onRequest`'s own fail-open behavior: a
+  /// malformed `requestOptions.path` (shouldn't happen — `UrlBuilder`
+  /// always produces a valid URL) is treated as "not anon-key-only" rather
+  /// than letting a `FormatException` escape this mapping step unmapped
+  /// (RNF09).
+  bool _isAnonKeyOnlyCall(DioException e) {
+    String function;
+    try {
+      function = HeaderInterceptor.functionNameOf(e.requestOptions.path);
+    } catch (_) {
+      function = '';
+    }
+    return HeaderInterceptor.anonKeyOnlyFunctions.contains(function);
   }
 }

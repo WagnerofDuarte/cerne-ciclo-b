@@ -1,5 +1,6 @@
 import '../../core/di/injection_container.dart';
 import '../../core/network/access_token_provider.dart';
+import '../../core/session/session_expiry_notifier.dart';
 import 'data/datasources/auth_remote_data_source.dart';
 import 'data/repositories/auth_repository_impl.dart';
 import 'data/repositories/session_repository_impl.dart';
@@ -34,9 +35,15 @@ void registerAuthFeature() {
     () => SessionRepositoryImpl(
       remoteDataSource: sl(),
       accessTokenProvider: sl<AccessTokenProvider>(),
+      sessionExpiryNotifier: sl<SessionExpiryNotifier>(),
     ),
     dispose: (repository) => repository.dispose(),
   );
 
-  sl.registerLazySingleton<AuthCubit>(() => AuthCubit(sl()));
+  // Story 1.6 — `AuthCubit` additionally depends on `SessionRepository`
+  // (registered above) so its `submit()` success branch can call
+  // `markAuthenticated()`.
+  sl.registerLazySingleton<AuthCubit>(
+    () => AuthCubit(sl(), sl<SessionRepository>()),
+  );
 }

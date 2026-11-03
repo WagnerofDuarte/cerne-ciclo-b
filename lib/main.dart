@@ -2,14 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:fpdart/fpdart.dart' hide State;
+import 'package:go_router/go_router.dart';
 
-import 'core/design_tokens.dart';
 import 'core/di/injection_container.dart';
 import 'core/failure/failure.dart';
-import 'features/auth/domain/entities/session_status.dart';
+import 'core/navigation/app_router.dart';
+import 'core/navigation/expiry_overlay_host.dart';
 import 'features/auth/domain/repositories/session_repository.dart';
-import 'features/auth/presentation/cubit/auth_cubit.dart';
-import 'features/auth/presentation/screens/auth_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,15 +27,16 @@ Future<void> main() async {
 
 /// Root widget. Portrait-only, light-mode-only, fixed 390x844 frame — no
 /// breakpoint, landscape or dark-mode path anywhere in the app (per the
-/// epic's UX constraints).
+/// epic's UX constraints; the portrait lock itself lives in
+/// `ios/Runner/Info.plist`, Story 1.6).
 ///
-/// Story 1.4 scope: `home` branches on `SessionRepository.statusStream`
-/// instead of hardcoding `AuthScreen` — `restoreSession()` fires once at
-/// boot (unconditional, no client-side expiry math) and the stream's first
-/// emission decides whether the user lands on `AuthScreen` or the post-auth
-/// placeholder. No `go_router` yet (Story 1.6): the `MaterialApp`/`Navigator`
-/// shape is unchanged, and a successful signup/login still simply
-/// pushes-replaces via `onAuthenticated`.
+/// Story 1.6 scope: the ad-hoc `StreamBuilder`/`Navigator.push` shell
+/// Stories 1.3-1.5 built this on top of is replaced by the one real
+/// `go_router` (`core/navigation/app_router.dart`) plus its
+/// `ExpiryOverlayHost` wrapper — [restoreSession] still fires once at boot
+/// here (unchanged from Story 1.4), but every screen transition and the
+/// expiry overlay's own "Entrar novamente" now go through that router
+/// instead of an imperative `Navigator`.
 class CerneApp extends StatefulWidget {
   const CerneApp({super.key});
 
@@ -46,20 +46,44 @@ class CerneApp extends StatefulWidget {
 
 class _CerneAppState extends State<CerneApp> {
   late final SessionRepository _sessionRepository;
+  late final GoRouter _router;
+
+  // Created here (not left for `GoRouter` to generate internally) and
+  // passed to both `buildAppRouter` and `ExpiryOverlayHost` below, so the
+  // latter can reach the Navigator's own `BuildContext` through this
+  // public, documented key instead of reaching into `GoRouter`'s internal
+  // `routerDelegate`.
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>(
+    debugLabel: 'root',
+  );
 
   @override
   void initState() {
     super.initState();
     _sessionRepository = sl<SessionRepository>();
-    // Fire-and-forget: the outcome reaches the UI through `statusStream`
-    // below, not through this call's return value. `restoreSession()`
-    // already maps every internal failure to `Left`/an `unauthenticated`
-    // emission and never throws, but swallowing any error here anyway is
-    // cheap insurance against it otherwise surfacing as an unhandled zone
-    // exception.
+    _router = buildAppRouter(
+      sessionRepository: _sessionRepository,
+      navigatorKey: _navigatorKey,
+    );
+    // Fire-and-forget: the outcome reaches the UI through
+    // `SessionRepository.currentStatus`/`statusStream` (which the router's
+    // `redirect`/`refreshListenable` already watch), not through this
+    // call's return value. `restoreSession()` already maps every internal
+    // failure to `Left`/an `unauthenticated` emission and never throws.
+    // This `catchError` is NOT a UI recovery path — its handler's return
+    // value is discarded by `unawaited` and never reaches `statusStream`.
+    // It exists purely so a future regression that broke the "never
+    // throws" contract above would surface as a logged message instead of
+    // an unhandled zone exception.
     unawaited(
       _sessionRepository.restoreSession().catchError(_asUnauthenticated),
     );
+  }
+
+  @override
+  void dispose() {
+    _router.dispose();
+    super.dispose();
   }
 
   // `catchError`'s handler must still complete the Future with a value of
@@ -76,94 +100,14 @@ class _CerneAppState extends State<CerneApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return MaterialApp.router(
       debugShowCheckedModeBanner: false,
-      home: StreamBuilder<SessionStatus>(
-        stream: _sessionRepository.statusStream,
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            // No emission yet: brief-blank for the happy path (RNF01's
-            // 300ms threshold) — `_BootLoadingScreen` only surfaces a
-            // spinner once the wait actually crosses that.
-            return const _BootLoadingScreen();
-          }
-          if (snapshot.data == SessionStatus.authenticated) {
-            return const _PostAuthPlaceholder();
-          }
-          return AuthScreen(
-            cubit: sl<AuthCubit>(),
-            onAuthenticated: (context) => Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const _PostAuthPlaceholder()),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-/// Throwaway placeholder — Story 1.6 replaces this wholesale with the real
-/// base navigation shell. Exists only so Story 1.3 has somewhere to land
-/// after a successful signup/login.
-class _PostAuthPlaceholder extends StatelessWidget {
-  const _PostAuthPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: DesignTokens.colorSurfaceBg,
-      body: const Center(
-        child: Text('Autenticado', style: DesignTokens.textHeadlineMd),
-      ),
-    );
-  }
-}
-
-/// Shown while `statusStream` has no data yet. Blank for the happy path
-/// (RNF01: no loading UI below 300ms), but surfaces a centered spinner once
-/// the wait crosses that threshold — `auth-refresh` is retried by
-/// `RetryInterceptor` on `NETWORK_TIMEOUT`/`NETWORK_OFFLINE`, so a slow or
-/// offline boot could otherwise leave the screen looking frozen for several
-/// seconds with zero feedback. Kept as a private, inline, one-off widget
-/// (no new shared-widget param) — same minimal-treatment convention Story
-/// 1.3's submit button uses for its own >300ms affordance.
-class _BootLoadingScreen extends StatefulWidget {
-  const _BootLoadingScreen();
-
-  @override
-  State<_BootLoadingScreen> createState() => _BootLoadingScreenState();
-}
-
-class _BootLoadingScreenState extends State<_BootLoadingScreen> {
-  static const _threshold = Duration(milliseconds: 300);
-
-  bool _showIndicator = false;
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer(_threshold, () {
-      if (mounted) {
-        setState(() => _showIndicator = true);
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: DesignTokens.colorSurfaceBg,
-      body: Center(
-        child: _showIndicator
-            ? const CircularProgressIndicator(color: DesignTokens.colorPrimary)
-            : const SizedBox.shrink(),
+      routerConfig: _router,
+      builder: (context, child) => ExpiryOverlayHost(
+        sessionRepository: _sessionRepository,
+        router: _router,
+        navigatorKey: _navigatorKey,
+        child: child!,
       ),
     );
   }

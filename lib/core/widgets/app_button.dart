@@ -39,13 +39,19 @@ class AppButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Widget child = Text(label, textAlign: TextAlign.center, style: DesignTokens.textLabelMd);
+    final Widget child = Text(
+      label,
+      textAlign: TextAlign.center,
+      style: DesignTokens.textLabelMd,
+    );
 
     final ButtonStyle baseStyle = ButtonStyle(
       padding: const WidgetStatePropertyAll(DesignTokens.buttonPadding),
       shape: const WidgetStatePropertyAll(
         RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(DesignTokens.radiusSm)),
+          borderRadius: BorderRadius.all(
+            Radius.circular(DesignTokens.radiusSm),
+          ),
         ),
       ),
       elevation: const WidgetStatePropertyAll(0),
@@ -96,9 +102,15 @@ class AppButton extends StatelessWidget {
             }),
             side: WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.disabled)) {
-                return const BorderSide(color: DesignTokens.colorBorder, width: DesignTokens.borderWidthDefault);
+                return const BorderSide(
+                  color: DesignTokens.colorBorder,
+                  width: DesignTokens.borderWidthDefault,
+                );
               }
-              return const BorderSide(color: DesignTokens.colorPrimary, width: DesignTokens.borderWidthDefault);
+              return const BorderSide(
+                color: DesignTokens.colorPrimary,
+                width: DesignTokens.borderWidthDefault,
+              );
             }),
           ),
           child: child,

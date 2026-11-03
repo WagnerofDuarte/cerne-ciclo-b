@@ -2,303 +2,189 @@
 
 ## Context
 
-Story 1.1 (project scaffold, stack integration & core infrastructure) is the
-only story marked `done`. No feature screens exist yet (`lib/features/` is
-empty) and no device/simulator/CI pipeline exists (AGENTS.md), so there is no
-UI to drive a traditional E2E test against. The only "API" surface
-implemented so far is the core network pipeline: `UrlBuilder`,
-`HeaderInterceptor`, `RetryInterceptor`, `ApiClient`, `AccessTokenProvider`,
-and their DI wiring in `setupCoreDependencies`.
+Cerne has no device/simulator or CI pipeline yet (AGENTS.md), so a true
+platform-level E2E (`integration_test` on a real/simulated device) isn't
+viable right now. The project already substitutes composition-root widget
+tests — `CerneApp` pumped with only a single named boundary faked (the
+`AuthRepository`/`SessionRepository` interface, or, in
+`network_pipeline_integration_test.dart`, the `HttpClientAdapter`) — as its
+E2E equivalent. `ApiClient`'s own docstring states the convention
+explicitly: tests mock `ApiClient` directly; only one dedicated suite is
+allowed to fake the transport boundary beneath it. All API-level coverage
+(status codes, response mapping, the 3-error write-failure matrix per
+write endpoint, retry behavior, header/URL building) already exists across
+`test/core/network/` and `test/features/auth/data/`.
 
-Each of those units already had thorough isolated unit tests (mocking `Dio`
-directly, or driving one interceptor at a time). The gap: nothing proved the
-pieces work *wired together* the way `setupCoreDependencies` actually wires
-them — real `Dio`, both real interceptors attached, real `UrlBuilder` — or
-that a retry genuinely goes back out over the wire. That gap is what this
-pass fills, in the same spirit `bootstrap_integration_test.dart` already
-established (fake only the transport boundary; everything above it is real).
-
-## Generated Tests
-
-### API Tests (network pipeline, end-to-end through the real wiring)
-
-- [x] `test/core/network/network_pipeline_integration_test.dart` — real `Dio`
-      + real `HeaderInterceptor` + real `RetryInterceptor` + real
-      `UrlBuilder`, with only `HttpClientAdapter` faked (no real network
-      calls). Covers:
-  - anon-only operation (`auth-login`): correct `x-cerne-function` URL,
-    `apikey` + anon `Authorization` headers, success maps to `Right`.
-  - bearer operation with a stored user token + trailing path params
-    (`chat-messages-retry/{sessionId}/{messageId}`): user token sent instead
-    of the anon key, URL built from the real segments, never the literal
-    `openapi.yaml` path (AD-5).
-  - a retryable error (`RATE_LIMITED`) that recovers on retry: the retry
-    actually re-sends a second real request and the eventual success maps to
-    `Right`.
-  - a retryable error (`NETWORK_TIMEOUT`) that never recovers: retried
-    exactly `maxRetries` times, then surfaces as `Left(NetworkTimeout)`.
-  - a non-retryable error (`AUTH_INVALID`): surfaces immediately as
-    `Left(AuthInvalid)`, with no retry request ever sent.
-
-No new UI exists to generate E2E tests for; no new API endpoints beyond the
-network pipeline itself exist yet.
-
-## Coverage
-
-- Core network pipeline: unit-level coverage already complete (pre-existing);
-  this pass adds the missing wired-together integration coverage.
-- UI features: none implemented yet (first screen is story 1.3,
-  account-creation-and-login — backlog).
-
-## Verification
-
-- `fvm flutter test` — 88/88 passing (83 pre-existing + 5 new).
-- `fvm flutter analyze` — no issues found.
-
-## Next Steps
-
-- Revisit E2E test strategy once a device/simulator or CI step exists
-  (AGENTS.md's open TODO) and once story 1.3 ships the first real screen.
-- Add API-pipeline coverage for each new `x-cerne-function` operation as its
-  consuming feature/story is implemented, following this same
-  faked-transport-boundary pattern.
-
----
-
-# Story 1.2 — Design Token System & Core Component Library
-
-## Context
-
-Story 1.2 delivered `lib/core/design_tokens.dart` and three shared widgets
-(`AppButton`, `AppTextField`, `Avatar`). Each component already had thorough
-*isolated* widget tests (one component at a time, checked against
-`DesignTokens` values). The gap: nothing proved the shared text-field/button
-primitives work together the way a consuming screen composes them — user
-keystrokes, taps, and focus changes flowing through multiple widgets in the
-same tree. That is a gap in the component library's own test coverage, not a
-screen's — it holds regardless of which feature consumes the widgets, and
-still no device/simulator/CI pipeline exists (AGENTS.md), so a traditional
-on-device E2E run isn't possible either way.
-
-(Story 1.3's actual login screen, `auth_screen.dart`, already shipped by the
-time of this round of patches — see `git log`. Its own `auth_screen_test.dart`
-is BLoC/cubit-focused and doesn't exercise raw widget interaction such as
-obscured-text-while-typing, keyboard-action focus movement, or a disabled
-button's `onPressed` actually staying `null`; this harness is not a stand-in
-for that screen, it covers what that screen's test suite does not.)
+Before adding anything, the full suite was run: **194/194 tests passing**,
+`flutter analyze`: **0 issues**. Given that density, the only legitimate
+gap found was in the composition-root (E2E-equivalent) layer.
 
 ## Generated Tests
 
-### Composition/interaction tests (shared widget library, user-driven)
+### E2E Tests (composition-root, `test/main_test.dart`)
 
-- [x] `test/core/widgets/component_library_interaction_test.dart` — a
-      `StatefulWidget` test harness (test-only, not shipped code) composing
-      two `AppTextField`s + one `AppButton` the way a form screen will.
-      Covers, through real taps and keystrokes:
-  - submit button stays disabled (`onPressed: null`) until both fields are
-    non-empty, and enables once they are.
-  - tapping the enabled button delivers the typed e-mail and senha values.
-  - an invalid e-mail surfaces the error border (`colorError`, 1.5px
-    `borderWidthEmphasis`) and error text, and never calls the submit
-    callback.
-  - correcting the e-mail after an invalid submit and resubmitting clears
-    the error and calls the submit callback.
-  - pressing the keyboard's "next" action on the e-mail field moves focus
-    to the senha field (`TextField`'s built-in default behavior — no extra
-    wiring needed).
-  - the senha field stays obscured while typing.
-  - a disabled button's `onPressed` is actually `null`, and tapping it never
-    fires the callback.
-  - the whole composed form renders with no overflow/exception at a 3.0x
-    Dynamic Type scale.
+- [x] `test/main_test.dart` — **new**: "CerneApp resolves the real AuthCubit
+  and navigates to the post-auth placeholder once signup succeeds" —
+  mirrors the existing real-wiring login test, but drives the
+  toggle-to-signup path. Previously, signup was only exercised against a
+  directly-constructed `AuthScreen`/`AuthCubit` pair
+  (`auth_screen_test.dart`), never through `main.dart`'s actual
+  `sl<AuthCubit>()` resolution and `onAuthenticated` → `Navigator`
+  wiring — only the login path had that proof.
 
-No new API endpoints exist for this story (pure UI/design-system work).
+No other E2E or API gaps were found; everything else implemented so far
+(design tokens/component library, auth validators, auth cubit, auth
+repository/data source, session repository, network pipeline, DI bootstrap)
+already has dedicated coverage at the appropriate layer.
 
 ## Coverage
 
-- Core component library: unit-level coverage already complete
-  (pre-existing, one widget at a time); this pass adds the missing
-  cross-component interaction coverage.
-- UI features: Story 1.3's login/signup screen is covered by its own
-  `auth_screen_test.dart` (BLoC-focused); this harness covers the shared
-  widgets' interaction behavior independent of any one screen.
+- Composition-root E2E scenarios: login ✅, **signup ✅ (added)**,
+  authenticated-boot ✅, unauthenticated-boot ✅, boot-loading-threshold ✅
+- API/data-source coverage: auth-login, auth-signup, auth-refresh — happy
+  path + the full 3-case write-failure matrix (timeout/malformed/offline)
+  each, plus retry and non-retry behavior proven over a faked transport
+- Implemented feature scope (per `sprint-status.yaml`): stories 1.1–1.4
+  (scaffold, design tokens, auth, session refresh) — all covered. Stories
+  1.5+ are still `backlog`, so out of scope for this pass.
 
 ## Verification
 
-- `fvm flutter test` — 169/169 passing (161 pre-existing + 8 new).
-- `fvm flutter analyze` — no issues found.
+- `fvm flutter test` → 195/195 passing (194 pre-existing + 1 new)
+- `fvm flutter analyze` → 0 issues
 
 ## Next Steps
 
-- Revisit true device E2E once a device/simulator or CI step exists
-  (AGENTS.md's open TODO).
+- Revisit the "no device/CI" constraint (AGENTS.md) once a simulator or CI
+  step exists — at that point, a real `integration_test` driver test
+  becomes possible and composition-root tests can be retired in its favor.
+- Re-run this pass after each future story (1.6 navigation shell, …) lands,
+  since each adds a new composition-root surface worth the same
+  login/signup-style proof.
 
 ---
 
-# Story 1.3 — Account Creation and Login
+# Story 1.5 — Expired-Session Recovery Overlay
 
 ## Context
 
-Story 1.3 delivered the first real feature screen (`AuthScreen`, Tela 0.1a)
-and the first feature-level API surface (`auth-login`/`auth-signup`). Unlike
-stories 1.1 and 1.2, the dev-story and code-review passes for this story
-already produced both an E2E-shaped screen test and an API-shaped repository
-test directly — this pass's job is to audit that coverage against the
-story's own I/O matrix (`spec-1-3-account-creation-and-login.md`) rather than
-author it from scratch, and to record the audit here since this file hadn't
-been updated since story 1.2.
+Story 1.5 adds a new core port (`SessionExpiryNotifier`), a third
+`SessionStatus` value (`expired`), a new shared `ConfirmationDialog`
+overlay widget, and `main.dart`'s reaction to the two together. Each new
+unit gets its own isolated test, and the composition-root suite
+(`test/main_test.dart`) gets the end-to-end proof that a mid-session
+`AUTH_EXPIRED` actually surfaces the overlay over the live screen and
+routes on confirm — same E2E-equivalent pattern this file's Story 1.4
+section established.
 
-No device/simulator/CI pipeline exists yet (AGENTS.md), so "E2E" here still
-means the same thing it meant for stories 1.1/1.2: drive the real composition
-through `flutter_test`, faking only the one boundary each layer can't avoid
-(the native secure-storage channel, or the HTTP transport) — not a
-traditional on-device run.
-
-## Audited Tests (pre-existing, not newly generated this pass)
-
-### E2E (screen- and composition-root-level, user-driven)
-
-- [x] `test/features/auth/presentation/screens/auth_screen_test.dart` — real
-      `AuthCubit` + mocked `AuthRepository`, driven via actual taps/keystrokes
-      on `AuthScreen`. Covers every row of the story's I/O matrix: valid
-      login, valid signup (exactly `{email, password}`), `AUTH_INVALID` in
-      both login and signup mode (both fields bordered, message shown once,
-      typed values kept), malformed e-mail blocked pre-network, empty
-      password blocked pre-network, a generic network failure rendered via
-      `Failure.message`, and no overflow at 3.0x Dynamic Type.
-- [x] `test/main_test.dart` — the one test that exercises the real
-      composition root (`CerneApp` → `sl<AuthCubit>()` → `onAuthenticated` →
-      `Navigator.pushReplacement`), added as a code-review patch for this
-      story (`spec-1-3-account-creation-and-login.md`, Review Findings). Only
-      `AuthRepository` is swapped for a mock; DI, the real cubit, and the
-      real navigation callback all run unchanged.
-
-### API (repository/data-source level, real wiring down to the HTTP boundary)
-
-- [x] `test/features/auth/data/repositories/auth_repository_impl_test.dart`
-      — real `AuthRemoteDataSource` (so the real DTO `fromJson`/request-body
-      shape is exercised), only `ApiClient` mocked. Runs the project's
-      standard `runWriteFailureMatrix` across `auth-signup` and `auth-login`
-      (3 failure types each) plus success mapping and the
-      save-token-before-`Right` ordering.
-- [x] `test/core/network/network_pipeline_integration_test.dart` (story 1.1)
-      already uses `auth-login` as its anon-only-operation example end to
-      end through the real `Dio` + both real interceptors + `UrlBuilder`,
-      with only the `HttpClientAdapter` faked — so the feature's actual
-      operation name is proven to reach the wire correctly, not just a
-      generic placeholder.
-
-## Gap Analysis — no new tests generated
-
-Between the two layers above, every AC and I/O-matrix row already has
-coverage, and the split mirrors this codebase's established pattern (each
-integration test fakes exactly one boundary, per `bootstrap_integration_test.dart`'s
-and `network_pipeline_integration_test.dart`'s own stated scope). A third
-test re-driving `auth-login`/`auth-signup` through the full stack with only
-transport faked would duplicate assertions already made in the two tests
-above without proving anything new, so none was added (skill guidance:
-avoid unnecessary abstractions/duplication).
-
-## Coverage
-
-- Auth feature: validators, cubit, repository/data-source, screen, and
-  composition root are each covered at the layer where coverage is cheapest
-  and clearest — no layer is untested.
-- API endpoints introduced by this story: `auth-login`, `auth-signup` — both
-  covered at the repository layer (full failure matrix) and proven to reach
-  the real wire at the pipeline layer.
-
-## Verification
-
-- `fvm flutter test` — 171/171 passing.
-- `fvm flutter analyze` — no issues found.
-
-## Next Steps
-
-- When story 1.4 (silent session refresh) lands, extend
-  `network_pipeline_integration_test.dart`-style real-wiring coverage to the
-  refresh-token operation, and add the equivalent repository-layer failure
-  matrix for it.
-- Revisit true device E2E once a device/simulator or CI step exists
-  (AGENTS.md's open TODO).
-
----
-
-# Story 1.4 — Silent Session Refresh & Persistence
-
-## Context
-
-Story 1.4 delivered the epic's one `SessionRepository`/`SessionStatus` stream
-and wired `auth-refresh` + boot-time restoration through it, closing the gap
-story 1.3's own summary flagged above. No new screen exists (`main.dart`
-branches `home` on the stream instead), so, as with stories 1.1/1.3, "E2E"
-here still means driving the real composition through `flutter_test`, faking
-only the one boundary each layer can't avoid.
+Code review of this story's own diff surfaced and fixed four gaps before
+landing: a rebuild that could reopen an already-dismissed overlay (no
+guard against calling `show()` more than once per `expired` episode), the
+system back gesture being able to dismiss the overlay despite the
+non-dismissible-barrier requirement (`PopScope` was missing), a synchronous
+`showGeneralDialog` failure permanently locking the single-overlay guard,
+and a stored-but-empty refresh token not short-circuiting
+`restoreSession()` the same way a `null` one does.
 
 ## Generated Tests
 
-### API (data-source/repository level, real wiring down to the HTTP boundary)
+### Unit (new core/feature code)
 
-- [x] `test/features/auth/data/datasources/auth_remote_data_source_test.dart`
-      — real `AuthRemoteDataSource.refresh()`, only `ApiClient` mocked. Runs
-      the project's standard `runWriteFailureMatrix` for `auth-refresh` (3
-      failure types), plus exact-request-body, nested-`session`-decoding, and
-      dead-token-passthrough checks.
+- [x] `test/core/session/session_expiry_notifier_test.dart` — **new**:
+  `SessionExpiryNotifierImpl.notifyExpired()`/`expiredEvents`/`dispose()`.
 - [x] `test/features/auth/data/repositories/session_repository_impl_test.dart`
-      — real `SessionRepositoryImpl`, `AuthRemoteDataSource` +
-      `AccessTokenProvider` mocked. Covers every row of the story's I/O
-      matrix (valid refresh token, no stored session, dead token —
-      `AUTH_EXPIRED` and `AUTH_INVALID` — and offline/fail-closed), the two
-      platform-exception paths (`readRefreshToken()`/`saveSession()`
-      throwing, RNF09), and `statusStream`'s replay-last-value semantics for
-      a late subscriber.
-- [x] `test/features/auth/data/repositories/auth_repository_impl_test.dart`
-      (story 1.3) — updated in place: `saveAccessToken` assertions became
-      `saveSession` assertions, now that signup/login persist both tokens.
-- [x] `test/core/network/network_pipeline_integration_test.dart` (story 1.1)
-      — extended with an `auth-refresh` case proving it goes out with the
-      anon-key bearer even when a stale user access token is already stored,
-      mirroring the existing `auth-login` case.
-- [x] `test/core/network/access_token_provider_test.dart` (story 1.1) —
-      extended with round-trip coverage for `saveSession`/`readRefreshToken`/
-      `clearSession` against the real `SecureStorageAccessTokenProvider`
-      (same faked-native-channel approach as the pre-existing three-method
-      coverage in that file).
+  — **extended**: the `expired` bridge's whole I/O matrix (mid-session
+  expiry while authenticated, while unauthenticated, before any status
+  yet, a second event while already `expired`, `dispose()` cancelling the
+  subscription), plus a stored-but-empty refresh token now being treated
+  as "no session" the same as `null`.
+- [x] `test/core/network/api_client_test.dart` — **extended**: the
+  notifier fires only for a mid-session `AUTH_EXPIRED` outside
+  `anonKeyOnlyFunctions`.
+- [x] `test/core/network/network_pipeline_integration_test.dart` —
+  **extended**: an `AUTH_EXPIRED` response on a bearer call reaches the
+  notifier through the real wiring, not just the mocked `ApiClient` unit.
 
-### Composition root
+### Composition/interaction (shared widget)
 
-- [x] `test/main_test.dart` (story 1.3) — extended with the two boot
-      branches this story adds: `statusStream` emitting `authenticated` lands
-      directly on the post-auth placeholder with `AuthScreen` never shown,
-      and emitting `unauthenticated` shows `AuthScreen` with the placeholder
-      never shown. The pre-existing login-flow test now also pumps past the
-      real (unmocked in that test) `restoreSession()` boot call before
-      interacting with the screen.
+- [x] `test/core/widgets/confirmation_dialog_test.dart` — **new**: neutral
+  vs. destructive `titleColor`, the non-dismissible scrim (including a
+  dedicated check that the tap is actually absorbed by the barrier rather
+  than just leaving the dialog on screen), the back-gesture `PopScope`
+  guard, the single-overlay guard, `onConfirm` firing, focus staying
+  trapped on the dialog under Tab traversal, and no overflow at 3.0x
+  Dynamic Type.
 
-No new UI exists to generate a traditional E2E test for; `auth-refresh` is
-the only new API endpoint this story introduces, and it's covered at both
-the data-source/repository layer (above) and the real-pipeline layer.
+### E2E Tests (composition-root, `test/main_test.dart`)
+
+- [x] `test/main_test.dart` — **extended**, new "Story 1.5" group: the
+  overlay appearing over the still-mounted authenticated screen, a second
+  `expired` emission never stacking a second dialog, "Entrar novamente"
+  dismissing the overlay and routing to the biometric/PIN placeholder, and
+  a later rebuild while `statusStream` is still `expired` (simulated by
+  pumping the same `CerneApp` root again) not reopening an
+  already-confirmed overlay.
 
 ## Coverage
 
-- Session feature: `AccessTokenProvider`'s new surface, the data source, the
-  repository (full I/O matrix + exception paths + stream semantics), and the
-  composition root (`main.dart`'s boot branch) are each covered at the layer
-  where coverage is cheapest and clearest.
-- API endpoints introduced by this story: `auth-refresh` — covered at the
-  data-source layer (full failure matrix) and proven to reach the real wire
-  at the pipeline layer, same as `auth-login`/`auth-signup` were in story 1.3.
+- Composition-root E2E scenarios: mid-session expiry overlay ✅, no
+  second overlay on a repeat event ✅, confirm-and-route ✅, no reopen on
+  an unrelated rebuild ✅ (added)
+- Core/unit coverage: `SessionExpiryNotifier`, the `expired` bridge's full
+  I/O matrix, `ConfirmationDialog`'s accessibility/dismissal guarantees —
+  all covered at the layer where coverage is cheapest and clearest.
+- Implemented feature scope (per `sprint-status.yaml`): stories 1.1–1.5 —
+  all covered. Story 1.6 is still `backlog`, so out of scope for this pass.
 
 ## Verification
 
-- `fvm flutter test` — 192/192 passing.
-- `fvm flutter analyze` — no issues found.
+- `fvm flutter test` → 223/223 passing
+- `fvm flutter analyze` → 0 issues
 
 ## Next Steps
 
-- When story 1.5 (expired-session recovery overlay) lands, it listens to
-  this same `statusStream` reactively (on a raw 401 mid-session) rather than
-  only at boot — extend coverage there rather than re-deriving session
-  validity from a second mechanism.
-- Revisit true device E2E once a device/simulator or CI step exists
-  (AGENTS.md's open TODO).
+- When Story 1.6 (base navigation shell) replaces `main.dart`'s
+  `MaterialApp`/`Navigator` shape with `go_router`, re-home this story's
+  composition-root assertions onto whatever replaces `_CerneAppState`.
+- Epic 2's real biometric/PIN re-auth flow is the first thing that will
+  need to transition `SessionStatus` back out of `expired` — extend this
+  story's bridge coverage there rather than re-deriving it (tracked in
+  `deferred-work.md`).
+
+---
+
+# QA Verification Pass (2026-11-02)
+
+## Context
+
+Re-ran this skill against the current working tree (sprint status still
+shows 1.1–1.5 `done`, 1.6 `backlog`). Before generating anything, checked
+for gaps: every `lib/` file has a corresponding test at the appropriate
+layer (unit for pure logic, widget for shared components, composition-root
+in `test/main_test.dart` for the E2E-equivalent flows), including the files
+not yet reflected in this document's own history —
+`lib/core/widgets/confirmation_dialog.dart`'s later review-round additions
+(the synchronous-`showGeneralDialog`-throw guard, the Tab-traversal
+focus-trap test) and the shared `test/support/mock_session_expiry_notifier.dart`
+helper (replacing the two duplicate inline mocks per story-1-5's own review
+finding).
+
+## Result
+
+No new API or E2E test was generated — no gap was found. The full suite
+passes (**229/229**, up from the 223 recorded in this file's last pass,
+reflecting review-round test additions landed since) and
+`fvm flutter analyze` reports **0 issues**. Story 1.6+ is still `backlog`
+(`lib/` has no navigation-shell code to test yet), so out of scope.
+
+## Verification
+
+- `fvm flutter pub get` — resolved, no conflicts
+- `fvm flutter test` → 229/229 passing
+- `fvm flutter analyze` → 0 issues
+
+## Next Steps
+
+- Re-run this pass once Story 1.6 lands — it's the next story expected to
+  add a composition-root surface worth the same E2E-equivalent proof this
+  file's login/signup/session-expiry sections already establish.

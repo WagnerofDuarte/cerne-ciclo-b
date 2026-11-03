@@ -10,6 +10,7 @@ import 'package:cerne/core/network/api_client.dart';
 import 'package:cerne/core/network/header_interceptor.dart';
 import 'package:cerne/core/network/retry_interceptor.dart';
 import 'package:cerne/core/network/url_builder.dart';
+import 'package:cerne/core/session/session_expiry_notifier.dart';
 
 /// Every other network test (`api_client_test.dart`, `header_interceptor_test.dart`,
 /// `retry_interceptor_test.dart`) mocks `Dio` itself or drives one interceptor
@@ -97,11 +98,13 @@ void main() {
 
   late _FakeHttpClientAdapter adapter;
   late _InMemoryAccessTokenProvider tokenProvider;
+  late SessionExpiryNotifierImpl sessionExpiryNotifier;
   late ApiClient apiClient;
 
   setUp(() {
     adapter = _FakeHttpClientAdapter();
     tokenProvider = _InMemoryAccessTokenProvider();
+    sessionExpiryNotifier = SessionExpiryNotifierImpl();
 
     // Mirrors `setupCoreDependencies`'s wiring exactly: real Dio, both real
     // interceptors attached in the same order, header interceptor fed the
@@ -112,7 +115,11 @@ void main() {
     );
     dio.interceptors.add(RetryInterceptor(dio));
 
-    apiClient = ApiClient(dio: dio, urlBuilder: const UrlBuilder(baseUrl));
+    apiClient = ApiClient(
+      dio: dio,
+      urlBuilder: const UrlBuilder(baseUrl),
+      sessionExpiryNotifier: sessionExpiryNotifier,
+    );
   });
 
   group('network pipeline — real Dio + real interceptors, faked transport', () {
@@ -246,5 +253,39 @@ void main() {
       }, (_) => fail('expected Left'));
       expect(adapter.requests, hasLength(1));
     });
+
+    test(
+      'Story 1.5: a mid-session AUTH_EXPIRED on a bearer endpoint fires the '
+      "real SessionExpiryNotifier's expiredEvents through the whole real "
+      'pipeline, while the same code on auth-refresh never does',
+      () async {
+        final events = <void>[];
+        final subscription = sessionExpiryNotifier.expiredEvents.listen(
+          events.add,
+        );
+        addTearDown(subscription.cancel);
+
+        adapter.queueJsonResponse(401, {
+          'code': 'AUTH_EXPIRED',
+          'message': 'Session expired',
+          'retryable': false,
+        });
+        await apiClient.get('entries-list');
+        await Future<void>.delayed(Duration.zero);
+        expect(events, hasLength(1));
+
+        adapter.queueJsonResponse(401, {
+          'code': 'AUTH_EXPIRED',
+          'message': 'Refresh token dead',
+          'retryable': false,
+        });
+        await apiClient.post(
+          'auth-refresh',
+          data: {'refreshToken': 'dead-token'},
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(events, hasLength(1));
+      },
+    );
   });
 }

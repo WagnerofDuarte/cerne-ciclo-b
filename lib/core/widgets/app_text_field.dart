@@ -42,7 +42,9 @@ class AppTextField extends StatelessWidget {
 
   OutlineInputBorder _border(Color color, double width) {
     return OutlineInputBorder(
-      borderRadius: const BorderRadius.all(Radius.circular(DesignTokens.radiusSm)),
+      borderRadius: const BorderRadius.all(
+        Radius.circular(DesignTokens.radiusSm),
+      ),
       borderSide: BorderSide(color: color, width: width),
     );
   }
@@ -58,7 +60,9 @@ class AppTextField extends StatelessWidget {
       onChanged: onChanged,
       maxLines: obscureText ? 1 : maxLines,
       minLines: null,
-      style: DesignTokens.textBodyLg.copyWith(color: DesignTokens.colorTextPrimary),
+      style: DesignTokens.textBodyLg.copyWith(
+        color: DesignTokens.colorTextPrimary,
+      ),
       cursorColor: DesignTokens.colorPrimary,
       decoration: InputDecoration(
         labelText: labelText,
@@ -70,15 +74,35 @@ class AppTextField extends StatelessWidget {
         filled: true,
         fillColor: DesignTokens.colorSurfaceElevated,
         contentPadding: DesignTokens.textFieldContentPadding,
-        labelStyle: DesignTokens.textBodyMd.copyWith(color: DesignTokens.colorTextSecondary),
-        hintStyle: DesignTokens.textBodyMd.copyWith(color: DesignTokens.colorTextSecondary),
-        errorStyle: DesignTokens.textBodyMd.copyWith(color: DesignTokens.colorError),
-        border: _border(DesignTokens.colorBorder, DesignTokens.borderWidthDefault),
-        enabledBorder: _border(DesignTokens.colorBorder, DesignTokens.borderWidthDefault),
-        focusedBorder: _border(DesignTokens.colorPrimary, DesignTokens.borderWidthEmphasis),
-        errorBorder: _border(DesignTokens.colorError, DesignTokens.borderWidthEmphasis),
-        focusedErrorBorder: _border(DesignTokens.colorError, DesignTokens.borderWidthEmphasis),
-        disabledBorder: _border(DesignTokens.colorBorder, DesignTokens.borderWidthDefault),
+        labelStyle: DesignTokens.textBodyMd.copyWith(
+          color: DesignTokens.colorTextSecondary,
+        ),
+        hintStyle: DesignTokens.textBodyMd.copyWith(
+          color: DesignTokens.colorTextSecondary,
+        ),
+        errorStyle: DesignTokens.textBodyMd.copyWith(
+          color: DesignTokens.colorError,
+        ),
+        border: _border(
+          DesignTokens.colorBorder,
+          DesignTokens.borderWidthDefault,
+        ),
+        enabledBorder: _border(
+          DesignTokens.colorBorder,
+          DesignTokens.borderWidthDefault,
+        ),
+        focusedBorder: _border(
+          DesignTokens.colorPrimary,
+          DesignTokens.borderWidthEmphasis,
+        ),
+        errorBorder: _border(
+          DesignTokens.colorError,
+          DesignTokens.borderWidthEmphasis,
+        ),
+        focusedErrorBorder: _border(
+          DesignTokens.colorError,
+          DesignTokens.borderWidthEmphasis,
+        ),
       ),
     );
   }

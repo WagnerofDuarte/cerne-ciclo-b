@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:mocktail/mocktail.dart';
@@ -8,6 +10,8 @@ import 'package:cerne/features/auth/data/datasources/auth_remote_data_source.dar
 import 'package:cerne/features/auth/data/models/auth_response_dto.dart';
 import 'package:cerne/features/auth/data/repositories/session_repository_impl.dart';
 import 'package:cerne/features/auth/domain/entities/session_status.dart';
+
+import '../../../../support/mock_session_expiry_notifier.dart';
 
 class MockAuthRemoteDataSource extends Mock implements AuthRemoteDataSource {}
 
@@ -24,11 +28,17 @@ const _newSession = AuthSessionDto(
 void main() {
   late MockAuthRemoteDataSource mockRemoteDataSource;
   late MockAccessTokenProvider mockAccessTokenProvider;
+  late MockSessionExpiryNotifier mockSessionExpiryNotifier;
+  late StreamController<void> expiryController;
   late SessionRepositoryImpl repository;
 
   setUp(() {
     mockRemoteDataSource = MockAuthRemoteDataSource();
     mockAccessTokenProvider = MockAccessTokenProvider();
+    mockSessionExpiryNotifier = MockSessionExpiryNotifier();
+    expiryController = StreamController<void>.broadcast();
+    when(() => mockSessionExpiryNotifier.expiredEvents)
+        .thenAnswer((_) => expiryController.stream);
     when(
       () => mockAccessTokenProvider.saveSession(
         accessToken: any(named: 'accessToken'),
@@ -39,7 +49,12 @@ void main() {
     repository = SessionRepositoryImpl(
       remoteDataSource: mockRemoteDataSource,
       accessTokenProvider: mockAccessTokenProvider,
+      sessionExpiryNotifier: mockSessionExpiryNotifier,
     );
+  });
+
+  tearDown(() async {
+    await expiryController.close();
   });
 
   /// Subscribes before [restoreSession] runs (required for a broadcast
@@ -107,6 +122,25 @@ void main() {
       );
       verifyNever(() => mockAccessTokenProvider.clearSession());
     });
+
+    test('stored-but-empty refresh token -> treated the same as no token: '
+        'no network call, stream emits unauthenticated', () async {
+      when(() => mockAccessTokenProvider.readRefreshToken())
+          .thenAnswer((_) async => '');
+
+      Either<Failure, Unit>? result;
+      final emitted = await emittedDuring(() async {
+        result = await repository.restoreSession();
+      });
+
+      expect(emitted, [SessionStatus.unauthenticated]);
+      expect(result!.isLeft(), isTrue);
+      result!.match(
+        (failure) => expect(failure, isA<AuthExpired>()),
+        (_) => fail('expected Left'),
+      );
+      verifyNever(() => mockRemoteDataSource.refresh(any()));
+    });
   });
 
   group('cold boot, dead refresh token', () {
@@ -155,6 +189,42 @@ void main() {
 
       expect(emitted, [SessionStatus.unauthenticated]);
       verify(() => mockAccessTokenProvider.clearSession()).called(1);
+    });
+  });
+
+  group('Story 1.6 — currentStatus / markAuthenticated', () {
+    test('currentStatus is null before any emission', () {
+      expect(repository.currentStatus, isNull);
+    });
+
+    test(
+      'currentStatus mirrors the last value emitted on statusStream',
+      () async {
+        when(() => mockAccessTokenProvider.readRefreshToken())
+            .thenAnswer((_) async => null);
+
+        await repository.restoreSession();
+
+        expect(repository.currentStatus, SessionStatus.unauthenticated);
+      },
+    );
+
+    test('markAuthenticated() synchronously flips currentStatus to '
+        'authenticated and emits it on statusStream, with no network/'
+        'storage call', () async {
+      final emitted = await emittedDuring(() async {
+        repository.markAuthenticated();
+      });
+
+      expect(repository.currentStatus, SessionStatus.authenticated);
+      expect(emitted, [SessionStatus.authenticated]);
+      verifyNever(() => mockRemoteDataSource.refresh(any()));
+      verifyNever(
+        () => mockAccessTokenProvider.saveSession(
+          accessToken: any(named: 'accessToken'),
+          refreshToken: any(named: 'refreshToken'),
+        ),
+      );
     });
   });
 
@@ -246,6 +316,90 @@ void main() {
       // Fail-closed, but the stored token is NOT cleared — only a
       // backend-confirmed dead token (AUTH_EXPIRED/AUTH_INVALID) clears it.
       verifyNever(() => mockAccessTokenProvider.clearSession());
+    });
+  });
+
+  group('Story 1.5 — SessionExpiryNotifier bridged onto statusStream', () {
+    test('a mid-session expiry event while authenticated -> stream emits '
+        'expired', () async {
+      when(() => mockAccessTokenProvider.readRefreshToken())
+          .thenAnswer((_) async => 'stored-refresh-token');
+      when(() => mockRemoteDataSource.refresh('stored-refresh-token'))
+          .thenAnswer((_) async => right(_newSession));
+
+      final emitted = await emittedDuring(() async {
+        await repository.restoreSession();
+        expiryController.add(null);
+        await Future<void>.delayed(Duration.zero);
+      });
+
+      expect(emitted, [SessionStatus.authenticated, SessionStatus.expired]);
+    });
+
+    test('an expiry event while unauthenticated (post-logout race) is a '
+        'silent no-op — no emission, no overlay', () async {
+      when(() => mockAccessTokenProvider.readRefreshToken())
+          .thenAnswer((_) async => null);
+
+      final emitted = await emittedDuring(() async {
+        await repository.restoreSession();
+        expiryController.add(null);
+        await Future<void>.delayed(Duration.zero);
+      });
+
+      expect(emitted, [SessionStatus.unauthenticated]);
+    });
+
+    test('an expiry event before restoreSession() has ever emitted (no '
+        'current status yet) is a silent no-op', () async {
+      final emitted = await emittedDuring(() async {
+        expiryController.add(null);
+        await Future<void>.delayed(Duration.zero);
+      });
+
+      expect(emitted, isEmpty);
+    });
+
+    test('a second expiry event while already expired does not re-emit — the '
+        "single-overlay guard holds at the repository's own stream, not only "
+        'in the UI', () async {
+      when(() => mockAccessTokenProvider.readRefreshToken())
+          .thenAnswer((_) async => 'stored-refresh-token');
+      when(() => mockRemoteDataSource.refresh('stored-refresh-token'))
+          .thenAnswer((_) async => right(_newSession));
+
+      final emitted = await emittedDuring(() async {
+        await repository.restoreSession();
+        expiryController.add(null);
+        await Future<void>.delayed(Duration.zero);
+        expiryController.add(null);
+        await Future<void>.delayed(Duration.zero);
+      });
+
+      expect(emitted, [SessionStatus.authenticated, SessionStatus.expired]);
+    });
+
+    test('dispose() cancels the expiry subscription — a later event never '
+        'reaches the (already-closed) statusStream', () async {
+      when(() => mockAccessTokenProvider.readRefreshToken())
+          .thenAnswer((_) async => 'stored-refresh-token');
+      when(() => mockRemoteDataSource.refresh('stored-refresh-token'))
+          .thenAnswer((_) async => right(_newSession));
+
+      final emitted = await emittedDuring(() async {
+        await repository.restoreSession();
+        await repository.dispose();
+        // If `dispose()` ever stopped cancelling `_expirySubscription`,
+        // this would still reach `_onSessionExpired()` and — since
+        // `_lastStatus` is still `authenticated` — attempt to `_emit()`
+        // `expired`. The `isClosed` guard in `_emit()` would swallow that
+        // silently, so only actually observing `statusStream` (not just
+        // asserting `add()` doesn't throw) can tell the two apart.
+        expiryController.add(null);
+        await Future<void>.delayed(Duration.zero);
+      });
+
+      expect(emitted, [SessionStatus.authenticated]);
     });
   });
 }

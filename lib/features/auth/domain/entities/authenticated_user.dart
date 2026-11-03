@@ -11,9 +11,7 @@ class AuthenticatedUser {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is AuthenticatedUser &&
-          other.id == id &&
-          other.email == email);
+      (other is AuthenticatedUser && other.id == id && other.email == email);
 
   @override
   int get hashCode => Object.hash(id, email);

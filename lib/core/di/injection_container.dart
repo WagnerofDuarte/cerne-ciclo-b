@@ -9,6 +9,7 @@ import '../network/api_client.dart';
 import '../network/header_interceptor.dart';
 import '../network/retry_interceptor.dart';
 import '../network/url_builder.dart';
+import '../session/session_expiry_notifier.dart';
 
 /// The project's single `get_it` instance — exactly one DI container exists
 /// (architecture spine). Every feature's `registerXFeature()` registers
@@ -36,6 +37,17 @@ Future<void> setupCoreDependencies() async {
 
   sl.registerLazySingleton<UrlBuilder>(() => UrlBuilder(functionsBaseUrl));
 
+  // Story 1.5 — `dispose:` wires `SessionExpiryNotifier.dispose()` into
+  // `get_it`'s own reset lifecycle, same rationale as `SessionRepository`'s
+  // own registration below. Registration order here is cosmetic, not
+  // load-bearing: `registerLazySingleton` only builds its instance on first
+  // `sl<T>()` access, so `ApiClient`'s factory can resolve this dependency
+  // correctly regardless of which of the two is registered first.
+  sl.registerLazySingleton<SessionExpiryNotifier>(
+    () => SessionExpiryNotifierImpl(),
+    dispose: (notifier) => notifier.dispose(),
+  );
+
   sl.registerLazySingleton<Dio>(() {
     final dio = Dio(
       BaseOptions(
@@ -57,7 +69,11 @@ Future<void> setupCoreDependencies() async {
   });
 
   sl.registerLazySingleton<ApiClient>(
-    () => ApiClient(dio: sl<Dio>(), urlBuilder: sl<UrlBuilder>()),
+    () => ApiClient(
+      dio: sl<Dio>(),
+      urlBuilder: sl<UrlBuilder>(),
+      sessionExpiryNotifier: sl<SessionExpiryNotifier>(),
+    ),
   );
 
   registerAuthFeature();

@@ -7,10 +7,13 @@ import 'package:cerne/core/design_tokens.dart';
 import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/features/auth/domain/entities/authenticated_user.dart';
 import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
+import 'package:cerne/features/auth/domain/repositories/session_repository.dart';
 import 'package:cerne/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:cerne/features/auth/presentation/screens/auth_screen.dart';
 
 class MockAuthRepository extends Mock implements AuthRepository {}
+
+class MockSessionRepository extends Mock implements SessionRepository {}
 
 Widget _wrap(
   AuthCubit cubit, {
@@ -20,10 +23,7 @@ Widget _wrap(
   return MediaQuery(
     data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
     child: MaterialApp(
-      home: AuthScreen(
-        cubit: cubit,
-        onAuthenticated: (_) => onAuthenticated(),
-      ),
+      home: AuthScreen(cubit: cubit, onAuthenticated: (_) => onAuthenticated()),
     ),
   );
 }
@@ -33,11 +33,14 @@ OutlineInputBorder _errorBorderOf(TextField field) =>
 
 void main() {
   late MockAuthRepository mockAuthRepository;
+  late MockSessionRepository mockSessionRepository;
   late AuthCubit cubit;
 
   setUp(() {
     mockAuthRepository = MockAuthRepository();
-    cubit = AuthCubit(mockAuthRepository);
+    mockSessionRepository = MockSessionRepository();
+    when(() => mockSessionRepository.markAuthenticated()).thenReturn(null);
+    cubit = AuthCubit(mockAuthRepository, mockSessionRepository);
   });
 
   tearDown(() => cubit.close());
@@ -51,8 +54,7 @@ void main() {
           password: any(named: 'password'),
         ),
       ).thenAnswer(
-        (_) async =>
-            right(const AuthenticatedUser(id: 'u1', email: 'a@b.com')),
+        (_) async => right(const AuthenticatedUser(id: 'u1', email: 'a@b.com')),
       );
       var authenticated = false;
 
@@ -73,10 +75,8 @@ void main() {
       await tester.pump();
 
       verify(
-        () => mockAuthRepository.logIn(
-          email: 'a@b.com',
-          password: 'segredo123',
-        ),
+        () =>
+            mockAuthRepository.logIn(email: 'a@b.com', password: 'segredo123'),
       ).called(1);
       expect(authenticated, isTrue);
     },
@@ -133,9 +133,8 @@ void main() {
           password: any(named: 'password'),
         ),
       ).thenAnswer(
-        (_) async => left(
-          const Failure.authInvalid(message: 'Credenciais inválidas'),
-        ),
+        (_) async =>
+            left(const Failure.authInvalid(message: 'Credenciais inválidas')),
       );
 
       await tester.pumpWidget(_wrap(cubit, onAuthenticated: () {}));
@@ -276,6 +275,51 @@ void main() {
       await tester.pump();
 
       expect(find.text('Sem conexão com a internet'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'signup mode, backend failure: AUTH_INVALID renders the same as in '
+    'login mode (the failure-rendering path is mode-agnostic)',
+    (tester) async {
+      when(
+        () => mockAuthRepository.signUp(
+          email: any(named: 'email'),
+          password: any(named: 'password'),
+        ),
+      ).thenAnswer(
+        (_) async =>
+            left(const Failure.authInvalid(message: 'Credenciais inválidas')),
+      );
+
+      await tester.pumpWidget(_wrap(cubit, onAuthenticated: () {}));
+
+      // Toggle to signup mode first.
+      await tester.tap(find.text('Não tem conta? Criar conta'));
+      await tester.pump();
+
+      await tester.enterText(
+        find.widgetWithText(TextField, 'E-mail'),
+        'nova@b.com',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Senha'),
+        'segredo123',
+      );
+      await tester.tap(find.text('Criar conta'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Credenciais inválidas'), findsOneWidget);
+
+      final emailField = tester.widget<TextField>(
+        find.widgetWithText(TextField, 'E-mail'),
+      );
+      final passwordField = tester.widget<TextField>(
+        find.widgetWithText(TextField, 'Senha'),
+      );
+      expect(emailField.decoration!.errorText, '');
+      expect(passwordField.decoration!.errorText, 'Credenciais inválidas');
     },
   );
 

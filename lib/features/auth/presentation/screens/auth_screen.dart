@@ -105,8 +105,8 @@ class _AuthViewState extends State<_AuthView> {
             // password-only validation error (`passwordError`, "Senha
             // obrigatória") is single-field — the e-mail value already
             // passed its own check, so it must never be bordered for it.
-            final emailErrorText = state.emailError ??
-                (state.formError != null ? '' : null);
+            final emailErrorText =
+                state.emailError ?? (state.formError != null ? '' : null);
             final passwordErrorText = state.formError ?? state.passwordError;
 
             return SingleChildScrollView(

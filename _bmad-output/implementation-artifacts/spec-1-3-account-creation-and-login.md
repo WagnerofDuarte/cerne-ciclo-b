@@ -83,6 +83,15 @@ New, under `lib/features/auth/`:
 - Given login/signup mode, when submitted, then `auth-login`/`auth-signup` is called with exactly `{email, password}` — no extra field anywhere.
 - Given a successful call, when the repository returns, then the access token is persisted before the UI moves past the screen.
 
+### Review Findings
+
+- [x] [Review][Patch] Token-save exception after a successful signup/login is mapped to the same `Failure.malformedResponse` used for a malformed server response — decided to keep the reused type (the hierarchy is closed at exactly 14 subtypes, AD-3) but document the reuse inline so a future reader doesn't mistake it for a parse-failure path. [lib/features/auth/data/repositories/auth_repository_impl.dart:57-63]
+- [x] [Review][Patch] `CerneApp`'s real DI-wired `AuthCubit` and post-auth navigation are never exercised by any test — a regression in `onAuthenticated`/`pushReplacement` would leave an authenticated user stuck on the login screen with `flutter test` still green. Fixed with `test/main_test.dart`. [lib/main.dart:32-47]
+- [x] [Review][Patch] Plaintext password lingers indefinitely in the `AuthCubit` singleton's state after a successful login, since the cubit is a DI singleton never reset after the screen is replaced. Fixed — `password` is now cleared on the `ResourceData` success emit. [lib/features/auth/presentation/cubit/auth_cubit.dart:109-117]
+- [x] [Review][Patch] `AuthState.copyWith`'s `mode` parameter is dead code — `toggleMode()` bypasses it via a raw constructor call, leaving two inconsistent state-construction patterns. Fixed — `toggleMode()` now goes through `copyWith`. [lib/features/auth/presentation/cubit/auth_state.dart]
+- [x] [Review][Patch] `emailChanged`/`passwordChanged` clear errors asymmetrically — `passwordChanged` never clears `emailError`. Harmless today, a latent trap if the cubit is extended. Fixed — now symmetric. [lib/features/auth/presentation/cubit/auth_cubit.dart:31-50]
+- [x] [Review][Patch] No widget-level test drives a backend/network failure while in signup mode — only login mode's failure rendering is covered at the screen level. Fixed — added an `AUTH_INVALID`-in-signup-mode widget test. [test/features/auth/presentation/screens/auth_screen_test.dart]
+
 ## Design Notes
 
 - **Post-auth destination:** `SessionStatus` (1.4) / `go_router` (1.6) don't exist yet — success swaps `main.dart`'s screen to a small inline placeholder via `Navigator.pushReplacement`, deleted wholesale by Story 1.6.
