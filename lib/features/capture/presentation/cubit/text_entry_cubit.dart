@@ -72,9 +72,11 @@ class TextEntryCubit extends Cubit<TextEntryState> {
   final EntriesRepository _repository;
 
   /// Switches the active tab, preserving whatever Texto text was already
-  /// typed (Never: the full cross-tab cancel-safety rule is Story 3.4's
-  /// scope — this story's trivial case just needs the tab itself to
-  /// switch without losing in-progress text or firing any `create` call).
+  /// typed. The cross-tab cancel-safety rule (FR-11) lives in
+  /// `insertion_modal.dart`'s tab-switch dispatch
+  /// (`_onTextEntryStateChange`), not here — Texto needs no `cancel()` of
+  /// its own because no async op ever precedes Salvar on this tab, unlike
+  /// Áudio's recording or Foto's pick/OCR.
   ///
   /// Review finding: ignored while [TextEntrySaving] — `InsertionModal`
   /// already disables the tab bar for that case, but this is the

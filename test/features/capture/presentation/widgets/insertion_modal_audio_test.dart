@@ -42,6 +42,12 @@ class _FakeMicRecorder implements MicRecorder {
   int cancelCalls = 0;
   MicRecording? nextStopResult;
 
+  /// Lets a test drive `_Waveform`'s own `amplitudeStream.listen(...,
+  /// onError: ...)` (Review finding: previously never exercised by any
+  /// test) — `null` (the default) keeps every other test's behavior
+  /// unchanged (`const Stream.empty()`).
+  StreamController<double>? amplitudeController;
+
   @override
   Future<bool> hasPermission() async => permissionGranted;
 
@@ -55,7 +61,8 @@ class _FakeMicRecorder implements MicRecorder {
   Future<void> cancel() async => cancelCalls++;
 
   @override
-  Stream<double> get amplitudeStream => const Stream.empty();
+  Stream<double> get amplitudeStream =>
+      amplitudeController?.stream ?? const Stream.empty();
 }
 
 class _FakeAudioTranscriber implements AudioTranscriber {
@@ -65,14 +72,30 @@ class _FakeAudioTranscriber implements AudioTranscriber {
   Future<String?> transcribe(String audioPath) async => nextTranscription;
 }
 
-/// A trivial fake — this file's own tests never switch to the Foto tab,
-/// so neither `PhotoPicker` port method below is ever expected to be
-/// called (same rationale as `_FakeMicRecorder`'s own doc, applied to
-/// spec-3-3's two new ports).
+/// `pickFromGallery` stays a trivial "never expected to be called" fake —
+/// this file's own tests only ever drive the Foto tab's Câmera button
+/// (spec-3-4's cross-tab tests), never Galeria. `pickFromCamera` is
+/// configurable — spec-3-4's Foto→Áudio/chained tests need an in-flight
+/// pick to switch away from (same `cameraGate` convention
+/// `insertion_modal_photo_test.dart`'s own fake already uses).
 class _FakePhotoPicker implements PhotoPicker {
+  PickedPhoto? nextCameraResult;
+  int cameraCalls = 0;
+
+  /// Lets a test hold `pickFromCamera()` unresolved, to simulate leaving
+  /// the Foto tab (via a tab switch) while the native picker dialog is
+  /// still open. `null` (the default) resolves immediately.
+  Completer<void>? cameraGate;
+
   @override
-  Future<PickedPhoto?> pickFromCamera() async =>
-      throw UnimplementedError('not expected to be called');
+  Future<PickedPhoto?> pickFromCamera() async {
+    cameraCalls++;
+    final activeGate = cameraGate;
+    if (activeGate != null) {
+      await activeGate.future;
+    }
+    return nextCameraResult;
+  }
 
   @override
   Future<PickedPhoto?> pickFromGallery() async =>
@@ -145,13 +168,16 @@ Future<void> _openModal(
 
 /// Drives the real `InsertionModal` + real `AudioEntryCubit` through
 /// spec-3-2's own I/O & Edge-Case Matrix — only the two native-package
-/// ports are faked (see the classes above). `PhotoEntryCubit` is always a
-/// fresh, never-configured instance (backed by the two trivial "not
-/// expected to be called" fakes above) — this file's own tests never
-/// switch to the Foto tab.
+/// ports are faked (see the classes above). `PhotoEntryCubit` is a fresh
+/// instance, left unconfigured by every test except spec-3-4's own
+/// cross-tab tests below, which do switch to the Foto tab and configure
+/// `_FakePhotoPicker.nextCameraResult`/`cameraGate` to drive an in-flight
+/// Câmera pick; `pickFromGallery()` stays untouched throughout — no test
+/// in this file, including spec-3-4's, ever taps Galeria.
 void main() {
   late _FakeMicRecorder fakeMicRecorder;
   late _FakeAudioTranscriber fakeAudioTranscriber;
+  late _FakePhotoPicker fakePhotoPicker;
   late _FakeEntriesRepository fakeRepository;
   late TextEntryCubit textCubit;
   late AudioEntryCubit audioCubit;
@@ -160,6 +186,7 @@ void main() {
   setUp(() {
     fakeMicRecorder = _FakeMicRecorder();
     fakeAudioTranscriber = _FakeAudioTranscriber();
+    fakePhotoPicker = _FakePhotoPicker();
     fakeRepository = _FakeEntriesRepository();
     textCubit = TextEntryCubit(fakeRepository);
     audioCubit = AudioEntryCubit(
@@ -168,7 +195,7 @@ void main() {
       fakeRepository,
     );
     photoCubit = PhotoEntryCubit(
-      _FakePhotoPicker(),
+      fakePhotoPicker,
       _FakeMediaRepository(),
       fakeRepository,
     );
@@ -247,6 +274,46 @@ void main() {
       expect(fakeRepository.lastSource, EntrySource.audio);
       expect(fakeRepository.lastMediaDurationSeconds, 7);
       expect(find.byType(TextField), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'An amplitudeStream error while recording never escapes uncaught — '
+    'the waveform just stays frozen on its last sample (Review finding: '
+    'the real MicRecorder.amplitudeStream can surface a native-side '
+    'error, which _Waveform guards with onError)',
+    (tester) async {
+      final amplitudeController = StreamController<double>();
+      fakeMicRecorder.amplitudeController = amplitudeController;
+      await _openModal(
+        tester,
+        cubit: textCubit,
+        audioCubit: audioCubit,
+        photoCubit: photoCubit,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Áudio'));
+      // Never `pumpAndSettle()` here — see the happy path test's own
+      // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
+      await tester.pump();
+      amplitudeController.add(0.6);
+      await tester.pump();
+
+      amplitudeController.addError(Exception('native amplitude failure'));
+      // If `onError` were ever dropped, this `pump()` is where the
+      // uncaught stream error would surface as a failed test.
+      await tester.pump();
+
+      expect(find.text('00:00'), findsOneWidget);
+
+      // Ends mid-recording — same cleanup as the other mid-recording
+      // tests above. The controller is deliberately never `close()`d:
+      // doing so under `flutter_test`'s `FakeAsync` zone needs its own
+      // `pump()` afterward to flush the pending `done` microtask, and
+      // nothing in this test needs that cleanup to pass.
+      await audioCubit.cancel();
+      await tester.pump();
     },
   );
 
@@ -385,6 +452,147 @@ void main() {
 
       expect(fakeMicRecorder.cancelCalls, 1);
       expect(fakeRepository.createCallCount, 0);
+    },
+  );
+
+  testWidgets(
+    'Story 3.4: Áudio→Foto mid-recording switch cancels the recorder, '
+    'never auto-starts anything on Foto',
+    (tester) async {
+      await _openModal(
+        tester,
+        cubit: textCubit,
+        audioCubit: audioCubit,
+        photoCubit: photoCubit,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Áudio'));
+      // Never `pumpAndSettle()` here — see the happy path test's own
+      // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
+      await tester.pump();
+      expect(fakeMicRecorder.startCalls, 1);
+
+      // Switches directly to Foto — skipping Texto — unlike every other
+      // "leave Áudio" test in this file, which only ever exercises the
+      // Áudio↔Texto pair.
+      await tester.tap(find.text('Foto'));
+      await tester.pumpAndSettle();
+
+      expect(fakeMicRecorder.cancelCalls, 1);
+      // Foto shows its idle capture buttons — nothing auto-started on
+      // entry (unlike Áudio, which auto-starts recording on entry).
+      expect(find.text('Câmera'), findsOneWidget);
+      expect(find.text('Galeria'), findsOneWidget);
+      expect(fakeRepository.createCallCount, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Story 3.4: Foto→Áudio mid-pick switch discards the pick and starts '
+    'recording immediately',
+    (tester) async {
+      fakePhotoPicker.cameraGate = Completer<void>();
+      await _openModal(
+        tester,
+        cubit: textCubit,
+        audioCubit: audioCubit,
+        photoCubit: photoCubit,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Foto'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Câmera'));
+      // Only a `pump()` — the gate above holds `pickFromCamera()`
+      // unresolved, same as never reaching the real file-read
+      // `insertion_modal_photo_test.dart`'s own "Leave tab mid-pick"
+      // test avoids this same way.
+      await tester.pump();
+
+      await tester.tap(find.text('Áudio'));
+      await tester.pump();
+
+      // Recording starts immediately despite the still-pending pick.
+      expect(fakeMicRecorder.startCalls, 1);
+      expect(fakeRepository.createCallCount, 0);
+
+      fakePhotoPicker.cameraGate!.complete();
+      await tester.pump();
+
+      // The stale pick never resurrected the Foto tab's own state nor
+      // fired a save.
+      expect(photoCubit.state, isA<PhotoIdle>());
+      expect(fakeRepository.createCallCount, 0);
+
+      // Ends mid-recording — see the happy path test's own comment on
+      // `AudioEntryCubit`'s 1-second elapsed-time ticker.
+      await audioCubit.cancel();
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Story 3.4: chained Áudio→Foto→Texto interruptions, then closing '
+    'without Salvar — POST /entries never fires at any point',
+    (tester) async {
+      fakePhotoPicker.cameraGate = Completer<void>();
+      await _openModal(
+        tester,
+        cubit: textCubit,
+        audioCubit: audioCubit,
+        photoCubit: photoCubit,
+      );
+      await tester.pumpAndSettle();
+
+      // Record audio.
+      await tester.tap(find.text('Áudio'));
+      await tester.pump();
+      expect(fakeMicRecorder.startCalls, 1);
+      expect(fakeRepository.createCallCount, 0);
+
+      // Switch to Foto — cancels the still-recording audio.
+      await tester.tap(find.text('Foto'));
+      await tester.pumpAndSettle();
+      expect(fakeMicRecorder.cancelCalls, 1);
+      expect(fakeRepository.createCallCount, 0);
+
+      // Start a photo pick (held in flight by the gate).
+      await tester.tap(find.text('Câmera'));
+      await tester.pump();
+      expect(fakeRepository.createCallCount, 0);
+
+      // Switch to Texto — cancels/discards the still-in-flight pick.
+      await tester.tap(find.text('Texto'));
+      await tester.pumpAndSettle();
+      expect(fakeRepository.createCallCount, 0);
+
+      // Type text.
+      await tester.enterText(find.byType(TextField), 'texto digitado');
+      await tester.pump();
+      expect(find.text('texto digitado'), findsOneWidget);
+      expect(fakeRepository.createCallCount, 0);
+
+      // Close the modal via the close control, never tapping Salvar.
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
+
+      expect(fakeRepository.createCallCount, 0);
+
+      // Releases the now-abandoned picker call so nothing is left
+      // dangling past this test — same hygiene
+      // `insertion_modal_photo_test.dart`'s own equivalent test uses.
+      // Flushed with a `pump()` (unlike a bare `complete()`) since this
+      // runs after the modal — and `PhotoEntryCubit` itself — has already
+      // closed; any exception from that completion must surface here,
+      // not leak into a later, unrelated test.
+      fakePhotoPicker.cameraGate!.complete();
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
     },
   );
 
