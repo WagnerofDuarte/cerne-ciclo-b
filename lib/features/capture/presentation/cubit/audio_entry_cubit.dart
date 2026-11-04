@@ -207,8 +207,16 @@ class AudioEntryCubit extends Cubit<AudioCaptureState> {
       // above — a native-side start failure must surface through the
       // normal error/retry path instead of escaping uncaught.
       if (isClosed || generation != _generation) {
+        // Review finding: the shared `_micRecorder` singleton may already
+        // belong to a newer, currently-active generation by the time this
+        // stale catch fires — never release it from here, only from the
+        // generation that's still actually live, or this would silently
+        // kill a different, active recording with no error surfaced.
         return;
       }
+      // Also releases the native recorder best-effort (Review finding): a
+      // partial/failed `start()` may still have left a session open.
+      unawaited(_safeCancelRecorder());
       emit(
         const AudioError(
           path: null,
@@ -264,8 +272,17 @@ class AudioEntryCubit extends Cubit<AudioCaptureState> {
       // uncaught — surfaces through the normal error/retry path instead.
       _stopping = false;
       if (isClosed || generation != _generation) {
+        // Review finding: the shared `_micRecorder` singleton may already
+        // belong to a newer, currently-active generation by the time this
+        // stale catch fires — never release it from here, only from the
+        // generation that's still actually live, or this would silently
+        // kill a different, active recording with no error surfaced.
         return;
       }
+      // Also releases the native recorder best-effort (Review finding): a
+      // failed `stop()` leaves the actual native session state
+      // unconfirmed, so this is the only chance to try to release it.
+      unawaited(_safeCancelRecorder());
       emit(
         const AudioError(
           path: null,
@@ -413,6 +430,14 @@ class AudioEntryCubit extends Cubit<AudioCaptureState> {
     // visible in `state`, missing the window while those methods were
     // still awaiting).
     _generation++;
+    // Review finding: without this, a hung `_micRecorder.stop()` call
+    // (one that never resolves) left `_stopping` stuck `true` forever —
+    // `stopRecording()`'s own guard made it a permanent no-op for the
+    // rest of this cubit's life. The `_generation` bump above already
+    // makes that stale continuation's eventual result a no-op, so
+    // resetting this eagerly is always safe, mirroring `PhotoEntryCubit.
+    // cancel()`'s own `_picking = false` reset.
+    _stopping = false;
     final current = state;
     if (current is AudioRecording) {
       _elapsedTimer?.cancel();

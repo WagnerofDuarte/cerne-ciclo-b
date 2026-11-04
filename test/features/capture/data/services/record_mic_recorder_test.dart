@@ -126,6 +126,33 @@ void main() {
 
       expect(result, isNull);
     });
+
+    test(
+      'a backward clock jump between start() and stop() (DST/NTP '
+      'correction) floors durationSeconds at 0, never negative (Review '
+      'finding: the existing happy-path test above can never drive this '
+      'branch, since the real wall clock never moves backward during a '
+      'test run)',
+      () async {
+        final clockReadings = [
+          DateTime(2026, 1, 1, 12, 0, 10), // start()'s _startedAt
+          DateTime(2026, 1, 1, 12, 0, 0), // stop()'s read — 10s earlier
+        ];
+        final clockRecorder = RecordMicRecorder(
+          recorder: mockRecorder,
+          now: () => clockReadings.removeAt(0),
+        );
+        when(
+          () => mockRecorder.start(any(), path: any(named: 'path')),
+        ).thenAnswer((_) async {});
+        when(() => mockRecorder.stop()).thenAnswer((_) async => '/tmp/out.wav');
+
+        await clockRecorder.start();
+        final result = await clockRecorder.stop();
+
+        expect(result!.durationSeconds, 0);
+      },
+    );
   });
 
   test(

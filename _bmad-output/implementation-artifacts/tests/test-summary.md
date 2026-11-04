@@ -713,3 +713,90 @@ E2E-equivalent gap, this project's substitute for a real
   capture across all tabs) are the next `backlog` stories in Epic 3 —
   each will need its own composition-root/pipeline E2E-equivalent pass
   once implemented.
+
+---
+
+# QA Generate E2E Tests Pass (2026-11-04) — Story 3.3 Photo Entry Capture
+
+## Context
+
+Re-ran this skill against the current working tree, now carrying Story 3.3
+(photo entry capture & backend OCR, committed `5bf09ca`) plus its own
+uncommitted code-review round (`photo_entry_cubit.dart`,
+`record_mic_recorder.dart`, `audio_entry_cubit.dart`). Checked the same
+composition-root/pipeline layer this file's prior passes established as
+Cerne's E2E-equivalent (no device/CI yet — AGENTS.md):
+
+- Texto (3.1) and Áudio (3.2) each already have a `<feature>_flow_e2e_test.
+  dart` driving the real, DI-resolved cubit through the real
+  `EntriesRepositoryImpl` → `ApiClient` → `Dio` → a real Hive box, with only
+  the transport boundary and native plugins faked.
+- Foto (3.3) — **gap found**: no equivalent existed for `PhotoEntryCubit`.
+  `photo_entry_cubit_test.dart` already covers every state transition
+  (pick, OCR, retry, `saveWithoutText`, cancel) against mocked
+  `PhotoPicker`/`MediaRepository`/`EntriesRepository`, but nothing proved
+  the real `media-ocr` + `entries-create` network pipeline together, the
+  way the sibling suites do for Texto/Áudio's own save leg. Photo is also
+  the only capture tab with *two* sequential real network calls in one
+  flow (OCR, then save) and a distinct recovery path (`OCR_NO_TEXT` →
+  "Salvar só a foto") worth proving end-to-end, not just at the unit level.
+
+## Generated Tests
+
+### E2E (composition-root/pipeline, `test/features/capture/`)
+
+- [x] `test/features/capture/photo_entry_flow_e2e_test.dart` — **new**,
+  mirrors `capture_flow_e2e_test.dart`/`audio_entry_flow_e2e_test.dart`'s
+  structure exactly. Drives the real, DI-resolved `PhotoEntryCubit` through
+  `pickFromCamera()` → the real `MediaRepositoryImpl` → `MediaRemoteDataSource`
+  → `ApiClient` → `Dio` (both real interceptors) for OCR, and through
+  `save()`/`saveWithoutText()` → the real `EntriesRepositoryImpl` → `ApiClient`
+  → `Dio` → a real `entries` Hive box for the save. Three things are faked:
+  the transport boundary (`HttpClientAdapter`), the native plugins (secure
+  storage, path_provider), and — honoring the "Never" boundary spec-3-3
+  itself states ("mock `image_picker`, same convention as
+  `MicRecorder`/`AudioTranscriber`") — `PhotoPicker` itself, swapped into
+  the real `sl` container *before* `PhotoEntryCubit` is first resolved, so
+  the real `image_picker`-backed singleton `capture_injection.dart` would
+  otherwise build is never instantiated.
+  - Happy path: `pickFromCamera()` fires a genuine POST to `media-ocr` with
+    the base64-encoded image bytes, `save()` then fires a genuine POST to
+    `entries-create` with `source: photo`, `PhotoSaved` is emitted, the
+    entry lands in the real Hive box, and the temp photo file is deleted
+    (best-effort cleanup on success).
+  - `OCR_NO_TEXT` recovery path: a real `media-ocr` failure surfaces as
+    `PhotoError(kind: ocrNoText)`, and `saveWithoutText()` then fires a
+    genuine second POST to `entries-create` with the fixed placeholder
+    content — the one flow unique to Photo (two real sequential network
+    calls across a recovery action) with no prior coverage at this layer.
+  - Save-failure path: OCR succeeds but a non-retryable `VALIDATION_ERROR`
+    on `entries-create` surfaces as `PhotoError(kind: generic)` carrying
+    `Failure.message` verbatim, exactly two requests fire (no retry),
+    nothing is written to the Hive box, and the photo file is preserved
+    (for a retried Salvar) — mirrors the sibling suites' own failure-path
+    guarantee.
+
+## Coverage
+
+- Composition-root/pipeline E2E-equivalent scenarios: Texto save (happy +
+  failure) ✅ pre-existing, Áudio save (happy + failure) ✅ pre-existing,
+  **Foto pick→OCR→save (happy path, `OCR_NO_TEXT`→"Salvar só a foto"
+  recovery, and save-failure) ✅ added**.
+- Implemented feature scope (per `sprint-status.yaml`): epics 1–2 (all
+  stories) and epic 3's done stories (3.1, 3.2, 3.3) — all covered at this
+  layer, including 3.3's uncommitted code-review round (no new
+  network/Hive-facing behavior in that round — see its own diff). 3.4
+  (cancel-safe capture) is still `backlog`, out of scope for this pass.
+
+## Verification
+
+- `fvm flutter test` → 553/553 passing (550 pre-existing + 3 new)
+- `fvm flutter analyze` → 0 issues
+
+## Next Steps
+
+- Story 3.4 (cancel-safe capture across all tabs) is the next `backlog`
+  story in Epic 3 — it will need its own composition-root/pipeline
+  E2E-equivalent pass once implemented, most likely extending the existing
+  three `<feature>_flow_e2e_test.dart` files in place (the cancel/leave-tab
+  behavior shares the same real-DI harness) rather than a new suite.

@@ -762,6 +762,33 @@ void main() {
       expect(cubit.state, isA<PhotoRecognized>());
     });
 
+    test(
+      'a photo picked just as the user left the tab (generation mismatch) '
+      'is deleted instead of leaking its temp file forever (Review '
+      'finding)',
+      () async {
+        final abandonedFile = File('${tempDir.path}/abandonada.jpg')
+          ..writeAsBytesSync([7, 8, 9]);
+        final pickCompleter = Completer<PickedPhoto?>();
+        when(
+          () => mockPhotoPicker.pickFromCamera(),
+        ).thenAnswer((_) => pickCompleter.future);
+        final firstPick = cubit.pickFromCamera();
+
+        await cubit.cancel();
+        // The native picker call finally resolves with a real photo after
+        // the user already left the tab — must not leak this file.
+        pickCompleter.complete(
+          PickedPhoto(path: abandonedFile.path, mimeType: 'image/jpeg'),
+        );
+        await firstPick;
+
+        await _waitUntilDeleted(abandonedFile);
+        expect(abandonedFile.existsSync(), isFalse);
+        expect(cubit.state, isA<PhotoIdle>());
+      },
+    );
+
     group('discardPreserved', () {
       test(
         'false (default) — a no-op for PhotoRecognized, preserving both '
@@ -971,6 +998,44 @@ void main() {
     expect(photoFile.existsSync(), isFalse);
     expect(secondPhotoFile.existsSync(), isTrue);
   });
+
+  test(
+    'picking again from a payloadTooLarge error still deletes the '
+    'abandoned first file even when the re-pick is itself canceled '
+    '(Review finding: the fix deletes the old file unconditionally as '
+    'soon as a new pick starts, independent of how that new pick ends — '
+    'the happy-path test above only exercises the re-pick-succeeds case)',
+    () async {
+      when(() => mockPhotoPicker.pickFromCamera()).thenAnswer(
+        (_) async => PickedPhoto(path: photoFile.path, mimeType: 'image/jpeg'),
+      );
+      when(
+        () => mockMediaRepository.recognizeText(
+          imageBytes: any(named: 'imageBytes'),
+          mimeType: any(named: 'mimeType'),
+        ),
+      ).thenAnswer(
+        (_) async => left(
+          const Failure.payloadTooLarge(message: 'Imagem muito grande.'),
+        ),
+      );
+      await cubit.pickFromCamera();
+      expect(cubit.state, isA<PhotoError>());
+      expect(photoFile.existsSync(), isTrue);
+
+      // The re-pick is canceled (user dismisses the picker with no file
+      // chosen) — the old abandoned file must still be gone.
+      when(
+        () => mockPhotoPicker.pickFromCamera(),
+      ).thenAnswer((_) async => null);
+
+      await cubit.pickFromCamera();
+      await _waitUntilDeleted(photoFile);
+
+      expect(photoFile.existsSync(), isFalse);
+      expect(cubit.state, isA<PhotoIdle>());
+    },
+  );
 
   test(
     'emit() after close() never throws (a save racing a modal dismiss)',

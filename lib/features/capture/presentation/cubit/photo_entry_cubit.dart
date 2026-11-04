@@ -162,8 +162,15 @@ class PhotoEntryCubit extends Cubit<PhotoCaptureState> {
     // A fresh pick replacing a previous `payloadTooLarge` error's own
     // (never-OCR'd, now-abandoned) file — Review finding: without this,
     // that file leaked on disk forever once this new pick's own file
-    // takes over `state`.
+    // takes over `state`. Deleted unconditionally right away (Review
+    // finding): this old file is abandoned the moment a new pick starts,
+    // regardless of whether that new pick succeeds, is canceled, or
+    // throws — the earlier code only deleted it on success, leaking it
+    // on every other exit path.
     final previousPath = current is PhotoError ? current.path : null;
+    if (previousPath != null) {
+      unawaited(_deletePickedFile(previousPath));
+    }
     _picking = true;
     final generation = ++_generation;
     PickedPhoto? photo;
@@ -183,6 +190,12 @@ class PhotoEntryCubit extends Cubit<PhotoCaptureState> {
     }
     _picking = false;
     if (isClosed || generation != _generation) {
+      // Review finding: without this, a photo picked just as the user
+      // left the tab (or closed the whole modal) was discarded with no
+      // cleanup — its OS temp file leaked forever.
+      if (photo != null) {
+        unawaited(_deletePickedFile(photo.path));
+      }
       return;
     }
     if (photo == null) {
@@ -194,9 +207,6 @@ class PhotoEntryCubit extends Cubit<PhotoCaptureState> {
         emit(const PhotoIdle());
       }
       return;
-    }
-    if (previousPath != null) {
-      unawaited(_deletePickedFile(previousPath));
     }
     emit(PhotoProcessing(path: photo.path, mimeType: photo.mimeType));
     await _recognize(photo.path, photo.mimeType, generation);

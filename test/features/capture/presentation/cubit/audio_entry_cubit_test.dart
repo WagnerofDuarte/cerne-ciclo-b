@@ -139,10 +139,12 @@ void main() {
 
     test(
       'start() throwing (native PlatformException) -> AudioError, never '
-      'escapes uncaught (Review finding)',
+      'escapes uncaught, and releases the native recorder best-effort '
+      '(Review finding)',
       () async {
         when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
         when(() => mockMicRecorder.start()).thenThrow(Exception('native failure'));
+        when(() => mockMicRecorder.cancel()).thenAnswer((_) async {});
 
         await cubit.startRecording();
 
@@ -150,6 +152,7 @@ void main() {
           cubit.state,
           isA<AudioError>().having((s) => s.path, 'path', isNull),
         );
+        verify(() => mockMicRecorder.cancel()).called(1);
       },
     );
 
@@ -229,12 +232,14 @@ void main() {
 
     test(
       'stop() throwing (native PlatformException) -> AudioError, never '
-      'escapes uncaught (Review finding)',
+      'escapes uncaught, and releases the native recorder best-effort '
+      '(Review finding)',
       () async {
         when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
         when(() => mockMicRecorder.start()).thenAnswer((_) async {});
         await cubit.startRecording();
         when(() => mockMicRecorder.stop()).thenThrow(Exception('native failure'));
+        when(() => mockMicRecorder.cancel()).thenAnswer((_) async {});
 
         await cubit.stopRecording();
 
@@ -242,6 +247,7 @@ void main() {
           cubit.state,
           isA<AudioError>().having((s) => s.path, 'path', isNull),
         );
+        verify(() => mockMicRecorder.cancel()).called(1);
       },
     );
 
@@ -475,6 +481,95 @@ void main() {
       expect(cubit.state, isA<AudioIdle>());
       verifyNever(() => mockMicRecorder.cancel());
     });
+
+    test(
+      'while recording, MicRecorder.cancel() throwing never escapes '
+      'uncaught — best-effort via _safeCancelRecorder (Review finding: '
+      'mirrors the existing hasPermission()/start()/stop() throw-tests, '
+      'extended to this call site)',
+      () async {
+        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+        await cubit.startRecording();
+        when(() => mockMicRecorder.cancel()).thenThrow(Exception('native failure'));
+
+        await cubit.cancel();
+
+        expect(cubit.state, isA<AudioIdle>());
+        verify(() => mockMicRecorder.cancel()).called(1);
+      },
+    );
+
+    test(
+      'startRecording()\'s own abandon-on-generation-mismatch branch '
+      'never lets a thrown MicRecorder.cancel() escape uncaught either '
+      '(Review finding: the same _safeCancelRecorder guard backs both '
+      'call sites)',
+      () async {
+        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+        final startCompleter = Completer<void>();
+        when(() => mockMicRecorder.start()).thenAnswer((_) => startCompleter.future);
+        when(() => mockMicRecorder.cancel()).thenThrow(Exception('native failure'));
+
+        final startFuture = cubit.startRecording();
+        // Let startRecording() actually get past the synchronous
+        // hasPermission() resolution and reach the in-flight
+        // _micRecorder.start() await (Review finding: without this, the
+        // immediately-following cancel() below runs synchronously before
+        // that resolution is ever processed, so startRecording() bails
+        // out at its earlier post-hasPermission() generation check
+        // instead — never reaching start() at all, silently testing the
+        // wrong branch).
+        await Future<void>.delayed(Duration.zero);
+        // Tab switch away while start() is still in flight.
+        await cubit.cancel();
+        startCompleter.complete();
+        await startFuture;
+        await Future<void>.delayed(Duration.zero);
+
+        expect(cubit.state, isA<AudioIdle>());
+        verify(() => mockMicRecorder.cancel()).called(1);
+      },
+    );
+
+    test(
+      'cancel() frees a permanently-stuck _stopping after a hung stop() so '
+      'a later record/stop cycle still works (Review finding: without the '
+      '_stopping reset in cancel(), a stop() that never resolves left '
+      'stopRecording() a permanent no-op for the rest of this cubit\'s '
+      'life)',
+      () async {
+        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+        await cubit.startRecording();
+        final hungStopCompleter = Completer<MicRecording?>();
+        when(
+          () => mockMicRecorder.stop(),
+        ).thenAnswer((_) => hungStopCompleter.future);
+        when(() => mockMicRecorder.cancel()).thenAnswer((_) async {});
+
+        // stopRecording() never resolves — simulates a hung native stop().
+        unawaited(cubit.stopRecording());
+        await Future<void>.delayed(Duration.zero);
+
+        await cubit.cancel();
+        expect(cubit.state, isA<AudioIdle>());
+
+        // A fresh record/stop cycle must not stay blocked by the `_stopping`
+        // flag the still-hung call above would otherwise have left stuck.
+        await cubit.startRecording();
+        when(() => mockMicRecorder.stop()).thenAnswer(
+          (_) async => const MicRecording(path: '/tmp/b.wav', durationSeconds: 3),
+        );
+        when(
+          () => mockAudioTranscriber.transcribe('/tmp/b.wav'),
+        ).thenAnswer((_) async => 'depois da gravação pendurada');
+
+        await cubit.stopRecording();
+
+        expect(cubit.state, isA<AudioTranscribed>());
+      },
+    );
 
     test(
       'while processing deletes the real abandoned recording file, not '

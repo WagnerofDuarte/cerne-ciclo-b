@@ -17,10 +17,19 @@ import '../../domain/services/mic_recorder.dart';
 /// recorder for the app's lifetime, reused across every Insertion Modal
 /// open, never recreated per "+" tap the way `AudioEntryCubit` itself is.
 class RecordMicRecorder implements MicRecorder {
-  RecordMicRecorder({required record_pkg.AudioRecorder recorder})
-    : _recorder = recorder;
+  RecordMicRecorder({
+    required record_pkg.AudioRecorder recorder,
+    DateTime Function() now = DateTime.now,
+  }) : _recorder = recorder,
+       _now = now;
 
   final record_pkg.AudioRecorder _recorder;
+
+  /// Injectable clock (Review finding) — same convention as
+  /// `VaultRepositoryImpl`'s own `now` param — so a test can drive
+  /// [stop]'s negative-duration clamp without waiting on, or faking, the
+  /// real wall clock.
+  final DateTime Function() _now;
 
   /// Set by [start], cleared by [stop]/[cancel] — [stop] has no other way
   /// to learn how long the session ran, since `AudioRecorder.stop()` only
@@ -55,7 +64,7 @@ class RecordMicRecorder implements MicRecorder {
       ),
       path: path,
     );
-    _startedAt = DateTime.now();
+    _startedAt = _now();
     _currentPath = path;
   }
 
@@ -72,7 +81,7 @@ class RecordMicRecorder implements MicRecorder {
     // (DST/NTP correction) could otherwise make this negative, which the
     // backend's `mediaDurationSeconds: minimum 0` contract rejects —
     // floored at 0 rather than trusting the wall clock never moves back.
-    final elapsed = DateTime.now().difference(startedAt).inSeconds;
+    final elapsed = _now().difference(startedAt).inSeconds;
     return MicRecording(
       path: path,
       durationSeconds: elapsed < 0 ? 0 : elapsed,
