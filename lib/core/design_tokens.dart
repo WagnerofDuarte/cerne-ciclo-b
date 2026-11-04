@@ -224,6 +224,18 @@ class DesignTokens {
   ];
 
   // ---------------------------------------------------------------------
+  // Motion (Story 3.1) — the first `Duration` token this file defines
+  // (RNF08: every such literal belongs here, not hardcoded in a widget).
+  // ---------------------------------------------------------------------
+
+  /// Insertion Modal's own entrance choreography — `200ms`
+  /// (`cerne-prototype.html` calls this transition `sheetUp`). The caller
+  /// (`InsertionModal.show`) substitutes `Duration.zero` instead whenever
+  /// `MediaQuery.disableAnimations` is true (Reduce Motion), rather than
+  /// this file encoding that condition itself.
+  static const Duration durationSheetUp = Duration(milliseconds: 200);
+
+  // ---------------------------------------------------------------------
   // Components — named constants that don't fit color/typography/
   // spacing/radii (epic context's "components" token category; see
   // Story 1.2 Design Notes).

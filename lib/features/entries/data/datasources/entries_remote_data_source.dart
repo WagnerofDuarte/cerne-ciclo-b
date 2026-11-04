@@ -1,0 +1,41 @@
+import 'package:fpdart/fpdart.dart';
+
+import '../../../../core/failure/failure.dart';
+import '../../../../core/network/api_client.dart';
+import '../../domain/entities/entry.dart';
+import '../models/entry_dto.dart';
+
+/// The entries feature's one write call so far (`entries-create`) — posts
+/// via the shared `ApiClient`, mirroring `account_remote_data_source.dart`'s
+/// pattern.
+class EntriesRemoteDataSource {
+  EntriesRemoteDataSource(this._apiClient);
+
+  final ApiClient _apiClient;
+
+  /// Sends exactly `{content, source}` — this story never passes
+  /// `chatMessageId`/`occurredAt`/`mediaDurationSeconds` (Boundaries: no
+  /// `Entry` field beyond the modeled 8; those three are optional in the
+  /// contract and belong to later stories/epics).
+  Future<Either<Failure, EntryDto>> create({
+    required String content,
+    required EntrySource source,
+  }) async {
+    final result = await _apiClient.post(
+      'entries-create',
+      data: {'content': content, 'source': source.name},
+    );
+    return result.flatMap((json) {
+      try {
+        final data = json['data'] as Map<String, dynamic>;
+        return right(EntryDto.fromJson(data));
+      } catch (error) {
+        // A 200 response that doesn't match the expected shape is a
+        // client-side parse failure, never a backend-sent code — maps to
+        // the local-only `malformedResponse` (RNF09: no exception escapes
+        // unmapped).
+        return left(Failure.malformedResponse(message: error.toString()));
+      }
+    });
+  }
+}

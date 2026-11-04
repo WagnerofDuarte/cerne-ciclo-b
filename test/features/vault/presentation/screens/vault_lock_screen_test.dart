@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart' hide State;
 
@@ -10,6 +9,8 @@ import 'package:cerne/features/vault/domain/entities/vault_status.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 import 'package:cerne/features/vault/presentation/screens/vault_lock_screen.dart';
 import 'package:cerne/features/vault/presentation/widgets/pin_keypad.dart';
+
+import '../../../../support/intercept_announcements.dart';
 
 /// Same shape as `app_router_test.dart`'s own `_FakeVaultRepository` — a
 /// plain fake (not mocktail) so `authenticate()`'s resolution can be held
@@ -568,31 +569,10 @@ void main() {
     // Review finding: every existing assertion above only reads the
     // visible `Text` widgets, so a deleted/broken `_announce()` call (or
     // an inverted `shouldAnnounceFailure` guard) would still pass every
-    // test in this file. These mock `SystemChannels.accessibility`
-    // directly — the channel `SemanticsService.sendAnnouncement` sends
-    // on — to assert the real announcement content.
-    List<String> interceptAnnouncements(WidgetTester tester) {
-      final messages = <String>[];
-      tester.binding.defaultBinaryMessenger.setMockDecodedMessageHandler<
-        dynamic
-      >(SystemChannels.accessibility, (dynamic call) async {
-        final event = call as Map<dynamic, dynamic>;
-        if (event['type'] == 'announce') {
-          final data = event['data'] as Map<dynamic, dynamic>;
-          messages.add(data['message'] as String);
-        }
-        return null;
-      });
-      addTearDown(
-        () => tester.binding.defaultBinaryMessenger
-            .setMockDecodedMessageHandler<dynamic>(
-              SystemChannels.accessibility,
-              null,
-            ),
-      );
-      return messages;
-    }
-
+    // test in this file. `interceptAnnouncements` (extracted to
+    // `test/support/`) mocks `SystemChannels.accessibility` directly — the
+    // channel `SemanticsService.sendAnnouncement` sends on — to assert the
+    // real announcement content.
     testWidgets(
       'a biometric failure on mount sends the fallback message as a real '
       'screen-reader announcement',

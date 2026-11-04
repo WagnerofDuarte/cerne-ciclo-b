@@ -1,10 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fpdart/fpdart.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:cerne/core/design_tokens.dart';
+import 'package:cerne/core/di/injection_container.dart';
+import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/core/navigation/placeholder_screens.dart';
 import 'package:cerne/core/widgets/app_drawer.dart';
+import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
+import 'package:cerne/features/entries/domain/entities/entry.dart';
+import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+
+/// A trivial fake — the "+" tests below never exercise a real save, so
+/// `create()` is never expected to actually be called.
+class _UnusedEntriesRepository implements EntriesRepository {
+  @override
+  Future<Either<Failure, Entry>> create({
+    required String content,
+    required EntrySource source,
+  }) async => throw UnimplementedError('not expected to be called');
+}
 
 /// Minimal two-route `GoRouter` for the three back-arrow placeholders —
 /// their header's back arrow does `context.go('/')` (Boundaries: "back-arrow
@@ -70,6 +86,32 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.byType(AppDrawer), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'the "+" control is always tappable and opens the Insertion Modal '
+      'on Texto (Story 3.1)',
+      (tester) async {
+        await resetCoreDependencies();
+        sl.registerFactory<TextEntryCubit>(
+          () => TextEntryCubit(_UnusedEntriesRepository()),
+        );
+        addTearDown(resetCoreDependencies);
+
+        await tester.pumpWidget(
+          const MaterialApp(home: HomeChatPlaceholderScreen()),
+        );
+
+        expect(find.byIcon(Icons.add), findsOneWidget);
+
+        await tester.tap(find.byIcon(Icons.add));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Texto'), findsOneWidget);
+        expect(find.text('Áudio'), findsOneWidget);
+        expect(find.text('Foto'), findsOneWidget);
+        expect(find.byType(TextField), findsOneWidget);
       },
     );
   });

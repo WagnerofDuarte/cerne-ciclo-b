@@ -2,9 +2,12 @@ import 'package:dio/dio.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:get_it/get_it.dart';
+import 'package:hive_ce_flutter/hive_ce_flutter.dart';
 
 import '../../features/account/account_injection.dart';
 import '../../features/auth/auth_injection.dart';
+import '../../features/capture/capture_injection.dart';
+import '../../features/entries/entries_injection.dart';
 import '../../features/vault/vault_injection.dart';
 import '../network/access_token_provider.dart';
 import '../network/api_client.dart';
@@ -81,6 +84,12 @@ Future<void> setupCoreDependencies() async {
   registerAuthFeature();
   registerVaultFeature();
   registerAccountFeature();
+
+  // Story 3.1 — the app's first `hive_ce` usage: `initFlutter()` must
+  // complete before `registerEntriesFeature()` opens its box (Code Map).
+  await Hive.initFlutter();
+  await registerEntriesFeature();
+  registerCaptureFeature();
 }
 
 /// Test/teardown helper — resets the single `get_it` instance so each test

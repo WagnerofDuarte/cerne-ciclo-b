@@ -2,6 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hive_ce/hive_ce.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
 import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/network/api_client.dart';
@@ -12,7 +14,11 @@ import 'package:cerne/features/account/presentation/cubit/account_settings_cubit
 import 'package:cerne/features/auth/data/datasources/auth_remote_data_source.dart';
 import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
 import 'package:cerne/features/auth/presentation/cubit/auth_cubit.dart';
+import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
+import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
+
+import '../../support/fake_path_provider_platform.dart';
 
 /// AC4 — proves the `dio` + `flutter_secure_storage` + `get_it` integration
 /// spike works together in one bootstrap, before anything else is built on
@@ -50,9 +56,17 @@ void main() {
     }
   }
 
+  late FakePathProviderPlatform fakePathProvider;
+
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(secureStorageChannel, handleSecureStorageCall);
+    // Story 3.1 — `setupCoreDependencies()` now also calls
+    // `Hive.initFlutter()` (transitively via `hive_ce_flutter`), which
+    // asks `path_provider` for the documents directory; faked the same
+    // way the secure-storage channel above is.
+    fakePathProvider = FakePathProviderPlatform();
+    PathProviderPlatform.instance = fakePathProvider;
 
     await resetCoreDependencies();
     await setupCoreDependencies();
@@ -62,7 +76,16 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(secureStorageChannel, null);
     fakeNativeStorage.clear();
+    // Closes the `entries` Hive box opened above — `resetCoreDependencies()`
+    // only resets `get_it`'s registrations, not Hive's own global box
+    // registry, and `Hive.openBox` silently returns the already-open box
+    // (ignoring a new path) if it isn't closed first.
+    await Hive.close();
     await resetCoreDependencies();
+    // Review finding: without this, every test run leaks one orphaned
+    // temp folder onto the dev machine/CI runner (`FakePathProviderPlatform`
+    // creates real disk directories, not an in-memory fake).
+    await fakePathProvider.cleanUp();
   });
 
   test(
@@ -134,6 +157,30 @@ void main() {
       // Dio) rather than just checking the registration exists — same
       // rationale as `AuthCubit`'s own forced resolution above.
       expect(() => sl<AccountSettingsCubit>(), returnsNormally);
+    },
+  );
+
+  test(
+    'setupCoreDependencies also wires the entries + capture features '
+    '(spec-3-1) — a broken registration/dependency cycle (including the '
+    'Hive box open) must surface here, not only at real app launch',
+    () async {
+      expect(sl.isRegistered<EntriesRepository>(), isTrue);
+
+      // Actually resolves the whole chain (EntriesRepository ->
+      // EntriesRemoteDataSource/Box<Map> -> ApiClient/Dio) rather than
+      // just checking the registration exists — same rationale as
+      // `AuthCubit`'s own forced resolution above.
+      expect(() => sl<EntriesRepository>(), returnsNormally);
+
+      // `TextEntryCubit` is a factory (Boundaries: "Modal open resets"),
+      // not a singleton — resolving it twice must return two distinct,
+      // independently closable instances.
+      final first = sl<TextEntryCubit>();
+      final second = sl<TextEntryCubit>();
+      expect(first, isNot(same(second)));
+      await first.close();
+      await second.close();
     },
   );
 

@@ -2,7 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../features/capture/presentation/cubit/text_entry_cubit.dart';
+import '../../features/capture/presentation/widgets/insertion_modal.dart';
 import '../design_tokens.dart';
+import '../di/injection_container.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/back_arrow_header.dart';
 
@@ -84,6 +87,18 @@ class HomeChatPlaceholderScreen extends StatelessWidget {
       // Boundaries: "heavier drawer scrim rgba(36,31,25,.4)" — overrides
       // `Scaffold`'s own default `Colors.black54` barrier.
       drawerScrimColor: DesignTokens.colorScrimHeavy,
+      // Story 3.1 — "a single tappable control, not the RF04 composer
+      // bar" (Design Notes): a plain FAB, always tappable, no proactive
+      // offline-disabling (Boundaries). `FloatingActionButton`'s own
+      // default 56dp size already clears the 44pt tap-target floor.
+      floatingActionButton: FloatingActionButton(
+        onPressed: () =>
+            InsertionModal.show(context, cubit: sl<TextEntryCubit>()),
+        backgroundColor: DesignTokens.colorAccent,
+        foregroundColor: DesignTokens.colorOnAccent,
+        tooltip: 'Adicionar registro',
+        child: const Icon(Icons.add),
+      ),
       body: Column(
         children: [
           Container(

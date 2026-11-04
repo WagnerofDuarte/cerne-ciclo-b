@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart' hide State;
+import 'package:hive_ce/hive_ce.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
 import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/failure/failure.dart';
@@ -19,6 +21,8 @@ import 'package:cerne/features/vault/domain/entities/vault_status.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 import 'package:cerne/features/vault/presentation/screens/vault_lock_screen.dart';
 import 'package:cerne/main.dart';
+
+import 'support/fake_path_provider_platform.dart';
 
 class MockAuthRepository extends Mock implements AuthRepository {}
 
@@ -172,6 +176,7 @@ void main() {
     'plugins.it_nomads.com/flutter_secure_storage',
   );
   final fakeNativeStorage = <String, String>{};
+  late FakePathProviderPlatform fakePathProvider;
 
   Future<dynamic> handleSecureStorageCall(MethodCall call) async {
     final args = call.arguments as Map<dynamic, dynamic>;
@@ -197,6 +202,13 @@ void main() {
           secureStorageChannel,
           handleSecureStorageCall,
         );
+    // Story 3.1 — `setupCoreDependencies()` now also calls
+    // `Hive.initFlutter()` (transitively via `hive_ce_flutter`), which
+    // asks `path_provider` for the documents directory; faked the same
+    // way the secure-storage channel above is.
+    fakePathProvider = FakePathProviderPlatform();
+    PathProviderPlatform.instance = fakePathProvider;
+
     await resetCoreDependencies();
     await setupCoreDependencies();
     // `setupCoreDependencies()` registers the real `VaultRepositoryImpl`
@@ -230,7 +242,16 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(secureStorageChannel, null);
     fakeNativeStorage.clear();
+    // Closes the `entries` Hive box opened above — `resetCoreDependencies()`
+    // only resets `get_it`'s registrations, not Hive's own global box
+    // registry, and `Hive.openBox` silently returns the already-open box
+    // (ignoring a new path) if it isn't closed first.
+    await Hive.close();
     await resetCoreDependencies();
+    // Review finding: without this, every test run leaks one orphaned
+    // temp folder onto the dev machine/CI runner (`FakePathProviderPlatform`
+    // creates real disk directories, not an in-memory fake).
+    await fakePathProvider.cleanUp();
   });
 
   testWidgets(
