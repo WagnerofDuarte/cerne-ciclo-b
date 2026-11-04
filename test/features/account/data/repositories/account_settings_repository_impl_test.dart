@@ -250,9 +250,13 @@ void main() {
       fetchCompleter.complete(
         right(const AccountSettingsDto(biometricEnabled: true)),
       );
-      await fetchFuture;
+      final fetchResult = await fetchFuture;
 
       expect(repository.currentBiometricEnabled, isFalse);
+      // Review finding: a stale fetch must not report success either —
+      // its own result was discarded, mirroring `setBiometricEnabled`'s
+      // stale-generation branch.
+      expect(fetchResult.isLeft(), isTrue);
     });
 
     test('an older setBiometricEnabled() call that resolves after a newer '

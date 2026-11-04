@@ -65,10 +65,17 @@ class VaultRepositoryImpl
     // Flutter-internal assertion if no binding exists yet — caught here and
     // rethrown with a message that names the actual root cause, so any
     // future call site that breaks this ordering fails clearly instead of
-    // opaquely.
+    // opaquely. Review finding: `BindingBase.checkInstance`'s own null-
+    // binding check is entirely wrapped in `assert(() {...})` (its doc
+    // comment: "In release mode it always returns the argument"), so a
+    // release build never actually throws `FlutterError` here — it
+    // silently returns `null` typed as non-nullable instead, and the very
+    // next call fails with an unrelated, uncaught error. Catching `Object`
+    // (not just `FlutterError`) makes this guard work the same way in
+    // every build mode, debug or release.
     try {
       WidgetsBinding.instance.addObserver(this);
-    } on FlutterError catch (error) {
+    } on Object catch (error) {
       throw StateError(
         'VaultRepositoryImpl requires WidgetsFlutterBinding.ensureInitialized() '
         '(or TestWidgetsFlutterBinding.ensureInitialized() in tests) to run '
@@ -246,6 +253,19 @@ class VaultRepositoryImpl
       // instead of comparing against one.
       if (storedPin == null) {
         await _secureStorage.write(key: _pinStorageKey, value: pin);
+        // Review finding: the check right after `read()` above only
+        // guards against a slow `read()` — a call whose own `write()` is
+        // the slow step could pass that earlier check, then still land
+        // here and unconditionally emit `unlocked` after being superseded
+        // by a second call that finished first. Re-checked here, right
+        // before emitting, closes that same gap for a slow `write()`.
+        if (generation != _submitPinGeneration) {
+          return left(
+            const Failure.malformedResponse(
+              message: 'Superseded by a newer PIN attempt',
+            ),
+          );
+        }
         _emit(VaultStatus.unlocked);
         return right(unit);
       }

@@ -404,6 +404,60 @@ void main() {
       expect(emitted, isEmpty);
       expect(repository.currentStatus, VaultStatus.unlocked);
     });
+
+    test('a superseded (stale) first-time-PIN call whose own write() -- '
+        'not read() -- is the slow step still never (re-)emits unlocked '
+        'once it finally resolves (review finding: the generation check '
+        'right after read() only guards a slow read(); this guards the '
+        'symmetric slow-write() case)', () async {
+      when(
+        () => mockSecureStorage.read(key: any(named: 'key')),
+      ).thenAnswer((_) async => null);
+
+      final firstWrite = Completer<void>();
+      var writeCallCount = 0;
+      when(
+        () => mockSecureStorage.write(
+          key: any(named: 'key'),
+          value: any(named: 'value'),
+        ),
+      ).thenAnswer((_) {
+        writeCallCount++;
+        return writeCallCount == 1 ? firstWrite.future : Future<void>.value();
+      });
+
+      final emitted = <VaultStatus>[];
+      final subscription = repository.statusStream.listen(emitted.add);
+      await Future<void>.delayed(Duration.zero);
+      emitted.clear();
+
+      // The first call passes its own generation check (nothing has
+      // superseded it yet) and starts its own write(), which is held
+      // pending.
+      final firstResultFuture = repository.submitPin('1111');
+      await Future<void>.delayed(Duration.zero);
+
+      // A second call starts and completes fully -- its own write()
+      // resolves immediately -- before the first call's write() does.
+      final secondResult = await repository.submitPin('2222');
+      await Future<void>.delayed(Duration.zero);
+      expect(secondResult.isRight(), isTrue);
+      expect(repository.currentStatus, VaultStatus.unlocked);
+      expect(emitted, [VaultStatus.unlocked]);
+      emitted.clear();
+
+      // The first (now superseded) call's write() finally resolves -- must
+      // be a no-op: no re-emission, `Left` returned, even though its own
+      // write already (unavoidably) landed in storage.
+      firstWrite.complete();
+      final firstResult = await firstResultFuture;
+      await Future<void>.delayed(Duration.zero);
+      await subscription.cancel();
+
+      expect(firstResult.isLeft(), isTrue);
+      expect(emitted, isEmpty);
+      expect(repository.currentStatus, VaultStatus.unlocked);
+    });
   });
 
   group('dispose()', () {

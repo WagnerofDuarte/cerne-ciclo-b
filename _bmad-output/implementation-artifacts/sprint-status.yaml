@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-26-2026 00:00
-last_updated: 11-03-2026 18:10
+last_updated: 11-03-2026 23:59
 project: cerne-ciclo-b
 project_key: NOKEY
 tracking_system: file-system
@@ -48,7 +48,7 @@ development_status:
   2-1-biometric-pin-app-access-gate: done
   2-2-biometric-failure-fallback-to-pin: done
   2-3-fixed-5-minute-idle-re-authentication-timeout: done
-  2-4-biometric-preference-persistence: review
+  2-4-biometric-preference-persistence: done
   epic-2-retrospective: optional
 
   epic-3: backlog

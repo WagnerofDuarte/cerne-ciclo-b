@@ -87,10 +87,17 @@ class AccountSettingsRepositoryImpl implements AccountSettingsRepository {
       // Review finding: a `setBiometricEnabled` call that started after
       // this fetch (and has therefore already bumped `_generation`) has
       // superseded it — this fetch's now-stale read must not clobber
-      // whatever that newer call already settled on.
-      if (generation == _generation) {
-        _emit(dto.biometricEnabled);
+      // whatever that newer call already settled on, and must not report
+      // success either, since its result was discarded (mirrors
+      // `setBiometricEnabled`'s own stale-generation branch).
+      if (generation != _generation) {
+        return left(
+          const Failure.malformedResponse(
+            message: AccountSettingsRepository.supersededMessage,
+          ),
+        );
       }
+      _emit(dto.biometricEnabled);
       return right(unit);
     });
   }
@@ -111,7 +118,7 @@ class AccountSettingsRepositoryImpl implements AccountSettingsRepository {
       // superseding call owns `_currentValue` from here on.
       return left(
         const Failure.malformedResponse(
-          message: 'Superseded by a newer preference update',
+          message: AccountSettingsRepository.supersededMessage,
         ),
       );
     }

@@ -230,30 +230,55 @@ class _VaultLockScreenState extends State<VaultLockScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // No ambient `Semantics(liveRegion: true)` wrapper here — it would
+    // re-trigger on every single digit tap inside `PinKeypad` (its own
+    // `_ProgressDots` label changes each tap), not just the two
+    // transitions that actually need announcing. Those two (biometric
+    // failure, PIN mismatch) are already covered explicitly and reliably
+    // by `_announce()` below.
+    //
+    // Tela 0.1b/c (the PIN keypad) is top-aligned under its own
+    // `pinScreenPadding`, unlike Tela 0.1 (biometric), which stays
+    // centered under the generic `screenPadding` — matching each state's
+    // own layout in `cerne-prototype.html` (Story 2.2 correction).
     return Scaffold(
       backgroundColor: DesignTokens.colorSurfaceBg,
-      body: Center(
-        child: Padding(
-          padding: DesignTokens.screenPadding,
-          // No ambient `Semantics(liveRegion: true)` wrapper here — it
-          // would re-trigger on every single digit tap inside `PinKeypad`
-          // (its own `_ProgressDots` label changes each tap), not just the
-          // two transitions that actually need announcing. Those two
-          // (biometric failure, PIN mismatch) are already covered
-          // explicitly and reliably by `_announce()` below.
-          child: _showPinKeypad
-              ? _PinView(
+      body: _showPinKeypad
+          ? Padding(
+              padding: DesignTokens.pinScreenPadding,
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: _PinView(
                   errorMessage: _errorMessage,
                   onSubmit: _submitPin,
                   enabled: !_submittingPin,
-                )
-              : _BiometricView(onUsePin: _useManualPin),
-        ),
-      ),
+                ),
+              ),
+            )
+          : Center(
+              child: Padding(
+                padding: DesignTokens.screenPadding,
+                child: _BiometricView(onUsePin: _useManualPin),
+              ),
+            ),
     );
   }
 }
 
+/// Tela 0.1's biometric view (Story 2.1 correction: fingerprint-circle icon,
+/// "Toque para desbloquear" title in [DesignTokens.textTitleLg] — sans-serif,
+/// matching the prototype, not [DesignTokens.textHeadlineMd]'s serif — and
+/// the Face ID/Touch ID body copy, all per `cerne-prototype.html`'s Tela 0.1
+/// block).
+///
+/// The prototype's second link, "usar e-mail e senha" (reaching the
+/// password login screen), is deliberately still not built here: reaching
+/// it would require ending the current session and forcing the vault back
+/// to [VaultStatus.locked] on demand, and neither `AuthRepository`/
+/// `SessionRepository` nor `VaultRepository` exposes that today — a known
+/// gap already tracked in `deferred-work.md` ("no epic currently owns
+/// reconnecting the vault screen to password login"), not something to
+/// improvise here as a dead tap target.
 class _BiometricView extends StatelessWidget {
   const _BiometricView({required this.onUsePin});
 
@@ -264,22 +289,32 @@ class _BiometricView extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(
-          Icons.lock_outline,
-          size: DesignTokens.spacing2xl,
-          color: DesignTokens.colorTextSecondary,
+        Container(
+          width: DesignTokens.biometricIconCircleSize,
+          height: DesignTokens.biometricIconCircleSize,
+          decoration: BoxDecoration(
+            color: DesignTokens.colorSurfaceElevated,
+            shape: BoxShape.circle,
+            border: Border.all(color: DesignTokens.colorBorder),
+            boxShadow: DesignTokens.elevation1,
+          ),
+          child: const Icon(
+            Icons.fingerprint,
+            size: DesignTokens.biometricIconSize,
+            color: DesignTokens.colorPrimary,
+          ),
         ),
         const SizedBox(height: DesignTokens.spacingMd),
         Text(
-          'Cerne bloqueado',
+          'Toque para desbloquear',
           textAlign: TextAlign.center,
-          style: DesignTokens.textHeadlineMd.copyWith(
+          style: DesignTokens.textTitleLg.copyWith(
             color: DesignTokens.colorTextPrimary,
           ),
         ),
         const SizedBox(height: DesignTokens.spacingSm),
         Text(
-          'Use a biometria do seu dispositivo para continuar.',
+          'Use Face ID ou Touch ID para continuar',
           textAlign: TextAlign.center,
           style: DesignTokens.textBodyMd.copyWith(
             color: DesignTokens.colorTextSecondary,
@@ -315,23 +350,58 @@ class _PinView extends StatelessWidget {
         Text(
           'Digite seu PIN',
           textAlign: TextAlign.center,
-          style: DesignTokens.textHeadlineMd.copyWith(
+          style: DesignTokens.textTitleLg.copyWith(
             color: DesignTokens.colorTextPrimary,
           ),
         ),
+        const SizedBox(height: DesignTokens.spacingSm),
         if (errorMessage != null) ...[
+          _PinErrorBand(message: errorMessage!),
           const SizedBox(height: DesignTokens.spacingSm),
-          Text(
-            errorMessage!,
-            textAlign: TextAlign.center,
-            style: DesignTokens.textBodyMd.copyWith(
-              color: DesignTokens.colorError,
+        ],
+        const SizedBox(height: DesignTokens.spacingSm),
+        PinKeypad(onSubmit: onSubmit, enabled: enabled),
+      ],
+    );
+  }
+}
+
+/// Tela 0.1c's error band — a tinted, rounded container with a warning
+/// icon, not plain colored text (Story 2.2 correction;
+/// `cerne-prototype.html`'s `ph-warning-circle` is approximated with a
+/// built-in Material icon, same rationale as [DesignTokens.dialogIconSize]).
+class _PinErrorBand extends StatelessWidget {
+  const _PinErrorBand({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: DesignTokens.pinErrorBandPadding,
+      decoration: BoxDecoration(
+        color: DesignTokens.colorErrorBg,
+        borderRadius: BorderRadius.circular(DesignTokens.radiusSm),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.error_outline,
+            size: DesignTokens.pinErrorBandIconSize,
+            color: DesignTokens.colorError,
+          ),
+          const SizedBox(width: DesignTokens.pinErrorBandIconGap),
+          Flexible(
+            child: Text(
+              message,
+              style: DesignTokens.textCaptionSm.copyWith(
+                color: DesignTokens.colorError,
+              ),
             ),
           ),
         ],
-        const SizedBox(height: DesignTokens.spacingLg),
-        PinKeypad(onSubmit: onSubmit, enabled: enabled),
-      ],
+      ),
     );
   }
 }

@@ -137,9 +137,11 @@ class _ProgressDots extends StatelessWidget {
               height: DesignTokens.pinProgressDotSize,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: filled
-                    ? DesignTokens.colorPrimary
-                    : DesignTokens.colorBorder,
+                color: filled ? DesignTokens.colorPrimary : null,
+                border: Border.all(
+                  color: DesignTokens.colorPrimary,
+                  width: DesignTokens.pinProgressDotBorderWidth,
+                ),
               ),
             ),
           );

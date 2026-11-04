@@ -84,6 +84,11 @@ class DesignTokens {
   /// constant's doc).
   static const Color colorScrimHeavy = Color(0x66241F19);
 
+  /// PIN error band fill (Story 2.2 correction) — `rgba(179,64,42,.08)`,
+  /// `cerne-prototype.html`'s Tela 0.1c error band background, `colorError`
+  /// at 8% alpha.
+  static const Color colorErrorBg = Color(0x14B3402A);
+
   // ---------------------------------------------------------------------
   // Typography — prototype-extract.md §3 "Typography"
   // ---------------------------------------------------------------------
@@ -156,6 +161,17 @@ class DesignTokens {
     fontSize: 12,
     height: 16 / 12,
     letterSpacing: 0.2,
+  );
+
+  /// Karla 400 · 12/16 — PIN error band caption (Story 2.2 correction).
+  /// `cerne-prototype.html`'s Tela 0.1c error band is `font-size:12px`
+  /// Karla, not on the rest of the type scale (the closest existing
+  /// token, [textLabelMd], is both a different weight and size).
+  static const TextStyle textCaptionSm = TextStyle(
+    fontFamily: _fontKarla,
+    fontWeight: FontWeight.w400,
+    fontSize: 12,
+    height: 16 / 12,
   );
 
   // ---------------------------------------------------------------------
@@ -231,6 +247,16 @@ class DesignTokens {
   /// Material icon (Design Notes — no new icon-font dependency), sized to
   /// match.
   static const double dialogIconSize = 20;
+
+  /// Tela 0.1's biometric icon circle (Story 2.1 correction) —
+  /// `cerne-prototype.html`'s `96px` circle, `colorSurfaceElevated` fill,
+  /// `colorBorder` outline, [elevation1] shadow.
+  static const double biometricIconCircleSize = 96;
+
+  /// Tela 0.1's `ph-fingerprint` icon (Story 2.1 correction) —
+  /// `font-size:44px`; approximated with a built-in Material icon, same
+  /// rationale as [dialogIconSize].
+  static const double biometricIconSize = 44;
 
   /// Confirmation-dialog card's internal gap between stacked elements
   /// (icon+title row, body text, button, caption) — the overlay's markup
@@ -310,8 +336,51 @@ class DesignTokens {
   /// Progress-dot diameter (4 dots above the grid, one per digit).
   static const double pinProgressDotSize = 12;
 
-  /// Gap between progress dots.
-  static const double pinProgressDotGap = spacingSm;
+  /// Gap between progress dots — `cerne-prototype.html`'s Tela 0.1b/c dots
+  /// row is `gap:14px`, not on the 4dp spacing scale (corrected from the
+  /// previous [spacingSm], Story 2.2 correction).
+  static const double pinProgressDotGap = 14;
+
+  /// Progress-dot border width — every dot (filled or not) keeps a
+  /// [colorPrimary] outline per the prototype's `border:1.5px solid
+  /// #1F3D34`; same weight as [borderWidthEmphasis].
+  static const double pinProgressDotBorderWidth = borderWidthEmphasis;
+
+  /// PIN error band icon size — `ph-warning-circle`, `font-size:14px` in
+  /// the prototype's Tela 0.1c error band (Story 2.2 correction).
+  static const double pinErrorBandIconSize = 14;
+
+  /// PIN error band's icon-text gap — `gap:6px`, not on the 4dp scale.
+  static const double pinErrorBandIconGap = 6;
+
+  /// PIN error band's own padding — `padding:8px 12px`; vertical matches
+  /// [spacingSm], horizontal (12) isn't on the existing scale.
+  static const EdgeInsets pinErrorBandPadding = EdgeInsets.symmetric(
+    horizontal: 12,
+    vertical: spacingSm,
+  );
+
+  /// Tela 0.1b/c's own screen padding — `padding:120px 32px 40px`, top-
+  /// aligned (not centered) unlike the generic [screenPadding]; 120 clears
+  /// the status bar + breathing room above the title, 40 isn't on the
+  /// existing scale.
+  static const EdgeInsets pinScreenPadding = EdgeInsets.fromLTRB(
+    spacingXl,
+    120,
+    spacingXl,
+    40,
+  );
+
+  /// Review finding (story 2.4) — small inline spinner shown next to the
+  /// Configurações biometric toggle while a `PATCH /account/settings`
+  /// call is in flight (RNF01: a loading indicator for calls over
+  /// 300ms), not named anywhere in prototype-extract.md since this
+  /// control didn't exist in the prototype.
+  static const double accountSettingsSavingIndicatorSize = 20;
+
+  /// [accountSettingsSavingIndicatorSize]'s own stroke width — thinner
+  /// than the default 4.0 so it reads cleanly at this small a size.
+  static const double accountSettingsSavingIndicatorStrokeWidth = 2;
 
   // ---------------------------------------------------------------------
   // Layout insets — not named in prototype-extract.md §3, but every

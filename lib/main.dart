@@ -24,7 +24,37 @@ Future<void> main() async {
     );
     rethrow;
   }
+  // Review finding: `app_router.dart`'s `_redirect` composes the vault
+  // gate (AD-14) strictly first, synchronously, ahead of everything else —
+  // it routes to `/vault` on the very first redirect evaluation, before
+  // `CerneApp`'s own fire-and-forget boot fetch below could ever resolve.
+  // `/vault`'s builder reads `currentBiometricEnabled` synchronously at
+  // that moment, so without this awaited (bounded) fetch here, every cold
+  // start reads the untouched default (`true`) regardless of what the user
+  // actually set — not the "one-time, benign gap on a slow-network cold
+  // boot" it looked like. Bounded so a hung network call can't delay app
+  // launch indefinitely; on timeout/failure, `currentBiometricEnabled` is
+  // simply left at its documented default, same outcome as before this
+  // fix.
+  await sl<AccountSettingsRepository>()
+      .fetchBiometricEnabled()
+      .timeout(const Duration(seconds: 2), onTimeout: () => right(unit))
+      .catchError(_asUnchangedPreference);
   runApp(const CerneApp());
+}
+
+// `catchError`'s handler must still complete the Future with a value of
+// its declared type (`Either<Failure, Unit>`) — a `void`-returning handler
+// would try to complete it with `null`, which isn't assignable to that
+// non-nullable type and would itself throw. Top-level (not a
+// `_CerneAppState` method) so both `main()`'s own awaited fetch above and
+// `CerneApp.initState`'s fire-and-forget one below can share it.
+Either<Failure, Unit> _asUnchangedPreference(
+  Object error,
+  StackTrace stackTrace,
+) {
+  debugPrint('Cerne: fetchBiometricEnabled() threw unexpectedly ($error)');
+  return left(Failure.malformedResponse(message: error.toString()));
 }
 
 /// Root widget. Portrait-only, light-mode-only, fixed 390x844 frame — no
@@ -115,18 +145,6 @@ class _CerneAppState extends State<CerneApp> {
     StackTrace stackTrace,
   ) {
     debugPrint('CerneApp: restoreSession() threw unexpectedly ($error)');
-    return left(Failure.malformedResponse(message: error.toString()));
-  }
-
-  // Same rationale as `_asUnauthenticated` above, for
-  // `fetchBiometricEnabled()`'s own "never throws" contract.
-  static Either<Failure, Unit> _asUnchangedPreference(
-    Object error,
-    StackTrace stackTrace,
-  ) {
-    debugPrint(
-      'CerneApp: fetchBiometricEnabled() threw unexpectedly ($error)',
-    );
     return left(Failure.malformedResponse(message: error.toString()));
   }
 

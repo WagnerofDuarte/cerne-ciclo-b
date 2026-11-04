@@ -212,7 +212,7 @@ void main() {
         await tester.pump();
 
         expect(fakeVaultRepository.authenticateCallCount, 1);
-        expect(find.text('Cerne bloqueado'), findsOneWidget);
+        expect(find.text('Toque para desbloquear'), findsOneWidget);
         expect(find.text('Digite seu PIN'), findsNothing);
 
         // Same widget type, no key — Flutter calls didUpdateWidget on the
@@ -275,7 +275,7 @@ void main() {
       await tester.pumpWidget(_wrap(fakeVaultRepository));
       await tester.pump();
 
-      expect(find.text('Cerne bloqueado'), findsOneWidget);
+      expect(find.text('Toque para desbloquear'), findsOneWidget);
       expect(find.text('Usar PIN'), findsOneWidget);
       expect(find.text('Digite seu PIN'), findsNothing);
 

@@ -13,6 +13,15 @@ import '../../../../core/failure/failure.dart';
 /// `attemptBiometricFirst`) and the Configurações toggle read — never a
 /// second, independently-tracked copy of the same boolean.
 abstract class AccountSettingsRepository {
+  /// The exact [Failure.message] [setBiometricEnabled] returns when a call
+  /// is discarded for being superseded by a newer one (the generation
+  /// guard, `AccountSettingsRepositoryImpl._generation`) — an internal
+  /// control-flow signal, not a real error, since the winning call already
+  /// settled the value correctly by the time this one resolves.
+  /// `AccountSettingsCubit` recognizes this exact string to suppress it
+  /// from the UI rather than showing a raw, English, internal message.
+  static const supersededMessage = 'Superseded by a newer preference update';
+
   /// Broadcast stream of the current `biometricEnabled` preference. Like
   /// `VaultRepository.statusStream`, this always has a value from the
   /// moment the repository is constructed (`true`) — a late subscriber

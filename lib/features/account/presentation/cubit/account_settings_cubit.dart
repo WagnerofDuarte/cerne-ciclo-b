@@ -78,9 +78,18 @@ class AccountSettingsCubit extends Cubit<AccountSettingsState> {
           biometricEnabled: _repository.currentBiometricEnabled,
         ),
       ) {
-    _subscription = _repository.biometricEnabledStream.listen(
-      (value) => emit(state.copyWith(biometricEnabled: value)),
-    );
+    _subscription = _repository.biometricEnabledStream.listen((value) {
+      // Review finding: `biometricEnabledStream`'s first delivery always
+      // replays the exact same value the constructor above just read
+      // synchronously — without this check, that replay was a redundant
+      // duplicate emission (not skipped by `Cubit`'s own equal-state dedup,
+      // which only applies once something has already been emitted),
+      // forcing one pointless extra rebuild right after every screen mount.
+      if (value == state.biometricEnabled) {
+        return;
+      }
+      emit(state.copyWith(biometricEnabled: value));
+    });
   }
 
   final AccountSettingsRepository _repository;
@@ -89,9 +98,30 @@ class AccountSettingsCubit extends Cubit<AccountSettingsState> {
   Future<void> toggleBiometric(bool value) async {
     emit(state.copyWith(clearErrorMessage: true, isSaving: true));
     final result = await _repository.setBiometricEnabled(value);
+    // Review finding: this cubit is a `get_it` lazy singleton with
+    // `dispose: (cubit) => cubit.close()` — if `close()` runs while the
+    // `await` above is still pending (e.g. `resetCoreDependencies()`
+    // during a logout, once Epic 8 implements one), `emit()` below would
+    // otherwise throw a `StateError` ("Cannot emit new states after
+    // calling close"), unlike the repository-layer `_emit` methods in this
+    // codebase, which already guard against the equivalent race.
+    if (isClosed) {
+      return;
+    }
     result.match(
-      (failure) =>
-          emit(state.copyWith(errorMessage: failure.message, isSaving: false)),
+      (failure) {
+        // Review finding: a superseded call's `Left` is an internal
+        // control-flow signal (`AccountSettingsRepository.
+        // supersededMessage`), not a real error — the winning call already
+        // settled the value correctly, so nothing should be shown; showing
+        // `failure.message` unconditionally leaked that raw, English,
+        // internal string into this otherwise fully Portuguese screen.
+        if (failure.message == AccountSettingsRepository.supersededMessage) {
+          emit(state.copyWith(isSaving: false));
+          return;
+        }
+        emit(state.copyWith(errorMessage: failure.message, isSaving: false));
+      },
       (_) => emit(state.copyWith(isSaving: false)),
     );
   }
