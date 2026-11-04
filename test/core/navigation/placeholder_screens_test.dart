@@ -3,14 +3,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:go_router/go_router.dart';
 
+import 'dart:typed_data';
+
 import 'package:cerne/core/design_tokens.dart';
 import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/core/navigation/placeholder_screens.dart';
 import 'package:cerne/core/widgets/app_drawer.dart';
+import 'package:cerne/features/capture/domain/repositories/media_repository.dart';
 import 'package:cerne/features/capture/domain/services/audio_transcriber.dart';
 import 'package:cerne/features/capture/domain/services/mic_recorder.dart';
+import 'package:cerne/features/capture/domain/services/photo_picker.dart';
 import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart';
+import 'package:cerne/features/capture/presentation/cubit/photo_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
@@ -54,6 +59,27 @@ class _UnusedAudioTranscriber implements AudioTranscriber {
   @override
   Future<String?> transcribe(String audioPath) async =>
       throw UnimplementedError('not expected to be called');
+}
+
+/// Trivial fakes for `PhotoEntryCubit`'s two new ports (spec-3-3) — same
+/// rationale as [_UnusedMicRecorder]/[_UnusedAudioTranscriber]: the "+"
+/// test below never switches to the Foto tab.
+class _UnusedPhotoPicker implements PhotoPicker {
+  @override
+  Future<PickedPhoto?> pickFromCamera() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<PickedPhoto?> pickFromGallery() async =>
+      throw UnimplementedError('not expected to be called');
+}
+
+class _UnusedMediaRepository implements MediaRepository {
+  @override
+  Future<Either<Failure, OcrResult>> recognizeText({
+    required Uint8List imageBytes,
+    required String mimeType,
+  }) async => throw UnimplementedError('not expected to be called');
 }
 
 /// Minimal two-route `GoRouter` for the three back-arrow placeholders —
@@ -135,6 +161,13 @@ void main() {
           () => AudioEntryCubit(
             _UnusedMicRecorder(),
             _UnusedAudioTranscriber(),
+            _UnusedEntriesRepository(),
+          ),
+        );
+        sl.registerFactory<PhotoEntryCubit>(
+          () => PhotoEntryCubit(
+            _UnusedPhotoPicker(),
+            _UnusedMediaRepository(),
             _UnusedEntriesRepository(),
           ),
         );

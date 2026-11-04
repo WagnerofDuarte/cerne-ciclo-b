@@ -30,6 +30,10 @@
 	<string>O Cerne usa Face ID para proteger o acesso ao seu diário.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>O Cerne usa o microfone para registrar seus áudios no diário.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>O Cerne usa a câmera para registrar fotos no seu diário.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>O Cerne acessa suas fotos para registrar imagens no seu diário.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -133,6 +133,14 @@ class AudioEntryCubit extends Cubit<AudioCaptureState> {
   /// flow the user already left).
   int _generation = 0;
 
+  /// Guards [stopRecording] against a second concurrent call (e.g. a fast
+  /// double-tap on the stop control before the UI rebuilds past
+  /// [AudioRecording]) — without this, a second `_micRecorder.stop()` call
+  /// racing the first could return `null` (nothing left to stop) and
+  /// overwrite a perfectly good [AudioProcessing]/transcription result
+  /// with a bogus [AudioError] (Review finding).
+  bool _stopping = false;
+
   /// Forwarded straight from [MicRecorder.amplitudeStream] — lets
   /// `_AudioTab`'s waveform animate without ever importing `package:record`
   /// itself (Boundaries).
@@ -158,7 +166,25 @@ class AudioEntryCubit extends Cubit<AudioCaptureState> {
       return;
     }
     final generation = ++_generation;
-    final hasPermission = await _micRecorder.hasPermission();
+    bool hasPermission;
+    try {
+      hasPermission = await _micRecorder.hasPermission();
+    } catch (_) {
+      // Review finding: a thrown `PlatformException` (native-side error)
+      // must never escape uncaught — surfaces through the same
+      // error/retry path as a plain permission denial.
+      if (isClosed || generation != _generation) {
+        return;
+      }
+      emit(
+        const AudioError(
+          path: null,
+          durationSeconds: null,
+          message: 'Não foi possível acessar o microfone.',
+        ),
+      );
+      return;
+    }
     if (isClosed || generation != _generation) {
       return;
     }
@@ -174,13 +200,30 @@ class AudioEntryCubit extends Cubit<AudioCaptureState> {
       );
       return;
     }
-    await _micRecorder.start();
+    try {
+      await _micRecorder.start();
+    } catch (_) {
+      // Review finding: same rationale as the `hasPermission()` catch
+      // above — a native-side start failure must surface through the
+      // normal error/retry path instead of escaping uncaught.
+      if (isClosed || generation != _generation) {
+        return;
+      }
+      emit(
+        const AudioError(
+          path: null,
+          durationSeconds: null,
+          message: 'Não foi possível iniciar a gravação.',
+        ),
+      );
+      return;
+    }
     if (isClosed || generation != _generation) {
       // Review finding: `cancel()` bumped `_generation` (the user already
       // left the Áudio tab) while `start()` was in flight — stop/discard
       // the session we just started instead of leaving a live, unobserved
       // recording running.
-      unawaited(_micRecorder.cancel());
+      unawaited(_safeCancelRecorder());
       return;
     }
     _startElapsedTimer();
@@ -200,14 +243,39 @@ class AudioEntryCubit extends Cubit<AudioCaptureState> {
 
   /// Stops recording and immediately kicks off transcription — the I/O
   /// matrix's "Happy path"/"Transcription fails" rows. Ignored outside
-  /// [AudioRecording] (e.g. a stray second tap on the stop control).
+  /// [AudioRecording] (e.g. a stray second tap on the stop control) and
+  /// — Review finding — ignored while a previous call is still awaiting
+  /// `_micRecorder.stop()` ([_stopping]): without this, a fast double-tap
+  /// on the stop control could fire a second `_micRecorder.stop()` call
+  /// that returns `null` (nothing left to stop) and clobber the first
+  /// call's genuine result with a bogus `AudioError`.
   Future<void> stopRecording() async {
-    if (state is! AudioRecording) {
+    if (state is! AudioRecording || _stopping) {
       return;
     }
+    _stopping = true;
     final generation = _generation;
     _elapsedTimer?.cancel();
-    final recording = await _micRecorder.stop();
+    MicRecording? recording;
+    try {
+      recording = await _micRecorder.stop();
+    } catch (_) {
+      // Review finding: a thrown `PlatformException` must never escape
+      // uncaught — surfaces through the normal error/retry path instead.
+      _stopping = false;
+      if (isClosed || generation != _generation) {
+        return;
+      }
+      emit(
+        const AudioError(
+          path: null,
+          durationSeconds: null,
+          message: 'Não foi possível gravar o áudio.',
+        ),
+      );
+      return;
+    }
+    _stopping = false;
     // Review finding: without the `_generation` check, a `cancel()` that
     // ran while `_micRecorder.stop()` was in flight (tab switch right
     // after tapping stop) already reset the cubit to `AudioIdle` — this
@@ -323,11 +391,21 @@ class AudioEntryCubit extends Cubit<AudioCaptureState> {
   /// Called when the Áudio tab loses focus mid-recording/mid-processing
   /// (`InsertionModal`'s tab-switch listener) — the I/O matrix's "Leave
   /// tab mid-recording" row: stops/releases the recorder, no `create()`
-  /// ever fires. A no-op for every other state — in particular
-  /// [AudioTranscribed]/[AudioError], where the Never clause's trivial
-  /// scope (resource safety only, not full Story 3.4 cancel-safety) means
-  /// leaving the tab must preserve the result rather than discard it.
-  Future<void> cancel() async {
+  /// ever fires. A no-op for every other state when [discardPreserved] is
+  /// `false` (the default) — in particular [AudioTranscribed]/[AudioError],
+  /// where the Never clause's trivial scope (resource safety only, not
+  /// full Story 3.4 cancel-safety) means a tab switch must preserve the
+  /// result rather than discard it.
+  ///
+  /// [discardPreserved] — Review finding: `InsertionModal.show()`'s
+  /// `finally` also calls this (before `close()`) when the *whole modal*
+  /// is dismissed (✕/swipe-down/barrier tap), not just the tab. In that
+  /// case there's no "switch back to the tab later" to preserve for —
+  /// the cubit is about to be closed — so a preserved [AudioTranscribed]
+  /// or file-carrying [AudioError]'s temp file would otherwise never be
+  /// cleaned up and leak on disk forever. Pass `true` only from that
+  /// call site.
+  Future<void> cancel({bool discardPreserved = false}) async {
     // Bumped unconditionally — including when the state below doesn't
     // match either branch — so an in-flight `startRecording()`/
     // `stopRecording()` continuation still sees the mismatch and aborts
@@ -338,7 +416,7 @@ class AudioEntryCubit extends Cubit<AudioCaptureState> {
     final current = state;
     if (current is AudioRecording) {
       _elapsedTimer?.cancel();
-      await _micRecorder.cancel();
+      await _safeCancelRecorder();
       if (isClosed) {
         return;
       }
@@ -355,6 +433,27 @@ class AudioEntryCubit extends Cubit<AudioCaptureState> {
       // handles on its own.
       unawaited(_deleteRecordingFile(current.path));
       emit(const AudioIdle());
+    } else if (discardPreserved) {
+      final path = switch (current) {
+        AudioTranscribed(path: final p) => p,
+        AudioError(path: final p) => p,
+        _ => null,
+      };
+      if (path != null) {
+        unawaited(_deleteRecordingFile(path));
+      }
+    }
+  }
+
+  /// Best-effort `_micRecorder.cancel()` — a thrown `PlatformException`
+  /// here (Review finding) must never escape uncaught, since both call
+  /// sites (above, and [startRecording]'s own abandon-on-generation-
+  /// mismatch branch) call this fire-and-forget.
+  Future<void> _safeCancelRecorder() async {
+    try {
+      await _micRecorder.cancel();
+    } catch (_) {
+      // Best-effort — nothing in the UI depends on this succeeding.
     }
   }
 

@@ -1,13 +1,17 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 
 import 'package:cerne/core/failure/failure.dart';
+import 'package:cerne/features/capture/domain/repositories/media_repository.dart';
 import 'package:cerne/features/capture/domain/services/audio_transcriber.dart';
 import 'package:cerne/features/capture/domain/services/mic_recorder.dart';
+import 'package:cerne/features/capture/domain/services/photo_picker.dart';
 import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart';
+import 'package:cerne/features/capture/presentation/cubit/photo_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/widgets/insertion_modal.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
@@ -61,6 +65,28 @@ class _FakeAudioTranscriber implements AudioTranscriber {
   Future<String?> transcribe(String audioPath) async => nextTranscription;
 }
 
+/// A trivial fake — this file's own tests never switch to the Foto tab,
+/// so neither `PhotoPicker` port method below is ever expected to be
+/// called (same rationale as `_FakeMicRecorder`'s own doc, applied to
+/// spec-3-3's two new ports).
+class _FakePhotoPicker implements PhotoPicker {
+  @override
+  Future<PickedPhoto?> pickFromCamera() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<PickedPhoto?> pickFromGallery() async =>
+      throw UnimplementedError('not expected to be called');
+}
+
+class _FakeMediaRepository implements MediaRepository {
+  @override
+  Future<Either<Failure, OcrResult>> recognizeText({
+    required Uint8List imageBytes,
+    required String mimeType,
+  }) async => throw UnimplementedError('not expected to be called');
+}
+
 class _FakeEntriesRepository implements EntriesRepository {
   Either<Failure, Entry> Function()? nextResult;
   int createCallCount = 0;
@@ -95,14 +121,19 @@ Future<void> _openModal(
   WidgetTester tester, {
   required TextEntryCubit cubit,
   required AudioEntryCubit audioCubit,
+  required PhotoEntryCubit photoCubit,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
         body: Builder(
           builder: (context) => ElevatedButton(
-            onPressed: () =>
-                InsertionModal.show(context, cubit: cubit, audioCubit: audioCubit),
+            onPressed: () => InsertionModal.show(
+              context,
+              cubit: cubit,
+              audioCubit: audioCubit,
+              photoCubit: photoCubit,
+            ),
             child: const Text('open'),
           ),
         ),
@@ -114,20 +145,33 @@ Future<void> _openModal(
 
 /// Drives the real `InsertionModal` + real `AudioEntryCubit` through
 /// spec-3-2's own I/O & Edge-Case Matrix — only the two native-package
-/// ports are faked (see the classes above).
+/// ports are faked (see the classes above). `PhotoEntryCubit` is always a
+/// fresh, never-configured instance (backed by the two trivial "not
+/// expected to be called" fakes above) — this file's own tests never
+/// switch to the Foto tab.
 void main() {
   late _FakeMicRecorder fakeMicRecorder;
   late _FakeAudioTranscriber fakeAudioTranscriber;
   late _FakeEntriesRepository fakeRepository;
   late TextEntryCubit textCubit;
   late AudioEntryCubit audioCubit;
+  late PhotoEntryCubit photoCubit;
 
   setUp(() {
     fakeMicRecorder = _FakeMicRecorder();
     fakeAudioTranscriber = _FakeAudioTranscriber();
     fakeRepository = _FakeEntriesRepository();
     textCubit = TextEntryCubit(fakeRepository);
-    audioCubit = AudioEntryCubit(fakeMicRecorder, fakeAudioTranscriber, fakeRepository);
+    audioCubit = AudioEntryCubit(
+      fakeMicRecorder,
+      fakeAudioTranscriber,
+      fakeRepository,
+    );
+    photoCubit = PhotoEntryCubit(
+      _FakePhotoPicker(),
+      _FakeMediaRepository(),
+      fakeRepository,
+    );
   });
 
   // Every test below opens the modal; the ones that never pop it (e.g. a
@@ -154,6 +198,9 @@ void main() {
     if (!audioCubit.isClosed) {
       await audioCubit.close();
     }
+    if (!photoCubit.isClosed) {
+      await photoCubit.close();
+    }
   });
 
   testWidgets(
@@ -167,7 +214,12 @@ void main() {
         durationSeconds: 7,
       );
       fakeAudioTranscriber.nextTranscription = 'Hoje foi um bom dia.';
-      await _openModal(tester, cubit: textCubit, audioCubit: audioCubit);
+      await _openModal(
+        tester,
+        cubit: textCubit,
+        audioCubit: audioCubit,
+        photoCubit: photoCubit,
+      );
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Áudio'));
@@ -198,73 +250,79 @@ void main() {
     },
   );
 
-  testWidgets(
-    'Mic permission denied: AudioError shown, no file to preserve; '
-    '"Tentar novamente" re-requests permission',
-    (tester) async {
-      fakeMicRecorder.permissionGranted = false;
-      await _openModal(tester, cubit: textCubit, audioCubit: audioCubit);
-      await tester.pumpAndSettle();
+  testWidgets('Mic permission denied: AudioError shown, no file to preserve; '
+      '"Tentar novamente" re-requests permission', (tester) async {
+    fakeMicRecorder.permissionGranted = false;
+    await _openModal(
+      tester,
+      cubit: textCubit,
+      audioCubit: audioCubit,
+      photoCubit: photoCubit,
+    );
+    await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Áudio'));
-      // Never `pumpAndSettle()` here — see the happy path test's own
-      // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
-      await tester.pump();
+    await tester.tap(find.text('Áudio'));
+    // Never `pumpAndSettle()` here — see the happy path test's own
+    // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
+    await tester.pump();
 
-      expect(find.text('Tentar novamente'), findsOneWidget);
-      expect(fakeMicRecorder.startCalls, 0);
+    expect(find.text('Tentar novamente'), findsOneWidget);
+    expect(fakeMicRecorder.startCalls, 0);
 
-      fakeMicRecorder.permissionGranted = true;
-      await tester.tap(find.text('Tentar novamente'));
-      // Never `pumpAndSettle()` once recording starts — see the happy
-      // path test's own comment.
-      await tester.pump();
+    fakeMicRecorder.permissionGranted = true;
+    await tester.tap(find.text('Tentar novamente'));
+    // Never `pumpAndSettle()` once recording starts — see the happy
+    // path test's own comment.
+    await tester.pump();
 
-      expect(fakeMicRecorder.startCalls, 1);
-      expect(find.text('00:00'), findsOneWidget);
+    expect(fakeMicRecorder.startCalls, 1);
+    expect(find.text('00:00'), findsOneWidget);
 
-      // This test ends mid-recording — `AudioEntryCubit`'s internal
-      // `Timer.periodic` must be canceled before the test body returns
-      // (not left to `tearDown`, which the framework's own pending-timer
-      // invariant check runs ahead of): same as a real tab switch away
-      // from Áudio (`cancel()`'s own I/O matrix row).
-      await audioCubit.cancel();
-      await tester.pump();
-    },
-  );
+    // This test ends mid-recording — `AudioEntryCubit`'s internal
+    // `Timer.periodic` must be canceled before the test body returns
+    // (not left to `tearDown`, which the framework's own pending-timer
+    // invariant check runs ahead of): same as a real tab switch away
+    // from Áudio (`cancel()`'s own I/O matrix row).
+    await audioCubit.cancel();
+    await tester.pump();
+  });
 
-  testWidgets(
-    'Transcription fails: AudioError shown, audio file preserved; '
-    '"Tentar novamente" re-transcribes the same file (never re-records)',
-    (tester) async {
-      fakeMicRecorder.nextStopResult = const MicRecording(
-        path: '/tmp/a.wav',
-        durationSeconds: 7,
-      );
-      fakeAudioTranscriber.nextTranscription = null;
-      await _openModal(tester, cubit: textCubit, audioCubit: audioCubit);
-      await tester.pumpAndSettle();
+  testWidgets('Transcription fails: AudioError shown, audio file preserved; '
+      '"Tentar novamente" re-transcribes the same file (never re-records)', (
+    tester,
+  ) async {
+    fakeMicRecorder.nextStopResult = const MicRecording(
+      path: '/tmp/a.wav',
+      durationSeconds: 7,
+    );
+    fakeAudioTranscriber.nextTranscription = null;
+    await _openModal(
+      tester,
+      cubit: textCubit,
+      audioCubit: audioCubit,
+      photoCubit: photoCubit,
+    );
+    await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Áudio'));
-      // Never `pumpAndSettle()` here — see the happy path test's own
-      // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
-      await tester.pump();
-      await tester.tap(find.byIcon(Icons.stop));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text('Áudio'));
+    // Never `pumpAndSettle()` here — see the happy path test's own
+    // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.stop));
+    await tester.pumpAndSettle();
 
-      expect(find.text('Tentar novamente'), findsOneWidget);
-      expect(fakeMicRecorder.startCalls, 1);
+    expect(find.text('Tentar novamente'), findsOneWidget);
+    expect(fakeMicRecorder.startCalls, 1);
 
-      fakeAudioTranscriber.nextTranscription = 'Funcionou na segunda vez.';
-      await tester.tap(find.text('Tentar novamente'));
-      await tester.pumpAndSettle();
+    fakeAudioTranscriber.nextTranscription = 'Funcionou na segunda vez.';
+    await tester.tap(find.text('Tentar novamente'));
+    await tester.pumpAndSettle();
 
-      expect(find.text('Funcionou na segunda vez.'), findsOneWidget);
-      // Still only the original recording — retry re-transcribed, it
-      // never started a second recording session.
-      expect(fakeMicRecorder.startCalls, 1);
-    },
-  );
+    expect(find.text('Funcionou na segunda vez.'), findsOneWidget);
+    // Still only the original recording — retry re-transcribed, it
+    // never started a second recording session.
+    expect(fakeMicRecorder.startCalls, 1);
+  });
 
   testWidgets(
     'Save fails (incl. offline): inline Failure.message shown, Salvar '
@@ -277,7 +335,12 @@ void main() {
         durationSeconds: 7,
       );
       fakeAudioTranscriber.nextTranscription = 'Hoje foi um bom dia.';
-      await _openModal(tester, cubit: textCubit, audioCubit: audioCubit);
+      await _openModal(
+        tester,
+        cubit: textCubit,
+        audioCubit: audioCubit,
+        photoCubit: photoCubit,
+      );
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Áudio'));
@@ -303,7 +366,12 @@ void main() {
     'Leave tab mid-recording: switching to Texto cancels the recorder, '
     'no POST /entries ever fires',
     (tester) async {
-      await _openModal(tester, cubit: textCubit, audioCubit: audioCubit);
+      await _openModal(
+        tester,
+        cubit: textCubit,
+        audioCubit: audioCubit,
+        photoCubit: photoCubit,
+      );
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Áudio'));
@@ -320,30 +388,35 @@ void main() {
     },
   );
 
-  testWidgets(
-    'the transcribed text is editable before Salvar',
-    (tester) async {
-      fakeMicRecorder.nextStopResult = const MicRecording(
-        path: '/tmp/a.wav',
-        durationSeconds: 7,
-      );
-      fakeAudioTranscriber.nextTranscription = 'texto original';
-      await _openModal(tester, cubit: textCubit, audioCubit: audioCubit);
-      await tester.pumpAndSettle();
+  testWidgets('the transcribed text is editable before Salvar', (tester) async {
+    fakeMicRecorder.nextStopResult = const MicRecording(
+      path: '/tmp/a.wav',
+      durationSeconds: 7,
+    );
+    fakeAudioTranscriber.nextTranscription = 'texto original';
+    await _openModal(
+      tester,
+      cubit: textCubit,
+      audioCubit: audioCubit,
+      photoCubit: photoCubit,
+    );
+    await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Áudio'));
-      // Never `pumpAndSettle()` here — see the happy path test's own
-      // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
-      await tester.pump();
-      await tester.tap(find.byIcon(Icons.stop));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text('Áudio'));
+    // Never `pumpAndSettle()` here — see the happy path test's own
+    // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.stop));
+    await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextField), 'texto editado pelo usuário');
-      await tester.pump();
+    await tester.enterText(
+      find.byType(TextField),
+      'texto editado pelo usuário',
+    );
+    await tester.pump();
 
-      expect(find.text('texto editado pelo usuário'), findsOneWidget);
-    },
-  );
+    expect(find.text('texto editado pelo usuário'), findsOneWidget);
+  });
 
   testWidgets(
     'Review finding: re-entering Áudio after a completed transcription '
@@ -355,7 +428,12 @@ void main() {
         durationSeconds: 7,
       );
       fakeAudioTranscriber.nextTranscription = 'texto transcrito original';
-      await _openModal(tester, cubit: textCubit, audioCubit: audioCubit);
+      await _openModal(
+        tester,
+        cubit: textCubit,
+        audioCubit: audioCubit,
+        photoCubit: photoCubit,
+      );
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Áudio'));
@@ -388,7 +466,12 @@ void main() {
         durationSeconds: 7,
       );
       fakeAudioTranscriber.nextTranscription = 'Hoje foi um bom dia.';
-      await _openModal(tester, cubit: textCubit, audioCubit: audioCubit);
+      await _openModal(
+        tester,
+        cubit: textCubit,
+        audioCubit: audioCubit,
+        photoCubit: photoCubit,
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Áudio'));
       await tester.pump();
@@ -408,35 +491,39 @@ void main() {
     },
   );
 
-  testWidgets(
-    'Review finding: editing the text after a save failure actually '
-    'retries with the edited text, not the stale pre-failure text',
-    (tester) async {
-      fakeRepository.nextResult = () =>
-          left(const Failure.networkOffline(message: 'Sem conexão'));
-      fakeMicRecorder.nextStopResult = const MicRecording(
-        path: '/tmp/a.wav',
-        durationSeconds: 7,
-      );
-      fakeAudioTranscriber.nextTranscription = 'texto original';
-      await _openModal(tester, cubit: textCubit, audioCubit: audioCubit);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Áudio'));
-      await tester.pump();
-      await tester.tap(find.byIcon(Icons.stop));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Salvar'));
-      await tester.pumpAndSettle();
+  testWidgets('Review finding: editing the text after a save failure actually '
+      'retries with the edited text, not the stale pre-failure text', (
+    tester,
+  ) async {
+    fakeRepository.nextResult = () =>
+        left(const Failure.networkOffline(message: 'Sem conexão'));
+    fakeMicRecorder.nextStopResult = const MicRecording(
+      path: '/tmp/a.wav',
+      durationSeconds: 7,
+    );
+    fakeAudioTranscriber.nextTranscription = 'texto original';
+    await _openModal(
+      tester,
+      cubit: textCubit,
+      audioCubit: audioCubit,
+      photoCubit: photoCubit,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Áudio'));
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.stop));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Salvar'));
+    await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextField), 'texto corrigido');
-      await tester.pump();
-      fakeRepository.nextResult = () => right(_savedEntry);
-      await tester.tap(find.widgetWithText(ElevatedButton, 'Salvar'));
-      await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'texto corrigido');
+    await tester.pump();
+    fakeRepository.nextResult = () => right(_savedEntry);
+    await tester.tap(find.widgetWithText(ElevatedButton, 'Salvar'));
+    await tester.pumpAndSettle();
 
-      expect(fakeRepository.createCallCount, 2);
-    },
-  );
+    expect(fakeRepository.createCallCount, 2);
+  });
 
   testWidgets(
     "Review finding: an in-flight audio save disables the tab bar and "
@@ -449,7 +536,12 @@ void main() {
       fakeAudioTranscriber.nextTranscription = 'Hoje foi um bom dia.';
       fakeRepository.nextResult = () => right(_savedEntry);
       fakeRepository.gate = Completer<void>();
-      await _openModal(tester, cubit: textCubit, audioCubit: audioCubit);
+      await _openModal(
+        tester,
+        cubit: textCubit,
+        audioCubit: audioCubit,
+        photoCubit: photoCubit,
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Áudio'));
       await tester.pump();
@@ -480,6 +572,31 @@ void main() {
     },
   );
 
+  testWidgets('Dismissing the whole modal (not switching tabs) while recording '
+      'releases the mic too (Review finding: previously only verified via '
+      'a tab switch, never via "x"/swipe/barrier dismissing the whole '
+      'sheet)', (tester) async {
+    await _openModal(
+      tester,
+      cubit: textCubit,
+      audioCubit: audioCubit,
+      photoCubit: photoCubit,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Áudio'));
+    // Never `pumpAndSettle()` here — see the happy path test's own
+    // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
+    await tester.pump();
+    expect(fakeMicRecorder.startCalls, 1);
+
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
+
+    expect(fakeMicRecorder.cancelCalls, 1);
+    expect(fakeRepository.createCallCount, 0);
+  });
+
   group(
     'announcements — review finding: every assertion above only read '
     'visible Text/TextField/button state, so a deleted/broken '
@@ -487,7 +604,12 @@ void main() {
     () {
       testWidgets('recording announces "Gravando áudio"', (tester) async {
         final announcements = interceptAnnouncements(tester);
-        await _openModal(tester, cubit: textCubit, audioCubit: audioCubit);
+        await _openModal(
+          tester,
+          cubit: textCubit,
+          audioCubit: audioCubit,
+          photoCubit: photoCubit,
+        );
         await tester.pumpAndSettle();
 
         await tester.tap(find.text('Áudio'));
@@ -511,7 +633,12 @@ void main() {
           );
           fakeAudioTranscriber.nextTranscription = 'Hoje foi um bom dia.';
           final announcements = interceptAnnouncements(tester);
-          await _openModal(tester, cubit: textCubit, audioCubit: audioCubit);
+          await _openModal(
+            tester,
+            cubit: textCubit,
+            audioCubit: audioCubit,
+            photoCubit: photoCubit,
+          );
           await tester.pumpAndSettle();
           await tester.tap(find.text('Áudio'));
           await tester.pump();
@@ -536,7 +663,12 @@ void main() {
         );
         fakeAudioTranscriber.nextTranscription = null;
         final announcements = interceptAnnouncements(tester);
-        await _openModal(tester, cubit: textCubit, audioCubit: audioCubit);
+        await _openModal(
+          tester,
+          cubit: textCubit,
+          audioCubit: audioCubit,
+          photoCubit: photoCubit,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.text('Áudio'));
         await tester.pump();
@@ -559,7 +691,12 @@ void main() {
         fakeAudioTranscriber.nextTranscription = 'Hoje foi um bom dia.';
         fakeRepository.nextResult = () => right(_savedEntry);
         final announcements = interceptAnnouncements(tester);
-        await _openModal(tester, cubit: textCubit, audioCubit: audioCubit);
+        await _openModal(
+          tester,
+          cubit: textCubit,
+          audioCubit: audioCubit,
+          photoCubit: photoCubit,
+        );
         await tester.pumpAndSettle();
         await tester.tap(find.text('Áudio'));
         await tester.pump();
@@ -571,6 +708,69 @@ void main() {
 
         expect(announcements, contains('Registro salvo'));
       });
+
+      testWidgets(
+        'saving announces "Salvando registro" before "Registro salvo" '
+        '(Review finding: the Texto tab\'s equivalent has a dedicated '
+        'test; the Áudio tab had none)',
+        (tester) async {
+          fakeMicRecorder.nextStopResult = const MicRecording(
+            path: '/tmp/a.wav',
+            durationSeconds: 7,
+          );
+          fakeAudioTranscriber.nextTranscription = 'Hoje foi um bom dia.';
+          fakeRepository.nextResult = () => right(_savedEntry);
+          fakeRepository.gate = Completer<void>();
+          final announcements = interceptAnnouncements(tester);
+          await _openModal(
+            tester,
+            cubit: textCubit,
+            audioCubit: audioCubit,
+            photoCubit: photoCubit,
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Áudio'));
+          await tester.pump();
+          await tester.tap(find.byIcon(Icons.stop));
+          await tester.pumpAndSettle();
+
+          await tester.tap(find.widgetWithText(ElevatedButton, 'Salvar'));
+          await tester.pump();
+
+          expect(announcements, contains('Salvando registro'));
+          expect(announcements, isNot(contains('Registro salvo')));
+
+          fakeRepository.gate!.complete();
+          await tester.pumpAndSettle();
+
+          expect(announcements, contains('Registro salvo'));
+        },
+      );
+
+      testWidgets(
+        'canceling mid-recording (tab switch away) announces "Gravação '
+        'cancelada" (Review finding: the one AudioCaptureState transition '
+        'previously never announced — masked only because its one '
+        'reachable path coincides with the separate tab-switch '
+        'announcement)',
+        (tester) async {
+          final announcements = interceptAnnouncements(tester);
+          await _openModal(
+            tester,
+            cubit: textCubit,
+            audioCubit: audioCubit,
+            photoCubit: photoCubit,
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Áudio'));
+          await tester.pump();
+
+          await tester.tap(find.text('Texto'));
+          await tester.pumpAndSettle();
+
+          expect(announcements, contains('Gravação cancelada'));
+        },
+      );
     },
   );
 }

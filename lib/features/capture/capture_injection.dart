@@ -1,13 +1,21 @@
+import 'package:image_picker/image_picker.dart' as image_picker_pkg;
 import 'package:record/record.dart' as record_pkg;
 import 'package:whisper_ggml/whisper_ggml.dart';
 
 import '../../core/di/injection_container.dart';
+import '../../core/network/api_client.dart';
 import '../entries/domain/repositories/entries_repository.dart';
+import 'data/datasources/media_remote_data_source.dart';
+import 'data/repositories/media_repository_impl.dart';
+import 'data/services/image_picker_photo_picker.dart';
 import 'data/services/record_mic_recorder.dart';
 import 'data/services/whisper_audio_transcriber.dart';
+import 'domain/repositories/media_repository.dart';
 import 'domain/services/audio_transcriber.dart';
 import 'domain/services/mic_recorder.dart';
+import 'domain/services/photo_picker.dart';
 import 'presentation/cubit/audio_entry_cubit.dart';
+import 'presentation/cubit/photo_entry_cubit.dart';
 import 'presentation/cubit/text_entry_cubit.dart';
 
 /// Registers the `capture` feature into the project's single `get_it`
@@ -43,6 +51,28 @@ void registerCaptureFeature() {
     () => AudioEntryCubit(
       sl<MicRecorder>(),
       sl<AudioTranscriber>(),
+      sl<EntriesRepository>(),
+    ),
+  );
+
+  sl.registerLazySingleton<image_picker_pkg.ImagePicker>(
+    image_picker_pkg.ImagePicker.new,
+  );
+  sl.registerLazySingleton<PhotoPicker>(
+    () => ImagePickerPhotoPicker(picker: sl<image_picker_pkg.ImagePicker>()),
+  );
+
+  sl.registerLazySingleton<MediaRemoteDataSource>(
+    () => MediaRemoteDataSource(sl<ApiClient>()),
+  );
+  sl.registerLazySingleton<MediaRepository>(
+    () => MediaRepositoryImpl(remoteDataSource: sl<MediaRemoteDataSource>()),
+  );
+
+  sl.registerFactory<PhotoEntryCubit>(
+    () => PhotoEntryCubit(
+      sl<PhotoPicker>(),
+      sl<MediaRepository>(),
       sl<EntriesRepository>(),
     ),
   );

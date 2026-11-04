@@ -633,3 +633,83 @@ No new API or E2E test was generated — no reachable gap was found.
   test coverage stops being re-verified every pass.
 - Story 2.4 (biometric preference persistence) is the next `backlog`
   story in Epic 2.
+
+---
+
+# QA Verification Pass (2026-11-04) — Story 3.2 Audio Entry Capture
+
+## Context
+
+Re-ran this skill against the current working tree, now carrying Stories
+2.4 (biometric preference persistence), 3.1 (text entry capture), and 3.2
+(audio entry capture & on-device transcription) — all `done` per
+`sprint-status.yaml`. Checked each for a composition-root/pipeline
+E2E-equivalent gap, this project's substitute for a real
+`integration_test` (no device/CI yet — AGENTS.md):
+
+- Story 2.4 — already covered: `test/main_test.dart`'s "Story 2.4 —
+  AccountSettingsRepository feeds VaultLockScreen through the real
+  composition root" group drives the real wiring for both the
+  `currentBiometricEnabled: false` and boot-fetch-failure rows.
+- Story 3.1 — already covered: `capture_flow_e2e_test.dart` drives the
+  real, DI-resolved `TextEntryCubit` through the real
+  `EntriesRepositoryImpl` → `ApiClient` → `Dio` (both interceptors) → a
+  real `entries` Hive box, with only the transport boundary and native
+  plugins (secure storage, path_provider) faked. Happy path + the
+  non-retryable-failure path both covered.
+- Story 3.2 — **gap found**: no equivalent existed for `AudioEntryCubit`.
+  `audio_entry_cubit_test.dart` already covers every state transition
+  (recording, permission, transcription, retry) against mocked
+  `MicRecorder`/`AudioTranscriber`/`EntriesRepository`, and that same
+  file's own doc comment records a deliberate boundary — "no automated
+  test exercises the real `record`/`whisper_ggml` native plugins" — so
+  the gap is specifically the real-network + real-Hive save() leg that
+  `capture_flow_e2e_test.dart` already proves for the Texto tab but
+  nothing proved for the Áudio tab.
+
+## Generated Tests
+
+### E2E (composition-root/pipeline, `test/features/capture/`)
+
+- [x] `test/features/capture/audio_entry_flow_e2e_test.dart` — **new**,
+  mirrors `capture_flow_e2e_test.dart`'s structure exactly. Drives the
+  real, DI-resolved `AudioEntryCubit` through `startRecording()` →
+  `stopRecording()` → `save()` against the real `EntriesRepositoryImpl` →
+  `ApiClient` → `Dio` (both real interceptors) → a real `entries` Hive
+  box. Three things are faked: the transport boundary
+  (`HttpClientAdapter`), the native plugins (secure storage,
+  path_provider), and — honoring the "Never" boundary above —
+  `MicRecorder`/`AudioTranscriber` themselves, swapped into the real `sl`
+  container *before* `AudioEntryCubit` is first resolved, so the real
+  `record`/`whisper_ggml` singletons `registerCaptureFeature()` would
+  otherwise build are never instantiated.
+  - Happy path: POST to `entries-create` carries `source: audio` +
+    `mediaDurationSeconds` with the right URL/headers/body, `AudioSaved`
+    is emitted, the entry lands in the real Hive box, and the temp
+    recording file is deleted (best-effort cleanup on success).
+  - Failure path: a non-retryable `VALIDATION_ERROR` surfaces as
+    `AudioError` carrying `Failure.message` verbatim, exactly one request
+    fires (no retry), nothing is written to the Hive box, and the
+    recording file is preserved (for a retried Salvar).
+
+## Coverage
+
+- Composition-root/pipeline E2E-equivalent scenarios: Texto save (happy +
+  failure) ✅ pre-existing, **Áudio save (happy + failure) ✅ added**,
+  account-settings-fed vault boot (both rows) ✅ pre-existing.
+- Implemented feature scope (per `sprint-status.yaml`): epics 1–2 (all
+  stories) and epic 3's done stories (3.1, 3.2) — all covered at this
+  layer. 3.3 (photo capture) and 3.4 (cancel-safe capture) are still
+  `backlog`, out of scope for this pass.
+
+## Verification
+
+- `fvm flutter test` → 473/473 passing (471 pre-existing + 2 new)
+- `fvm flutter analyze` → 0 issues
+
+## Next Steps
+
+- Story 3.3 (photo entry capture, backend OCR) and 3.4 (cancel-safe
+  capture across all tabs) are the next `backlog` stories in Epic 3 —
+  each will need its own composition-root/pipeline E2E-equivalent pass
+  once implemented.

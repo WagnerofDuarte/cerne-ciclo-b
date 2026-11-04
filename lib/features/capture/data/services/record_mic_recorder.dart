@@ -68,9 +68,14 @@ class RecordMicRecorder implements MicRecorder {
     if (path == null || startedAt == null) {
       return null;
     }
+    // Review finding: a backward system-clock adjustment mid-recording
+    // (DST/NTP correction) could otherwise make this negative, which the
+    // backend's `mediaDurationSeconds: minimum 0` contract rejects —
+    // floored at 0 rather than trusting the wall clock never moves back.
+    final elapsed = DateTime.now().difference(startedAt).inSeconds;
     return MicRecording(
       path: path,
-      durationSeconds: DateTime.now().difference(startedAt).inSeconds,
+      durationSeconds: elapsed < 0 ? 0 : elapsed,
     );
   }
 

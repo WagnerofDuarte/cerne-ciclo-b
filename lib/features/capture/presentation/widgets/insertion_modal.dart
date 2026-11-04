@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
@@ -7,17 +8,23 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../core/design_tokens.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../cubit/audio_entry_cubit.dart';
+import '../cubit/photo_entry_cubit.dart';
 import '../cubit/text_entry_cubit.dart';
 
 /// The Insertion Modal — a 3-tab bottom sheet (Texto/Áudio/Foto) opened
-/// from the Home/Chat "+" control (`placeholder_screens.dart`). Texto and
-/// Áudio are both functional as of spec-3-2 (Boundaries) — Foto still
-/// renders its own idle, non-interactive placeholder (Story 3.3).
+/// from the Home/Chat "+" control (`placeholder_screens.dart`). Texto,
+/// Áudio and Foto are all functional as of spec-3-3 (Boundaries).
 class InsertionModal extends StatelessWidget {
-  const InsertionModal({required this.cubit, required this.audioCubit, super.key});
+  const InsertionModal({
+    required this.cubit,
+    required this.audioCubit,
+    required this.photoCubit,
+    super.key,
+  });
 
   final TextEntryCubit cubit;
   final AudioEntryCubit audioCubit;
+  final PhotoEntryCubit photoCubit;
 
   /// Presents the modal exactly as the Boundaries dictate:
   /// `showModalBottomSheet(isScrollControlled: true, barrierColor:
@@ -27,15 +34,16 @@ class InsertionModal extends StatelessWidget {
   /// `durationSheetUp` entrance that collapses to zero under Reduce
   /// Motion (`MediaQuery.disableAnimations`).
   ///
-  /// [cubit]/[audioCubit] are both fresh, `get_it`-factory-scoped
-  /// instances — one pair per "+" tap (Boundaries: "Modal open resets") —
-  /// closed here once the sheet is gone, regardless of how it closed
-  /// (Salvar success, "x", swipe-down, or barrier dismiss) — the caller
-  /// never has to remember to do this itself.
+  /// [cubit]/[audioCubit]/[photoCubit] are all fresh, `get_it`-factory-
+  /// scoped instances — one trio per "+" tap (Boundaries: "Modal open
+  /// resets") — closed here once the sheet is gone, regardless of how it
+  /// closed (Salvar success, "x", swipe-down, or barrier dismiss) — the
+  /// caller never has to remember to do this itself.
   static Future<void> show(
     BuildContext context, {
     required TextEntryCubit cubit,
     required AudioEntryCubit audioCubit,
+    required PhotoEntryCubit photoCubit,
   }) async {
     final reduceMotion = MediaQuery.of(context).disableAnimations;
     final controller =
@@ -55,7 +63,11 @@ class InsertionModal extends StatelessWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         transitionAnimationController: controller,
-        builder: (_) => InsertionModal(cubit: cubit, audioCubit: audioCubit),
+        builder: (_) => InsertionModal(
+          cubit: cubit,
+          audioCubit: audioCubit,
+          photoCubit: photoCubit,
+        ),
       );
     } finally {
       // `showModalBottomSheet`'s own Future completes as soon as the
@@ -83,15 +95,47 @@ class InsertionModal extends StatelessWidget {
         controller.removeStatusListener(onStatusChange);
       }
       controller.dispose();
-      await cubit.close();
-      // Review finding: dismissing the whole modal while recording/
-      // processing (the "x" button, swipe-down, or barrier tap — as
-      // opposed to switching to another tab, which already went through
-      // this same `cancel()`) never stopped the native recording session;
-      // `close()` alone only cancels the elapsed-seconds timer, not the
-      // recorder itself.
-      await audioCubit.cancel();
-      await audioCubit.close();
+      // Review finding: each of the three cubits' cancel+close pair is
+      // isolated in its own try/finally — without this, an exception
+      // from an earlier step (e.g. `audioCubit.cancel()`) would skip
+      // every later cleanup step entirely, leaking whichever cubit never
+      // got to run its own `cancel()`/`close()`.
+      try {
+        await cubit.close();
+      } finally {
+        try {
+          // Review finding: dismissing the whole modal while recording/
+          // processing (the "x" button, swipe-down, or barrier tap — as
+          // opposed to switching to another tab, which already went
+          // through this same `cancel()`) never stopped the native
+          // recording session; `close()` alone only cancels the
+          // elapsed-seconds timer, not the recorder itself.
+          // `discardPreserved: true` — unlike a tab switch, there's no
+          // "switch back later" to preserve a transcribed/failed
+          // recording for, so its temp file must be cleaned up here too
+          // (Review finding) rather than leaking on disk forever once
+          // `close()` below makes the cubit unreachable.
+          await audioCubit.cancel(discardPreserved: true);
+        } finally {
+          try {
+            await audioCubit.close();
+          } finally {
+            try {
+              // Review finding: every `image_picker` pick writes a real
+              // OS temp file — the comment this replaced incorrectly
+              // claimed Foto "never creates a temp file of its own".
+              // Same `discardPreserved: true` rationale as Áudio's own
+              // call above: there's no "switch back later" once the
+              // whole modal is closing, so a preserved
+              // `PhotoRecognized`/`PhotoError`'s picked file must be
+              // cleaned up here too rather than leaking on disk forever.
+              await photoCubit.cancel(discardPreserved: true);
+            } finally {
+              await photoCubit.close();
+            }
+          }
+        }
+      }
     }
   }
 
@@ -101,6 +145,7 @@ class InsertionModal extends StatelessWidget {
       providers: [
         BlocProvider.value(value: cubit),
         BlocProvider.value(value: audioCubit),
+        BlocProvider.value(value: photoCubit),
       ],
       child: const _InsertionModalBody(),
     );
@@ -111,17 +156,40 @@ class InsertionModal extends StatelessWidget {
 /// given emission is a genuine transition worth announcing — e.g.
 /// [AudioRecording]'s own per-second timer tick re-emits the same kind
 /// repeatedly and must never re-announce "Gravando áudio" every second.
-enum _AudioAnnounceKind { idle, recording, processing, transcribed, saving, saved, error }
+enum _AudioAnnounceKind {
+  idle,
+  recording,
+  processing,
+  transcribed,
+  saving,
+  saved,
+  error,
+}
 
-_AudioAnnounceKind _audioAnnounceKindOf(AudioCaptureState state) => switch (state) {
-  AudioIdle() => _AudioAnnounceKind.idle,
-  AudioRecording() => _AudioAnnounceKind.recording,
-  AudioProcessing() => _AudioAnnounceKind.processing,
-  AudioTranscribed(saving: true) => _AudioAnnounceKind.saving,
-  AudioTranscribed() => _AudioAnnounceKind.transcribed,
-  AudioSaved() => _AudioAnnounceKind.saved,
-  AudioError() => _AudioAnnounceKind.error,
-};
+_AudioAnnounceKind _audioAnnounceKindOf(AudioCaptureState state) =>
+    switch (state) {
+      AudioIdle() => _AudioAnnounceKind.idle,
+      AudioRecording() => _AudioAnnounceKind.recording,
+      AudioProcessing() => _AudioAnnounceKind.processing,
+      AudioTranscribed(saving: true) => _AudioAnnounceKind.saving,
+      AudioTranscribed() => _AudioAnnounceKind.transcribed,
+      AudioSaved() => _AudioAnnounceKind.saved,
+      AudioError() => _AudioAnnounceKind.error,
+    };
+
+/// Same "only announce a genuine transition" role as [_AudioAnnounceKind],
+/// for `PhotoEntryCubit`.
+enum _PhotoAnnounceKind { idle, processing, recognized, saving, saved, error }
+
+_PhotoAnnounceKind _photoAnnounceKindOf(PhotoCaptureState state) =>
+    switch (state) {
+      PhotoIdle() => _PhotoAnnounceKind.idle,
+      PhotoProcessing() => _PhotoAnnounceKind.processing,
+      PhotoRecognized(saving: true) => _PhotoAnnounceKind.saving,
+      PhotoRecognized() => _PhotoAnnounceKind.recognized,
+      PhotoSaved() => _PhotoAnnounceKind.saved,
+      PhotoError() => _PhotoAnnounceKind.error,
+    };
 
 class _InsertionModalBody extends StatefulWidget {
   const _InsertionModalBody();
@@ -140,11 +208,22 @@ class _InsertionModalBodyState extends State<_InsertionModalBody> {
   /// instead of inside `_TextoTab`.
   final _audioTextController = TextEditingController();
 
+  /// The Foto tab's own text field controller — same "lifted up" rationale
+  /// as [_audioTextController].
+  final _photoTextController = TextEditingController();
+
   /// The last `AudioTranscribed.path` this controller's text was synced
   /// from — only a *new* transcription (a different/first path) resets
   /// the controller's text; the user's own edits via `onChanged` never
   /// get clobbered by an unrelated rebuild.
   String? _lastSyncedAudioPath;
+
+  /// Same role as [_lastSyncedAudioPath], for `PhotoRecognized.path` — a
+  /// *new* `PhotoRecognized` for a path not yet synced (the initial OCR
+  /// success, or a retried OCR landing after an error that never
+  /// synced) overwrites the controller; the user's own edits (which
+  /// re-emit the same path) never do.
+  String? _lastSyncedPhotoPath;
 
   /// Tracks the previously-seen `activeTab` so the listener can tell a
   /// genuine tab switch apart from the many other `TextEntryIdle`
@@ -157,6 +236,10 @@ class _InsertionModalBodyState extends State<_InsertionModalBody> {
   /// for `AudioEntryCubit` (see [_audioAnnounceKindOf]).
   late _AudioAnnounceKind _lastAudioAnnouncedKind;
 
+  /// Same role as [_lastAudioAnnouncedKind], for `PhotoEntryCubit` (see
+  /// [_photoAnnounceKindOf]).
+  late _PhotoAnnounceKind _lastPhotoAnnouncedKind;
+
   @override
   void initState() {
     super.initState();
@@ -164,12 +247,16 @@ class _InsertionModalBodyState extends State<_InsertionModalBody> {
     _lastAudioAnnouncedKind = _audioAnnounceKindOf(
       context.read<AudioEntryCubit>().state,
     );
+    _lastPhotoAnnouncedKind = _photoAnnounceKindOf(
+      context.read<PhotoEntryCubit>().state,
+    );
   }
 
   @override
   void dispose() {
     _textController.dispose();
     _audioTextController.dispose();
+    _photoTextController.dispose();
     super.dispose();
   }
 
@@ -219,6 +306,13 @@ class _InsertionModalBodyState extends State<_InsertionModalBody> {
         unawaited(audioCubit.startRecording());
       } else if (previousTab == CaptureTab.audio) {
         unawaited(audioCubit.cancel());
+      }
+      // spec-3-3's Code Map: leaving Foto mid-pick/mid-OCR discards the
+      // in-flight picker/OCR call (I/O matrix: "Leave tab mid-pick/OCR")
+      // — unlike Áudio, entering Foto never starts anything on its own
+      // (picking only ever starts from an explicit Câmera/Galeria tap).
+      if (previousTab == CaptureTab.foto) {
+        unawaited(context.read<PhotoEntryCubit>().cancel());
       }
     }
     switch (state) {
@@ -276,87 +370,144 @@ class _InsertionModalBodyState extends State<_InsertionModalBody> {
           }),
         );
       case AudioIdle():
-        break;
+        // Review finding: the one `AudioCaptureState` transition
+        // previously never announced — reachable today only via
+        // `cancel()` resetting from `AudioRecording` (a tab switch away
+        // mid-recording), which happened to already be covered by the
+        // separate tab-switch announcement above, masking the gap.
+        _announce('Gravação cancelada');
+    }
+  }
+
+  void _onPhotoStateChange(BuildContext context, PhotoCaptureState state) {
+    if (state is PhotoRecognized && state.path != _lastSyncedPhotoPath) {
+      _lastSyncedPhotoPath = state.path;
+      _photoTextController.text = state.text;
+    }
+    final kind = _photoAnnounceKindOf(state);
+    if (kind == _lastPhotoAnnouncedKind) {
+      return;
+    }
+    _lastPhotoAnnouncedKind = kind;
+    switch (state) {
+      case PhotoProcessing():
+        _announce('Reconhecendo texto da foto');
+      case PhotoRecognized(saving: true):
+        _announce('Salvando registro');
+      case PhotoRecognized():
+        _announce('Texto reconhecido. Revise o texto antes de salvar.');
+      case PhotoError(message: final message):
+        _announce(message);
+      case PhotoSaved():
+        // Same "wait for the announcement" rationale as
+        // `TextEntrySaved`/`AudioSaved` above.
+        unawaited(
+          _announce('Registro salvo').then((_) {
+            if (context.mounted) {
+              Navigator.of(context).pop();
+            }
+          }),
+        );
+      case PhotoIdle():
+        // Reachable via `cancel()` resetting from `PhotoProcessing` (a
+        // tab switch away mid-pick/mid-OCR), same rationale as
+        // `AudioIdle`'s own "Gravação cancelada" above.
+        _announce('Captura de foto cancelada');
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return BlocListener<AudioEntryCubit, AudioCaptureState>(
-      listener: _onAudioStateChange,
-      // Review finding: `isSaving` below previously only read
-      // `TextEntryCubit`'s state, so the tab bar/"x" close button stayed
-      // tappable while an *audio* save was in flight (`AudioTranscribed.
-      // saving == true`) — the same race Story 3.1's own review fixed for
-      // the Texto tab, just unguarded on the Áudio side. Wrapping in this
-      // `BlocBuilder` makes the whole subtree rebuild on an `AudioEntryCubit`
-      // state change too, not only a `TextEntryCubit` one.
-      child: BlocBuilder<AudioEntryCubit, AudioCaptureState>(
-        builder: (context, audioState) {
-          final isAudioSaving =
-              audioState is AudioTranscribed && audioState.saving;
-          return BlocConsumer<TextEntryCubit, TextEntryState>(
-            listener: _onTextEntryStateChange,
-            builder: (context, state) {
-              final isSaving = state is TextEntrySaving || isAudioSaving;
-              return Container(
-                padding: DesignTokens.screenPadding,
-                decoration: const BoxDecoration(
-                  color: DesignTokens.colorSurfaceElevated,
-                  borderRadius: BorderRadius.vertical(
-                    top: Radius.circular(DesignTokens.radiusLg),
-                  ),
-                  boxShadow: DesignTokens.elevation2,
-                ),
-                child: Padding(
-                  // Keeps the Texto field clear of the on-screen keyboard —
-                  // the sheet is `isScrollControlled: true`, so it already
-                  // grows to fit; this is the standard companion fix for
-                  // the keyboard inset itself.
-                  padding: EdgeInsets.only(
-                    bottom: MediaQuery.of(context).viewInsets.bottom,
-                  ),
-                  child: SafeArea(
-                    top: false,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Expanded(
-                              child: _TabBar(
-                                activeTab: state.activeTab,
-                                isSaving: isSaving,
-                              ),
-                            ),
-                            const SizedBox(width: DesignTokens.spacingSm),
-                            _CloseButton(isSaving: isSaving),
-                          ],
+    return BlocListener<PhotoEntryCubit, PhotoCaptureState>(
+      listener: _onPhotoStateChange,
+      child: BlocListener<AudioEntryCubit, AudioCaptureState>(
+        listener: _onAudioStateChange,
+        // Review finding: `isSaving` below previously only read
+        // `TextEntryCubit`'s state, so the tab bar/"x" close button
+        // stayed tappable while an *audio* save was in flight
+        // (`AudioTranscribed.saving == true`) — the same race Story
+        // 3.1's own review fixed for the Texto tab, just unguarded on
+        // the Áudio side. Wrapping in this `BlocBuilder` makes the whole
+        // subtree rebuild on an `AudioEntryCubit` state change too, not
+        // only a `TextEntryCubit` one. Same rationale — spec-3-3 —
+        // extends this to `PhotoEntryCubit`'s own saving flag via the
+        // nested `BlocBuilder` below.
+        child: BlocBuilder<AudioEntryCubit, AudioCaptureState>(
+          builder: (context, audioState) {
+            final isAudioSaving =
+                audioState is AudioTranscribed && audioState.saving;
+            return BlocBuilder<PhotoEntryCubit, PhotoCaptureState>(
+              builder: (context, photoState) {
+                final isPhotoSaving =
+                    photoState is PhotoRecognized && photoState.saving;
+                return BlocConsumer<TextEntryCubit, TextEntryState>(
+                  listener: _onTextEntryStateChange,
+                  builder: (context, state) {
+                    final isSaving =
+                        state is TextEntrySaving ||
+                        isAudioSaving ||
+                        isPhotoSaving;
+                    return Container(
+                      padding: DesignTokens.screenPadding,
+                      decoration: const BoxDecoration(
+                        color: DesignTokens.colorSurfaceElevated,
+                        borderRadius: BorderRadius.vertical(
+                          top: Radius.circular(DesignTokens.radiusLg),
                         ),
-                        const SizedBox(height: DesignTokens.spacingMd),
-                        switch (state.activeTab) {
-                          CaptureTab.texto => _TextoTab(
-                            controller: _textController,
-                            state: state,
+                        boxShadow: DesignTokens.elevation2,
+                      ),
+                      child: Padding(
+                        // Keeps the Texto field clear of the on-screen
+                        // keyboard — the sheet is
+                        // `isScrollControlled: true`, so it already
+                        // grows to fit; this is the standard companion
+                        // fix for the keyboard inset itself.
+                        padding: EdgeInsets.only(
+                          bottom: MediaQuery.of(context).viewInsets.bottom,
+                        ),
+                        child: SafeArea(
+                          top: false,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.center,
+                                children: [
+                                  Expanded(
+                                    child: _TabBar(
+                                      activeTab: state.activeTab,
+                                      isSaving: isSaving,
+                                    ),
+                                  ),
+                                  const SizedBox(width: DesignTokens.spacingSm),
+                                  _CloseButton(isSaving: isSaving),
+                                ],
+                              ),
+                              const SizedBox(height: DesignTokens.spacingMd),
+                              switch (state.activeTab) {
+                                CaptureTab.texto => _TextoTab(
+                                  controller: _textController,
+                                  state: state,
+                                ),
+                                CaptureTab.audio => _AudioTab(
+                                  controller: _audioTextController,
+                                ),
+                                CaptureTab.foto => _FotoTab(
+                                  controller: _photoTextController,
+                                ),
+                              },
+                            ],
                           ),
-                          CaptureTab.audio => _AudioTab(
-                            controller: _audioTextController,
-                          ),
-                          CaptureTab.foto => const _IdleTabPlaceholder(
-                            icon: Icons.photo_camera_outlined,
-                            label: 'Foto chega em breve',
-                          ),
-                        },
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
-          );
-        },
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }
@@ -501,38 +652,6 @@ class _CloseButton extends StatelessWidget {
   }
 }
 
-class _IdleTabPlaceholder extends StatelessWidget {
-  const _IdleTabPlaceholder({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingXl),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            icon,
-            size: DesignTokens.spacing2xl,
-            color: DesignTokens.colorTextSecondary,
-          ),
-          const SizedBox(height: DesignTokens.spacingSm),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: DesignTokens.textBodyMd.copyWith(
-              color: DesignTokens.colorTextSecondary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _TextoTab extends StatelessWidget {
   const _TextoTab({required this.controller, required this.state});
 
@@ -546,7 +665,9 @@ class _TextoTab extends StatelessWidget {
     // about to pop (same rationale as TextEntryCubit.save()'s own guard),
     // so Salvar shouldn't be tappable during that brief window either.
     final canSave =
-        controller.text.trim().isNotEmpty && !isSaving && state is! TextEntrySaved;
+        controller.text.trim().isNotEmpty &&
+        !isSaving &&
+        state is! TextEntrySaved;
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -641,7 +762,11 @@ class _AudioTab extends StatelessWidget {
             controller: controller,
             saving: saving,
           ),
-          AudioError(path: final path, message: final message, text: final text) =>
+          AudioError(
+            path: final path,
+            message: final message,
+            text: final text,
+          ) =>
             _AudioErrorView(
               controller: controller,
               message: message,
@@ -901,7 +1026,9 @@ class _AudioErrorView extends StatelessWidget {
         const SizedBox(height: DesignTokens.spacingSm),
         Text(
           message,
-          style: DesignTokens.textBodyMd.copyWith(color: DesignTokens.colorError),
+          style: DesignTokens.textBodyMd.copyWith(
+            color: DesignTokens.colorError,
+          ),
         ),
         const SizedBox(height: DesignTokens.spacingMd),
         AppButton(
@@ -942,17 +1069,24 @@ class _WaveformState extends State<_Waveform> {
   @override
   void initState() {
     super.initState();
-    _subscription = widget.amplitudeStream?.listen((amplitude) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _samples.removeAt(0);
-        // `num.clamp` returns `num`, not `double` — `_samples` is
-        // `List<double>`.
-        _samples.add(amplitude.clamp(0.1, 1.0).toDouble());
-      });
-    });
+    _subscription = widget.amplitudeStream?.listen(
+      (amplitude) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _samples.removeAt(0);
+          // `num.clamp` returns `num`, not `double` — `_samples` is
+          // `List<double>`.
+          _samples.add(amplitude.clamp(0.1, 1.0).toDouble());
+        });
+      },
+      // Review finding: an unhandled `onError` turns a native amplitude-
+      // stream error into an uncaught async exception — the waveform
+      // just stays frozen on its last sample instead, no worse than the
+      // already-handled "no live stream" (frozen/processing) case.
+      onError: (_) {},
+    );
   }
 
   @override
@@ -990,5 +1124,383 @@ class _WaveformState extends State<_Waveform> {
         ),
       ),
     );
+  }
+}
+
+/// The Foto tab — spec-3-3's new pick -> processingOcr ->
+/// recognized/error pipeline UI, mirroring `_AudioTab`'s own structure
+/// (a `BlocBuilder`-driven switch over its cubit's state). [controller]
+/// is `_InsertionModalBodyState`'s own persistent `TextEditingController`
+/// for the recognized text (see its own doc) — never created locally
+/// here, so a rebuild never loses cursor position.
+class _FotoTab extends StatelessWidget {
+  const _FotoTab({required this.controller});
+
+  final TextEditingController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<PhotoEntryCubit, PhotoCaptureState>(
+      builder: (context, state) {
+        return switch (state) {
+          PhotoIdle() => const _PhotoCaptureButtons(),
+          PhotoProcessing(path: final path) => _PhotoProcessingView(path: path),
+          PhotoRecognized(path: final path, saving: final saving) =>
+            _PhotoRecognizedView(
+              controller: controller,
+              path: path,
+              saving: saving,
+            ),
+          PhotoError() => _PhotoErrorView(controller: controller, state: state),
+          // Brief, between `save()`'s success and `InsertionModal`'s own
+          // listener popping the sheet — same instantaneous-state
+          // rationale as `_AudioTab`'s own `AudioSaved` branch (reuses
+          // the same `_AudioLoading` spinner).
+          PhotoSaved() => const _AudioLoading(),
+        };
+      },
+    );
+  }
+}
+
+/// Câmera/Galeria capture buttons — [PhotoIdle]'s own rendering, and also
+/// reused by [_PhotoErrorView]'s `payloadTooLarge` branch (I/O matrix:
+/// "no action besides picking a different photo").
+class _PhotoCaptureButtons extends StatelessWidget {
+  const _PhotoCaptureButtons();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingXl),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.photo_camera_outlined,
+            size: DesignTokens.spacing2xl,
+            color: DesignTokens.colorTextSecondary,
+          ),
+          const SizedBox(height: DesignTokens.spacingMd),
+          Row(
+            children: [
+              Expanded(
+                child: AppButton(
+                  label: 'Câmera',
+                  onPressed: () =>
+                      context.read<PhotoEntryCubit>().pickFromCamera(),
+                ),
+              ),
+              const SizedBox(width: DesignTokens.spacingSm),
+              Expanded(
+                child: AppButton(
+                  label: 'Galeria',
+                  variant: AppButtonVariant.secondaryOutline,
+                  onPressed: () =>
+                      context.read<PhotoEntryCubit>().pickFromGallery(),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A fixed thumbnail size — a layout choice, not a visual value (color/
+/// font/spacing/radius) under RNF08, so it isn't a `design_tokens.dart`
+/// constant (same rationale as `_waveformBarCount`).
+const _photoThumbnailHeight = DesignTokens.spacing2xl * 2;
+
+/// Renders the picked photo at [path] — shown while processing, while
+/// recognized (editable text below it), and for a save-failure error
+/// that still carries the photo. Never shown for `payloadTooLarge`/a
+/// generic OCR-call failure (no text yet to anchor it to), matching
+/// `_PhotoErrorView`'s own branches.
+class _PhotoThumbnail extends StatelessWidget {
+  const _PhotoThumbnail({required this.path});
+
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: const BorderRadius.all(
+        Radius.circular(DesignTokens.radiusSm),
+      ),
+      child: Image.file(
+        File(path),
+        height: _photoThumbnailHeight,
+        fit: BoxFit.cover,
+        // A deleted/unreadable temp file (edge case, never expected in
+        // practice) must never crash the tab — falls back to a plain
+        // placeholder rather than the framework's default red error box.
+        errorBuilder: (context, error, stackTrace) => Container(
+          height: _photoThumbnailHeight,
+          color: DesignTokens.colorBorder,
+          alignment: Alignment.center,
+          child: const Icon(
+            Icons.broken_image_outlined,
+            color: DesignTokens.colorTextSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PhotoProcessingView extends StatelessWidget {
+  const _PhotoProcessingView({required this.path});
+
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _PhotoThumbnail(path: path),
+        const SizedBox(height: DesignTokens.spacingMd),
+        const SizedBox(
+          width: DesignTokens.accountSettingsSavingIndicatorSize,
+          height: DesignTokens.accountSettingsSavingIndicatorSize,
+          child: CircularProgressIndicator(
+            color: DesignTokens.colorPrimary,
+            strokeWidth: DesignTokens.accountSettingsSavingIndicatorStrokeWidth,
+          ),
+        ),
+        const SizedBox(height: DesignTokens.spacingSm),
+        Text(
+          'Reconhecendo texto...',
+          style: DesignTokens.textBodyMd.copyWith(
+            color: DesignTokens.colorTextSecondary,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PhotoRecognizedView extends StatelessWidget {
+  const _PhotoRecognizedView({
+    required this.controller,
+    required this.path,
+    required this.saving,
+  });
+
+  final TextEditingController controller;
+  final String path;
+  final bool saving;
+
+  @override
+  Widget build(BuildContext context) {
+    final canSave = controller.text.trim().isNotEmpty && !saving;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _PhotoThumbnail(path: path),
+        const SizedBox(height: DesignTokens.spacingMd),
+        TextField(
+          controller: controller,
+          enabled: !saving,
+          minLines: 3,
+          maxLines: null,
+          // Mirrors `POST /entries`'s own `content` cap, same as
+          // `_TextoTab`/`_AudioTranscribedView`.
+          maxLength: 20000,
+          onChanged: (value) =>
+              context.read<PhotoEntryCubit>().updateText(value),
+          style: DesignTokens.textBodyLg.copyWith(
+            color: DesignTokens.colorTextPrimary,
+          ),
+          decoration: const InputDecoration(
+            counterText: '',
+            contentPadding: DesignTokens.textFieldContentPadding,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.all(
+                Radius.circular(DesignTokens.radiusSm),
+              ),
+              borderSide: BorderSide(
+                color: DesignTokens.colorBorder,
+                width: DesignTokens.borderWidthDefault,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.all(
+                Radius.circular(DesignTokens.radiusSm),
+              ),
+              borderSide: BorderSide(
+                color: DesignTokens.colorPrimary,
+                width: DesignTokens.borderWidthEmphasis,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: DesignTokens.spacingMd),
+        AppButton(
+          label: saving ? 'Salvando...' : 'Salvar',
+          onPressed: canSave
+              ? () => context.read<PhotoEntryCubit>().save()
+              : null,
+        ),
+      ],
+    );
+  }
+}
+
+/// Covers all 3 [PhotoErrorKind] branches (I/O matrix): `ocrNoText`'s two
+/// recovery paths, `payloadTooLarge`'s "pick a different photo" only, and
+/// `generic`'s OCR-call-retry vs. save-failure-editable-field split
+/// (Design Notes: "a discriminator is clearer than overloading
+/// nullability tricks").
+class _PhotoErrorView extends StatelessWidget {
+  const _PhotoErrorView({required this.controller, required this.state});
+
+  final TextEditingController controller;
+  final PhotoError state;
+
+  @override
+  Widget build(BuildContext context) {
+    switch (state.kind) {
+      case PhotoErrorKind.ocrNoText:
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _PhotoThumbnail(path: state.path),
+            const SizedBox(height: DesignTokens.spacingMd),
+            const Icon(Icons.error_outline, color: DesignTokens.colorError),
+            const SizedBox(height: DesignTokens.spacingSm),
+            Text(
+              state.message,
+              textAlign: TextAlign.center,
+              style: DesignTokens.textBodyMd.copyWith(
+                color: DesignTokens.colorError,
+              ),
+            ),
+            const SizedBox(height: DesignTokens.spacingMd),
+            Row(
+              children: [
+                Expanded(
+                  child: AppButton(
+                    label: 'Tentar novamente',
+                    onPressed: () => context.read<PhotoEntryCubit>().retry(),
+                  ),
+                ),
+                const SizedBox(width: DesignTokens.spacingSm),
+                Expanded(
+                  child: AppButton(
+                    label: 'Salvar só a foto',
+                    variant: AppButtonVariant.secondaryOutline,
+                    onPressed: () =>
+                        context.read<PhotoEntryCubit>().saveWithoutText(),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+
+      case PhotoErrorKind.payloadTooLarge:
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: DesignTokens.colorError),
+            const SizedBox(height: DesignTokens.spacingSm),
+            Text(
+              state.message,
+              textAlign: TextAlign.center,
+              style: DesignTokens.textBodyMd.copyWith(
+                color: DesignTokens.colorError,
+              ),
+            ),
+            const SizedBox(height: DesignTokens.spacingMd),
+            const _PhotoCaptureButtons(),
+          ],
+        );
+
+      case PhotoErrorKind.generic:
+        if (state.text == null) {
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, color: DesignTokens.colorError),
+              const SizedBox(height: DesignTokens.spacingSm),
+              Text(
+                state.message,
+                textAlign: TextAlign.center,
+                style: DesignTokens.textBodyMd.copyWith(
+                  color: DesignTokens.colorError,
+                ),
+              ),
+              const SizedBox(height: DesignTokens.spacingMd),
+              AppButton(
+                label: 'Tentar novamente',
+                onPressed: () => context.read<PhotoEntryCubit>().retry(),
+              ),
+            ],
+          );
+        }
+        final canSave = controller.text.trim().isNotEmpty;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _PhotoThumbnail(path: state.path),
+            const SizedBox(height: DesignTokens.spacingMd),
+            TextField(
+              controller: controller,
+              minLines: 3,
+              maxLines: null,
+              maxLength: 20000,
+              onChanged: (value) =>
+                  context.read<PhotoEntryCubit>().updateText(value),
+              style: DesignTokens.textBodyLg.copyWith(
+                color: DesignTokens.colorTextPrimary,
+              ),
+              decoration: const InputDecoration(
+                counterText: '',
+                contentPadding: DesignTokens.textFieldContentPadding,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.all(
+                    Radius.circular(DesignTokens.radiusSm),
+                  ),
+                  borderSide: BorderSide(
+                    color: DesignTokens.colorBorder,
+                    width: DesignTokens.borderWidthDefault,
+                  ),
+                ),
+                // Review finding: missing here while
+                // `_PhotoRecognizedView`'s otherwise-identical field
+                // already has it — added for consistency.
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.all(
+                    Radius.circular(DesignTokens.radiusSm),
+                  ),
+                  borderSide: BorderSide(
+                    color: DesignTokens.colorPrimary,
+                    width: DesignTokens.borderWidthEmphasis,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: DesignTokens.spacingSm),
+            Text(
+              state.message,
+              style: DesignTokens.textBodyMd.copyWith(
+                color: DesignTokens.colorError,
+              ),
+            ),
+            const SizedBox(height: DesignTokens.spacingMd),
+            AppButton(
+              label: 'Salvar',
+              onPressed: canSave
+                  ? () => context.read<PhotoEntryCubit>().save()
+                  : null,
+            ),
+          ],
+        );
+    }
   }
 }

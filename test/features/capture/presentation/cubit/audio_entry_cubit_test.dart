@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
@@ -10,6 +11,18 @@ import 'package:cerne/features/capture/domain/services/mic_recorder.dart';
 import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+
+/// `_deleteRecordingFile` is fire-and-forget (`unawaited`) by design — a
+/// single microtask tick (`Future<void>.delayed(Duration.zero)`) isn't a
+/// reliable enough wait for a real `dart:io` file-delete to land under
+/// full-suite load, so every assertion on the resulting file polls
+/// instead, bounded to avoid hanging if the delete genuinely never
+/// happens.
+Future<void> _waitUntilDeleted(File file) async {
+  for (var i = 0; i < 50 && file.existsSync(); i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+}
 
 class MockMicRecorder extends Mock implements MicRecorder {}
 
@@ -108,6 +121,38 @@ void main() {
       },
     );
 
+    test(
+      'hasPermission() throwing (native PlatformException) -> AudioError, '
+      'never escapes uncaught (Review finding)',
+      () async {
+        when(() => mockMicRecorder.hasPermission()).thenThrow(Exception('native failure'));
+
+        await cubit.startRecording();
+
+        expect(
+          cubit.state,
+          isA<AudioError>().having((s) => s.path, 'path', isNull),
+        );
+        verifyNever(() => mockMicRecorder.start());
+      },
+    );
+
+    test(
+      'start() throwing (native PlatformException) -> AudioError, never '
+      'escapes uncaught (Review finding)',
+      () async {
+        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockMicRecorder.start()).thenThrow(Exception('native failure'));
+
+        await cubit.startRecording();
+
+        expect(
+          cubit.state,
+          isA<AudioError>().having((s) => s.path, 'path', isNull),
+        );
+      },
+    );
+
     test('ignored while already recording (no second overlapping start)', () async {
       when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
       when(() => mockMicRecorder.start()).thenAnswer((_) async {});
@@ -181,6 +226,52 @@ void main() {
       verifyNever(() => mockMicRecorder.stop());
       expect(cubit.state, isA<AudioIdle>());
     });
+
+    test(
+      'stop() throwing (native PlatformException) -> AudioError, never '
+      'escapes uncaught (Review finding)',
+      () async {
+        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+        await cubit.startRecording();
+        when(() => mockMicRecorder.stop()).thenThrow(Exception('native failure'));
+
+        await cubit.stopRecording();
+
+        expect(
+          cubit.state,
+          isA<AudioError>().having((s) => s.path, 'path', isNull),
+        );
+      },
+    );
+
+    test(
+      'a second concurrent call while the first is still awaiting stop() '
+      'is ignored (Review finding: without this, a fast double-tap on the '
+      'stop control before the UI rebuilds could fire _micRecorder.stop() '
+      'twice and let a stale/null second result clobber the first call\'s '
+      'genuine recording)',
+      () async {
+        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+        await cubit.startRecording();
+        final stopCompleter = Completer<MicRecording?>();
+        when(() => mockMicRecorder.stop()).thenAnswer((_) => stopCompleter.future);
+        when(
+          () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
+        ).thenAnswer((_) async => 'Hoje foi um bom dia.');
+
+        final firstStop = cubit.stopRecording();
+        final secondStop = cubit.stopRecording();
+        stopCompleter.complete(
+          const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
+        );
+        await firstStop;
+        await secondStop;
+
+        verify(() => mockMicRecorder.stop()).called(1);
+      },
+    );
   });
 
   group('retry()', () {
@@ -384,6 +475,193 @@ void main() {
       expect(cubit.state, isA<AudioIdle>());
       verifyNever(() => mockMicRecorder.cancel());
     });
+
+    test(
+      'while processing deletes the real abandoned recording file, not '
+      'just a fake path (Review finding: the existing coverage above used '
+      "a fake '/tmp/a.wav' path, which silently no-ops the delete and "
+      "never actually observes it happening)",
+      () async {
+        final tempDir = Directory.systemTemp.createTempSync(
+          'cerne_test_audio_cubit_',
+        );
+        addTearDown(() {
+          if (tempDir.existsSync()) {
+            tempDir.deleteSync(recursive: true);
+          }
+        });
+        final file = File('${tempDir.path}/a.wav')..createSync();
+        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+        await cubit.startRecording();
+        when(() => mockMicRecorder.stop()).thenAnswer(
+          (_) async => MicRecording(path: file.path, durationSeconds: 7),
+        );
+        final transcribeCompleter = Completer<String?>();
+        when(
+          () => mockAudioTranscriber.transcribe(file.path),
+        ).thenAnswer((_) => transcribeCompleter.future);
+
+        final stopFuture = cubit.stopRecording();
+        await Future<void>.delayed(Duration.zero);
+        expect(cubit.state, isA<AudioProcessing>());
+        expect(file.existsSync(), isTrue);
+
+        await cubit.cancel();
+        await _waitUntilDeleted(file);
+
+        expect(file.existsSync(), isFalse);
+
+        transcribeCompleter.complete('chegou tarde demais');
+        await stopFuture;
+      },
+    );
+
+    group('discardPreserved', () {
+      test(
+        'false (default) — a no-op for AudioTranscribed, preserving the '
+        'result for a later tab switch back',
+        () async {
+          when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+          when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+          await cubit.startRecording();
+          when(() => mockMicRecorder.stop()).thenAnswer(
+            (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
+          );
+          when(
+            () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
+          ).thenAnswer((_) async => 'texto');
+          await cubit.stopRecording();
+          final transcribed = cubit.state;
+
+          await cubit.cancel();
+
+          expect(cubit.state, same(transcribed));
+        },
+      );
+
+      test(
+        'true — deletes the preserved file for AudioTranscribed (Review '
+        "finding: InsertionModal.show()'s full-modal-dismiss path, which "
+        'never switches back to the tab, so the file would otherwise leak '
+        'forever once close() follows)',
+        () async {
+          final tempDir = Directory.systemTemp.createTempSync(
+            'cerne_test_audio_cubit_',
+          );
+          addTearDown(() {
+            if (tempDir.existsSync()) {
+              tempDir.deleteSync(recursive: true);
+            }
+          });
+          final file = File('${tempDir.path}/a.wav')..createSync();
+          when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+          when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+          await cubit.startRecording();
+          when(() => mockMicRecorder.stop()).thenAnswer(
+            (_) async => MicRecording(path: file.path, durationSeconds: 7),
+          );
+          when(
+            () => mockAudioTranscriber.transcribe(file.path),
+          ).thenAnswer((_) async => 'texto');
+          await cubit.stopRecording();
+          expect(file.existsSync(), isTrue);
+
+          await cubit.cancel(discardPreserved: true);
+          await _waitUntilDeleted(file);
+
+          expect(file.existsSync(), isFalse);
+        },
+      );
+
+      test(
+        'true — also deletes the preserved file for a file-carrying '
+        'AudioError (e.g. a failed transcription awaiting retry)',
+        () async {
+          final tempDir = Directory.systemTemp.createTempSync(
+            'cerne_test_audio_cubit_',
+          );
+          addTearDown(() {
+            if (tempDir.existsSync()) {
+              tempDir.deleteSync(recursive: true);
+            }
+          });
+          final file = File('${tempDir.path}/a.wav')..createSync();
+          when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+          when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+          await cubit.startRecording();
+          when(() => mockMicRecorder.stop()).thenAnswer(
+            (_) async => MicRecording(path: file.path, durationSeconds: 7),
+          );
+          when(
+            () => mockAudioTranscriber.transcribe(file.path),
+          ).thenAnswer((_) async => null);
+          await cubit.stopRecording();
+          expect(cubit.state, isA<AudioError>());
+          expect(file.existsSync(), isTrue);
+
+          await cubit.cancel(discardPreserved: true);
+          await _waitUntilDeleted(file);
+
+          expect(file.existsSync(), isFalse);
+        },
+      );
+
+      test(
+        'true — a no-op for a permission-denied AudioError (no file to '
+        'delete)',
+        () async {
+          when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => false);
+          await cubit.startRecording();
+          expect(cubit.state, isA<AudioError>());
+
+          await cubit.cancel(discardPreserved: true);
+
+          expect(cubit.state, isA<AudioError>());
+        },
+      );
+    });
+  });
+
+  group('cancel() racing retry()', () {
+    test(
+      'a cancel() mid-retry-re-transcription resets to AudioIdle and '
+      'drops the eventual stale result instead of resurrecting the flow '
+      '(Review finding: retry() re-enters the shared _transcribe() '
+      "continuation through a different call path than stopRecording(), "
+      'and never bumps _generation itself — relying entirely on '
+      "_transcribe()'s own state-based guard)",
+      () async {
+        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+        await cubit.startRecording();
+        when(() => mockMicRecorder.stop()).thenAnswer(
+          (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
+        );
+        when(
+          () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
+        ).thenAnswer((_) async => null);
+        await cubit.stopRecording();
+        expect(cubit.state, isA<AudioError>());
+
+        final retryCompleter = Completer<String?>();
+        when(
+          () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
+        ).thenAnswer((_) => retryCompleter.future);
+
+        final retryFuture = cubit.retry();
+        await Future<void>.delayed(Duration.zero);
+        expect(cubit.state, isA<AudioProcessing>());
+
+        await cubit.cancel();
+        expect(cubit.state, isA<AudioIdle>());
+
+        retryCompleter.complete('chegou tarde demais, pós-cancelamento');
+        await retryFuture;
+
+        expect(cubit.state, isA<AudioIdle>());
+      },
+    );
   });
 
   group('save()', () {
@@ -491,6 +769,47 @@ void main() {
       );
       expect(cubit.state, isA<AudioIdle>());
     });
+
+    test(
+      'happy path deletes the real temp recording file after a '
+      'successful save (Review finding: the existing happy-path test '
+      "above uses a fake '/tmp/a.wav' path, which silently no-ops the "
+      'delete and never actually observes it happening)',
+      () async {
+        final tempDir = Directory.systemTemp.createTempSync(
+          'cerne_test_audio_cubit_',
+        );
+        addTearDown(() {
+          if (tempDir.existsSync()) {
+            tempDir.deleteSync(recursive: true);
+          }
+        });
+        final file = File('${tempDir.path}/a.wav')..createSync();
+        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+        await cubit.startRecording();
+        when(() => mockMicRecorder.stop()).thenAnswer(
+          (_) async => MicRecording(path: file.path, durationSeconds: 7),
+        );
+        when(
+          () => mockAudioTranscriber.transcribe(file.path),
+        ).thenAnswer((_) async => 'Hoje foi um bom dia.');
+        await cubit.stopRecording();
+        when(
+          () => mockRepository.create(
+            content: any(named: 'content'),
+            source: any(named: 'source'),
+            mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
+          ),
+        ).thenAnswer((_) async => right(_savedEntry));
+        expect(file.existsSync(), isTrue);
+
+        await cubit.save();
+        await _waitUntilDeleted(file);
+
+        expect(file.existsSync(), isFalse);
+      },
+    );
 
     test('ignored while already saving (no double-submit)', () async {
       await reachTranscribed();
