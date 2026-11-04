@@ -5,6 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 
 import 'package:cerne/core/failure/failure.dart';
+import 'package:cerne/features/capture/domain/services/audio_transcriber.dart';
+import 'package:cerne/features/capture/domain/services/mic_recorder.dart';
+import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/widgets/insertion_modal.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
@@ -40,6 +43,7 @@ class _FakeEntriesRepository implements EntriesRepository {
   Future<Either<Failure, Entry>> create({
     required String content,
     required EntrySource source,
+    int? mediaDurationSeconds,
   }) async {
     createCallCount++;
     final activeGate = gate;
@@ -50,6 +54,43 @@ class _FakeEntriesRepository implements EntriesRepository {
   }
 }
 
+/// A trivial fake — this file's own tests never switch to the Áudio tab,
+/// so neither `MicRecorder` port method below is ever expected to be
+/// called (same rationale as `_FakeEntriesRepository`'s own doc, applied
+/// to spec-3-2's two new ports).
+class _FakeMicRecorder implements MicRecorder {
+  // This file's generic tab-switch tests (`_openModal`'s own default)
+  // *do* switch into the Áudio tab (Code Map: tab-switch starts
+  // recording), so `hasPermission()` must return something rather than
+  // throw — `false` keeps the flow harmless (an `AudioError` state,
+  // never touching `start`/`stop`/`cancel` below) for every test that
+  // doesn't care about the audio pipeline's own details
+  // (`audio_entry_cubit_test.dart` covers those with scriptable mocks).
+  @override
+  Future<bool> hasPermission() async => false;
+
+  @override
+  Future<void> start() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<MicRecording?> stop() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<void> cancel() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<double> get amplitudeStream => const Stream.empty();
+}
+
+class _FakeAudioTranscriber implements AudioTranscriber {
+  @override
+  Future<String?> transcribe(String audioPath) async =>
+      throw UnimplementedError('not expected to be called');
+}
+
 /// Opens the real `InsertionModal` from a minimal host screen with an
 /// "open" button — `InsertionModal.show` just needs a `BuildContext` with
 /// a `Navigator` ancestor, same as `showModalBottomSheet` itself.
@@ -58,6 +99,15 @@ Future<void> _openModal(
   TextEntryCubit cubit, {
   bool disableAnimations = false,
 }) async {
+  // Only `cubit` is scripted per test (`fakeRepository.nextResult`/`gate`)
+  // — none of this file's tests ever switch to the Áudio tab, so a fresh,
+  // never-configured `AudioEntryCubit` (backed by the two trivial
+  // "not expected to be called" fakes above) is always enough here.
+  final audioCubit = AudioEntryCubit(
+    _FakeMicRecorder(),
+    _FakeAudioTranscriber(),
+    _FakeEntriesRepository(),
+  );
   await tester.pumpWidget(
     MediaQuery(
       data: MediaQueryData(disableAnimations: disableAnimations),
@@ -65,7 +115,8 @@ Future<void> _openModal(
         home: Scaffold(
           body: Builder(
             builder: (context) => ElevatedButton(
-              onPressed: () => InsertionModal.show(context, cubit: cubit),
+              onPressed: () =>
+                  InsertionModal.show(context, cubit: cubit, audioCubit: audioCubit),
               child: const Text('open'),
             ),
           ),
@@ -105,8 +156,10 @@ void main() {
   );
 
   testWidgets(
-    'tapping Áudio switches to its own idle placeholder; Foto likewise — '
-    'neither is interactive (Never: audio/photo capture logic)',
+    'tapping Áudio switches to its own functional capture pipeline '
+    '(spec-3-2 — superseding Story 3.1\'s idle placeholder for this tab); '
+    'Foto remains the idle placeholder, still non-interactive (Never: '
+    'photo capture logic)',
     (tester) async {
       await _openModal(tester, TextEntryCubit(fakeRepository));
       await tester.pumpAndSettle();
@@ -114,8 +167,12 @@ void main() {
       await tester.tap(find.text('Áudio'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Áudio chega em breve'), findsOneWidget);
-      expect(find.byType(TextField), findsNothing);
+      // This file's own `_FakeMicRecorder.hasPermission()` always denies
+      // — `audio_entry_cubit_test.dart` covers the full pipeline with
+      // scriptable mocks; this just proves the tab is real UI now, not
+      // Story 3.1's old idle placeholder.
+      expect(find.text('Áudio chega em breve'), findsNothing);
+      expect(find.text('Tentar novamente'), findsOneWidget);
 
       await tester.tap(find.text('Foto'));
       await tester.pumpAndSettle();

@@ -50,6 +50,13 @@ dependencies:
   flutter_secure_storage: ^11.2.0
   flutter_dotenv: ^6.0.1
   whisper_ggml: ^2.8.1
+  record: ^6.0.0
+
+  # Already resolved transitively (via `hive_ce_flutter`) since Story 3.1,
+  # but spec-3-2's `RecordMicRecorder` imports it directly (temp-dir audio
+  # file path) — `depend_on_referenced_packages` (flutter_lints) requires
+  # a direct dependency for that.
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:

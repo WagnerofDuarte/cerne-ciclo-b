@@ -6,11 +6,14 @@
 enum EntrySource { manual, audio, photo, chat }
 
 /// A saved journal entry — plain `{id, content, source, chatMessageId,
-/// occurredAt, serverRevision, createdAt, updatedAt}` class, no `freezed`
-/// (mirrors `AuthenticatedUser`: this feature has no need for the
-/// union/copyWith machinery `Failure` uses). Boundaries: never a field
-/// beyond this exact set — `tags`/`piiStatus`/`piiSpans`/`embeddingStatus`/
-/// `mediaDurationSeconds` belong to later epics, not this story.
+/// occurredAt, serverRevision, createdAt, updatedAt, mediaDurationSeconds}`
+/// class, no `freezed` (mirrors `AuthenticatedUser`: this feature has no
+/// need for the union/copyWith machinery `Failure` uses). Boundaries:
+/// never a field beyond this exact set — `tags`/`piiStatus`/`piiSpans`/
+/// `embeddingStatus` still belong to later epics, not this story.
+/// [mediaDurationSeconds] was the one field Story 3.1 deferred (its own
+/// comment named it "later epics") — spec-3-2 is that story, for the
+/// `source: audio` entries it produces.
 ///
 /// [occurredAt]/[createdAt]/[updatedAt] are kept as the backend's own ISO
 /// 8601 strings rather than parsed into `DateTime` — nothing in this story
@@ -27,6 +30,7 @@ class Entry {
     required this.serverRevision,
     required this.createdAt,
     required this.updatedAt,
+    this.mediaDurationSeconds,
   });
 
   final String id;
@@ -41,6 +45,10 @@ class Entry {
   final String createdAt;
   final String updatedAt;
 
+  /// Non-null only for an [EntrySource.audio]-sourced entry
+  /// (`AudioEntryCubit.save()`) — `null` for every other source.
+  final int? mediaDurationSeconds;
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -52,7 +60,8 @@ class Entry {
           other.occurredAt == occurredAt &&
           other.serverRevision == serverRevision &&
           other.createdAt == createdAt &&
-          other.updatedAt == updatedAt);
+          other.updatedAt == updatedAt &&
+          other.mediaDurationSeconds == mediaDurationSeconds);
 
   @override
   int get hashCode => Object.hash(
@@ -64,6 +73,7 @@ class Entry {
     serverRevision,
     createdAt,
     updatedAt,
+    mediaDurationSeconds,
   );
 
   @override
@@ -71,5 +81,6 @@ class Entry {
       'Entry(id: $id, content: $content, source: $source, '
       'chatMessageId: $chatMessageId, occurredAt: $occurredAt, '
       'serverRevision: $serverRevision, createdAt: $createdAt, '
-      'updatedAt: $updatedAt)';
+      'updatedAt: $updatedAt, '
+      'mediaDurationSeconds: $mediaDurationSeconds)';
 }

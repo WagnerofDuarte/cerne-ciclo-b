@@ -107,9 +107,16 @@ class TextEntryCubit extends Cubit<TextEntryState> {
   /// blank/whitespace-only text never calls [EntriesRepository.create] —
   /// `InsertionModal` already disables Salvar for that case, but this is
   /// the authoritative guard regardless of how `save()` is invoked.
+  ///
+  /// Review finding: also ignored while already [TextEntrySaved] — the
+  /// modal's dismiss animation keeps this cubit alive (and Salvar
+  /// re-enabled, since that state isn't [TextEntrySaving]) for its
+  /// duration, so without this a fast double-tap on Salvar could fire a
+  /// second, un-deduplicated `create` call before the sheet finishes
+  /// closing.
   Future<void> save() async {
     final text = state.text.trim();
-    if (text.isEmpty || state is TextEntrySaving) {
+    if (text.isEmpty || state is TextEntrySaving || state is TextEntrySaved) {
       return;
     }
     final activeTab = state.activeTab;

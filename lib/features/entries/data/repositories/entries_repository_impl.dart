@@ -30,10 +30,12 @@ class EntriesRepositoryImpl implements EntriesRepository {
   Future<Either<Failure, Entry>> create({
     required String content,
     required EntrySource source,
+    int? mediaDurationSeconds,
   }) async {
     final result = await _remoteDataSource.create(
       content: content,
       source: source,
+      mediaDurationSeconds: mediaDurationSeconds,
     );
     return result.match((failure) async => left(failure), (dto) async {
       // A thrown Hive/disk exception must never escape unmapped (RNF09) —
@@ -57,5 +59,6 @@ class EntriesRepositoryImpl implements EntriesRepository {
     serverRevision: dto.serverRevision,
     createdAt: dto.createdAt,
     updatedAt: dto.updatedAt,
+    mediaDurationSeconds: dto.mediaDurationSeconds,
   );
 }

@@ -17,5 +17,6 @@ abstract class EntriesRepository {
   Future<Either<Failure, Entry>> create({
     required String content,
     required EntrySource source,
+    int? mediaDurationSeconds,
   });
 }

@@ -135,4 +135,56 @@ void main() {
       expect(stored['source'], 'chat');
     },
   );
+
+  test(
+    'spec-3-2: a non-null mediaDurationSeconds round-trips through the '
+    'real box; a null one is omitted from the stored map entirely '
+    '(includeIfNull: false), not stored as an explicit null',
+    () async {
+      const audioDto = EntryDto(
+        id: 'e3',
+        content: 'Transcrição de áudio.',
+        source: EntrySource.audio,
+        chatMessageId: null,
+        occurredAt: '2026-01-03T00:00:00Z',
+        serverRevision: 1,
+        createdAt: '2026-01-03T00:00:00Z',
+        updatedAt: '2026-01-03T00:00:00Z',
+        mediaDurationSeconds: 42,
+      );
+      when(
+        () => mockRemoteDataSource.create(
+          content: any(named: 'content'),
+          source: any(named: 'source'),
+          mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
+        ),
+      ).thenAnswer((_) async => right(audioDto));
+
+      await repository.create(
+        content: 'Transcrição de áudio.',
+        source: EntrySource.audio,
+        mediaDurationSeconds: 42,
+      );
+
+      final stored = box.get('e3');
+      expect(stored!['mediaDurationSeconds'], 42);
+
+      // A manual entry (no mediaDurationSeconds at all) stores no such
+      // key — never an explicit `null` value.
+      when(
+        () => mockRemoteDataSource.create(
+          content: any(named: 'content'),
+          source: any(named: 'source'),
+          mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
+        ),
+      ).thenAnswer((_) async => right(_dto));
+      await repository.create(
+        content: 'Hoje foi um bom dia.',
+        source: EntrySource.manual,
+      );
+      final manualStored = box.get('e1');
+      expect(manualStored, isNotNull);
+      expect(manualStored!.containsKey('mediaDurationSeconds'), isFalse);
+    },
+  );
 }

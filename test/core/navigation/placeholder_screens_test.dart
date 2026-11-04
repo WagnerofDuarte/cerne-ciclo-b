@@ -8,6 +8,9 @@ import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/core/navigation/placeholder_screens.dart';
 import 'package:cerne/core/widgets/app_drawer.dart';
+import 'package:cerne/features/capture/domain/services/audio_transcriber.dart';
+import 'package:cerne/features/capture/domain/services/mic_recorder.dart';
+import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
@@ -19,7 +22,38 @@ class _UnusedEntriesRepository implements EntriesRepository {
   Future<Either<Failure, Entry>> create({
     required String content,
     required EntrySource source,
+    int? mediaDurationSeconds,
   }) async => throw UnimplementedError('not expected to be called');
+}
+
+/// Trivial fakes for `AudioEntryCubit`'s two ports — the "+" test below
+/// never switches to the Áudio tab, so neither is ever expected to be
+/// called (same rationale as [_UnusedEntriesRepository]).
+class _UnusedMicRecorder implements MicRecorder {
+  @override
+  Future<bool> hasPermission() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<void> start() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<MicRecording?> stop() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<void> cancel() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<double> get amplitudeStream => const Stream.empty();
+}
+
+class _UnusedAudioTranscriber implements AudioTranscriber {
+  @override
+  Future<String?> transcribe(String audioPath) async =>
+      throw UnimplementedError('not expected to be called');
 }
 
 /// Minimal two-route `GoRouter` for the three back-arrow placeholders —
@@ -96,6 +130,13 @@ void main() {
         await resetCoreDependencies();
         sl.registerFactory<TextEntryCubit>(
           () => TextEntryCubit(_UnusedEntriesRepository()),
+        );
+        sl.registerFactory<AudioEntryCubit>(
+          () => AudioEntryCubit(
+            _UnusedMicRecorder(),
+            _UnusedAudioTranscriber(),
+            _UnusedEntriesRepository(),
+          ),
         );
         addTearDown(resetCoreDependencies);
 

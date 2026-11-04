@@ -14,6 +14,9 @@ import 'package:cerne/features/account/presentation/cubit/account_settings_cubit
 import 'package:cerne/features/auth/data/datasources/auth_remote_data_source.dart';
 import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
 import 'package:cerne/features/auth/presentation/cubit/auth_cubit.dart';
+import 'package:cerne/features/capture/domain/services/audio_transcriber.dart';
+import 'package:cerne/features/capture/domain/services/mic_recorder.dart';
+import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
@@ -56,11 +59,23 @@ void main() {
     }
   }
 
+  // Review finding: `record_pkg.AudioRecorder`'s constructor itself (not
+  // just a later method call) immediately invokes this native channel —
+  // `registerLazySingleton<record_pkg.AudioRecorder>(AudioRecorder.new)`
+  // in `capture_injection.dart` throws `MissingPluginException` under
+  // `flutter test` without this, same rationale as the secure-storage
+  // channel above (no device/simulator exists yet, AGENTS.md). Nothing
+  // in this file's tests actually records audio, so every method just
+  // returns `null`, mirroring the secure-storage fake's own `default`.
+  const recordChannel = MethodChannel('com.llfbandit.record/messages');
+
   late FakePathProviderPlatform fakePathProvider;
 
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(secureStorageChannel, handleSecureStorageCall);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(recordChannel, (_) async => null);
     // Story 3.1 — `setupCoreDependencies()` now also calls
     // `Hive.initFlutter()` (transitively via `hive_ce_flutter`), which
     // asks `path_provider` for the documents directory; faked the same
@@ -75,6 +90,8 @@ void main() {
   tearDown(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(secureStorageChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(recordChannel, null);
     fakeNativeStorage.clear();
     // Closes the `entries` Hive box opened above — `resetCoreDependencies()`
     // only resets `get_it`'s registrations, not Hive's own global box
@@ -181,6 +198,29 @@ void main() {
       expect(first, isNot(same(second)));
       await first.close();
       await second.close();
+    },
+  );
+
+  test(
+    'setupCoreDependencies also wires spec-3-2\'s audio-capture bindings '
+    '(review finding: the original diff never extended this test for the '
+    'new registrations, so a broken real DI wiring — e.g. a constructor-'
+    'argument-order mistake in AudioEntryCubit(...) — would only surface '
+    'at real app launch, which has no automated check yet, AGENTS.md)',
+    () async {
+      expect(sl.isRegistered<MicRecorder>(), isTrue);
+      expect(sl.isRegistered<AudioTranscriber>(), isTrue);
+      expect(() => sl<MicRecorder>(), returnsNormally);
+      expect(() => sl<AudioTranscriber>(), returnsNormally);
+
+      // `AudioEntryCubit` is a factory, same rationale as `TextEntryCubit`
+      // above — resolving it twice must return two distinct,
+      // independently closable instances.
+      final firstAudio = sl<AudioEntryCubit>();
+      final secondAudio = sl<AudioEntryCubit>();
+      expect(firstAudio, isNot(same(secondAudio)));
+      await firstAudio.close();
+      await secondAudio.close();
     },
   );
 

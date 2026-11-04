@@ -76,6 +76,48 @@ void main() {
       },
     );
 
+    test(
+      'spec-3-2: a non-null mediaDurationSeconds is threaded through to '
+      'the remote data source and onto the mapped Entry',
+      () async {
+        const audioDto = EntryDto(
+          id: 'e2',
+          content: 'Transcrição de áudio.',
+          source: EntrySource.audio,
+          chatMessageId: null,
+          occurredAt: '2026-01-01T00:00:00Z',
+          serverRevision: 1,
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+          mediaDurationSeconds: 7,
+        );
+        when(
+          () => mockRemoteDataSource.create(
+            content: any(named: 'content'),
+            source: any(named: 'source'),
+            mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
+          ),
+        ).thenAnswer((_) async => right(audioDto));
+
+        final result = await repository.create(
+          content: 'Transcrição de áudio.',
+          source: EntrySource.audio,
+          mediaDurationSeconds: 7,
+        );
+
+        verify(
+          () => mockRemoteDataSource.create(
+            content: 'Transcrição de áudio.',
+            source: EntrySource.audio,
+            mediaDurationSeconds: 7,
+          ),
+        ).called(1);
+        result.match((_) => fail('expected Right'), (entry) {
+          expect(entry.mediaDurationSeconds, 7);
+        });
+      },
+    );
+
     test('a Hive write failure maps to Left(malformedResponse), never '
         'throws (RNF09)', () async {
       when(

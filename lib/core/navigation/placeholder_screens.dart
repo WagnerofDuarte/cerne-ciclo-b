@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../features/capture/presentation/cubit/audio_entry_cubit.dart';
 import '../../features/capture/presentation/cubit/text_entry_cubit.dart';
 import '../../features/capture/presentation/widgets/insertion_modal.dart';
 import '../design_tokens.dart';
@@ -92,8 +93,11 @@ class HomeChatPlaceholderScreen extends StatelessWidget {
       // offline-disabling (Boundaries). `FloatingActionButton`'s own
       // default 56dp size already clears the 44pt tap-target floor.
       floatingActionButton: FloatingActionButton(
-        onPressed: () =>
-            InsertionModal.show(context, cubit: sl<TextEntryCubit>()),
+        onPressed: () => InsertionModal.show(
+          context,
+          cubit: sl<TextEntryCubit>(),
+          audioCubit: sl<AudioEntryCubit>(),
+        ),
         backgroundColor: DesignTokens.colorAccent,
         foregroundColor: DesignTokens.colorOnAccent,
         tooltip: 'Adicionar registro',

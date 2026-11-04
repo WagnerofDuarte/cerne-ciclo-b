@@ -276,6 +276,13 @@ class DesignTokens {
   /// isn't on the existing 4dp spacing scale.
   static const double dialogContentGap = 14;
 
+  /// Insertion Modal's "x" close button, each tab button, and (spec-3-2)
+  /// the circular stop-recording control's minimum tap target (Story 3.1
+  /// review finding) — UX-DR23's 44pt floor, same rationale
+  /// [pinKeypadButtonSize] already cites, named here instead of
+  /// hardcoded in `insertion_modal.dart` (RNF08).
+  static const double insertionModalTapTargetMin = 44;
+
   // ---------------------------------------------------------------------
   // Navigation shell (Story 1.6) — `cerne-prototype.html`'s
   // `<!-- OVERLAY: Drawer -->` block, the `Tela 1/5/6` header blocks, and

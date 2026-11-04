@@ -5,11 +5,11 @@ import '../../domain/entities/entry.dart';
 part 'entry_dto.g.dart';
 
 /// `POST /entries`'s response `data` object (`openapi.yaml:370-456`) —
-/// decodes exactly the 8 fields [Entry] models (Code Map/Boundaries);
-/// every other field (`tags`/`piiStatus`/`piiSpans`/`embeddingStatus`/
-/// `mediaDurationSeconds`) is simply ignored by `json_serializable`'s
-/// generated `fromJson`, same convention `AccountSettingsDto` already
-/// uses for the fields it doesn't model.
+/// decodes exactly the 9 fields [Entry] models (Code Map/Boundaries);
+/// every other field (`tags`/`piiStatus`/`piiSpans`/`embeddingStatus`) is
+/// simply ignored by `json_serializable`'s generated `fromJson`, same
+/// convention `AccountSettingsDto` already uses for the fields it doesn't
+/// model.
 ///
 /// [source] serializes/deserializes against [EntrySource]'s own `.name`
 /// (`json_serializable`'s default enum handling) — the enum's member
@@ -26,6 +26,7 @@ class EntryDto {
     required this.serverRevision,
     required this.createdAt,
     required this.updatedAt,
+    this.mediaDurationSeconds,
   });
 
   final String id;
@@ -36,6 +37,15 @@ class EntryDto {
   final int serverRevision;
   final String createdAt;
   final String updatedAt;
+
+  /// Sent/decoded only when non-null (Code Map) —
+  /// `@JsonKey(includeIfNull: false)` drops the key from `toJson()`
+  /// entirely rather than serializing an explicit `null`; a response that
+  /// omits the key likewise decodes to `null` here, `json_serializable`'s
+  /// default behavior for a nullable field with no `@JsonKey(required:
+  /// true)`.
+  @JsonKey(includeIfNull: false)
+  final int? mediaDurationSeconds;
 
   factory EntryDto.fromJson(Map<String, dynamic> json) =>
       _$EntryDtoFromJson(json);

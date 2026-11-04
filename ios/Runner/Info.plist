@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>O Cerne usa Face ID para proteger o acesso ao seu diário.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>O Cerne usa o microfone para registrar seus áudios no diário.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

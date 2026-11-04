@@ -88,6 +88,58 @@ void main() {
       },
     );
 
+    test(
+      'spec-3-2: a non-null mediaDurationSeconds is sent alongside '
+      'content/source',
+      () async {
+        when(
+          () => mockApiClient.post('entries-create', data: any(named: 'data')),
+        ).thenAnswer((_) async => right(_entryBody(source: 'audio')));
+
+        await dataSource.create(
+          content: 'Hoje foi um bom dia.',
+          source: EntrySource.audio,
+          mediaDurationSeconds: 7,
+        );
+
+        final captured = verify(
+          () => mockApiClient.post(
+            'entries-create',
+            data: captureAny(named: 'data'),
+          ),
+        ).captured;
+        expect(captured.single, {
+          'content': 'Hoje foi um bom dia.',
+          'source': 'audio',
+          'mediaDurationSeconds': 7,
+        });
+      },
+    );
+
+    test(
+      'decodes a non-null mediaDurationSeconds from the response data '
+      'object',
+      () async {
+        when(
+          () => mockApiClient.post('entries-create', data: any(named: 'data')),
+        ).thenAnswer((_) async {
+          final body = _entryBody(source: 'audio');
+          (body['data']! as Map<String, dynamic>)['mediaDurationSeconds'] = 7;
+          return right(body);
+        });
+
+        final result = await dataSource.create(
+          content: 'Hoje foi um bom dia.',
+          source: EntrySource.audio,
+          mediaDurationSeconds: 7,
+        );
+
+        result.match((_) => fail('expected Right'), (dto) {
+          expect(dto.mediaDurationSeconds, 7);
+        });
+      },
+    );
+
     test('decodes the EntryDto from the response data object', () async {
       when(
         () => mockApiClient.post('entries-create', data: any(named: 'data')),

@@ -85,6 +85,22 @@ baseline_commit: '12cdeaa93f773d1e68061196f04bb89627cdc849'
 - Given any state change this story introduces, when a screen reader is active, then an announced label accompanies it — never color/animation alone.
 - Given `fvm flutter analyze` and `fvm flutter test`, then both report zero issues / all green.
 
+### Review Findings
+
+**Patch:**
+- [x] [Review][Patch] Fast double-tap after a successful save can fire a second `POST /entries` [lib/features/capture/presentation/cubit/text_entry_cubit.dart:112]
+- [x] [Review][Patch] "Registro salvo" announcement isn't awaited before the modal pops [lib/features/capture/presentation/widgets/insertion_modal.dart:166]
+- [x] [Review][Patch] Hardcoded 44pt tap-target literals bypass `design_tokens.dart` [lib/features/capture/presentation/widgets/insertion_modal.dart:316]
+- [x] [Review][Patch] `_TabButton`'s `Semantics` label risks double-announcing the tab name [lib/features/capture/presentation/widgets/insertion_modal.dart:295]
+- [x] [Review][Patch] `TextField`'s default "0/20000" character counter is unaccounted for [lib/features/capture/presentation/widgets/insertion_modal.dart:426]
+
+**Defer:**
+- [x] [Review][Defer] A local Hive write failure after a successful backend create risks a duplicate entry on retry [lib/features/entries/data/repositories/entries_repository_impl.dart:45] — deferred, pre-existing
+- [x] [Review][Defer] Raw exception text is surfaced verbatim as user-facing/announced copy [lib/features/entries/data/repositories/entries_repository_impl.dart:45] — deferred, pre-existing
+- [x] [Review][Defer] Hive write failure is mapped to `malformedResponse`, documented for parse failures, not local I/O [lib/features/entries/data/repositories/entries_repository_impl.dart:45] — deferred, pre-existing
+- [x] [Review][Defer] An exception during `Hive.initFlutter()`/`registerEntriesFeature()` crashes app startup with no fallback [lib/core/di/injection_container.dart:90] — deferred, pre-existing
+- [x] [Review][Defer] `EntrySource.audio`/`EntrySource.photo` are never exercised through the datasource/Hive serialization layer [test/features/entries/data/datasources/entries_remote_data_source_test.dart] — deferred, pre-existing
+
 ## Spec Change Log
 
 - 2026-11-04 — Token-count checkpoint (step-02): spec exceeded 1600 tokens (~2676) because it bundled a proactive offline-detection/banner pattern that doesn't exist anywhere in the app yet. Human chose [S] Split: carved the connectivity/banner work out to `deferred-work.md` and narrowed this story's "+" control to always-tappable, with offline failures surfacing through the existing reactive `Failure.networkOffline` path. KEEP: the `entries`/`capture` feature stand-up, Hive write-through, and modal-shell scope are otherwise unchanged from the original investigation.
