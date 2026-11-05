@@ -180,11 +180,15 @@ class PendingEntryWriteTrackerImpl implements PendingEntryWriteTracker {
   Future<void> retry(String tempId) async {
     final current = _pending[tempId];
     if (current == null || current.status is! PendingEntryWriteFailed) {
-      // Unknown, already in flight, or already resolved — I/O matrix's
-      // "Write fails, non-retryable" row also routes through this guard
-      // indirectly: `SyncBadge` only ever calls [retry] for a
-      // `Failure.retryable` error in the first place, but this stays the
-      // authoritative check regardless of how `retry()` is invoked.
+      // Unknown, already in flight, or already resolved.
+      return;
+    }
+    final failedStatus = current.status as PendingEntryWriteFailed;
+    if (!failedStatus.failure.retryable) {
+      // Review finding (round 2): the tracker, not just `SyncBadge`'s own
+      // `onTap` guard, is the authoritative check — a non-retryable
+      // failure must never be replayed regardless of which caller invokes
+      // [retry].
       return;
     }
     _pending[tempId] = current.copyWith(status: const PendingEntryWriteInFlight());

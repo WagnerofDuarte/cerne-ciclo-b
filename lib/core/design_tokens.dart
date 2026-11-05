@@ -270,6 +270,12 @@ class DesignTokens {
   /// rationale as [dialogIconSize].
   static const double biometricIconSize = 44;
 
+  /// Tela 4 — Vazio's `ph-notebook` icon (Story 4.3) — `font-size:88px` in
+  /// `cerne-prototype.html`'s empty-state block; approximated with a
+  /// built-in Material icon, same rationale as [dialogIconSize]/
+  /// [biometricIconSize].
+  static const double entriesEmptyStateIconSize = 88;
+
   /// Confirmation-dialog card's internal gap between stacked elements
   /// (icon+title row, body text, button, caption) — the overlay's markup
   /// (prototype-extract.md's "Sessão expirada" block) uses 14px, which

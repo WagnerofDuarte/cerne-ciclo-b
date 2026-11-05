@@ -144,7 +144,24 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
       return;
     }
     result.match(
-      (failure) => emit(MeusRegistrosError(message: failure.message)),
+      (failure) {
+        // Review finding (round 2): mirrors the success branch's own
+        // `_pendingWrites` overlay below — a write already pending/failed
+        // when the first page fails to load must still show its own
+        // placeholder card, not disappear behind a plain error screen
+        // until the next unrelated `pendingWrites` emission.
+        if (_pendingWrites.isEmpty) {
+          emit(MeusRegistrosError(message: failure.message));
+          return;
+        }
+        emit(
+          MeusRegistrosLoaded(
+            entries: const [],
+            nextCursor: null,
+            pendingWrites: _pendingWrites,
+          ),
+        );
+      },
       (page) {
         // Same degenerate-cursor distrust as `_fetchMore`'s own guard below:
         // a page reporting zero items is treated as exhausted regardless of
@@ -254,10 +271,11 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
 
 /// Filters [entries] down to the first occurrence of each id, checked
 /// against [seenIds] (default empty) — covers both a duplicate against an
-/// already-held id *and* a duplicate within [entries] itself, since
-/// [seenIds] accumulates as entries are walked.
+/// already-held id *and* a duplicate within [entries] itself, since a
+/// local copy of [seenIds] accumulates as entries are walked (the caller's
+/// own set, if any, is never mutated).
 List<Entry> _dedupedById(List<Entry> entries, {Set<String>? seenIds}) {
-  final seen = seenIds ?? <String>{};
+  final seen = {...?seenIds};
   return [
     for (final entry in entries)
       if (seen.add(entry.id)) entry,

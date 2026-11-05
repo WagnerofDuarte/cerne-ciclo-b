@@ -1,16 +1,25 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart' hide State;
 import 'package:go_router/go_router.dart';
 
+import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/core/navigation/expiry_overlay_host.dart';
 import 'package:cerne/core/widgets/back_arrow_header.dart';
 import 'package:cerne/core/widgets/confirmation_dialog.dart';
 import 'package:cerne/features/auth/domain/entities/session_status.dart';
 import 'package:cerne/features/auth/domain/repositories/session_repository.dart';
+import 'package:cerne/features/capture/domain/repositories/media_repository.dart';
+import 'package:cerne/features/capture/domain/services/audio_transcriber.dart';
+import 'package:cerne/features/capture/domain/services/mic_recorder.dart';
+import 'package:cerne/features/capture/domain/services/photo_picker.dart';
+import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart';
+import 'package:cerne/features/capture/presentation/cubit/photo_entry_cubit.dart';
+import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
@@ -20,6 +29,7 @@ import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.d
 import 'package:cerne/features/entries/presentation/screens/meus_registros_screen.dart';
 import 'package:cerne/features/entries/presentation/widgets/entry_record_card.dart';
 import 'package:cerne/features/entries/presentation/widgets/entry_skeleton_card.dart';
+import 'package:cerne/features/entries/presentation/widgets/sync_badge.dart';
 
 /// Same tiny fake `expiry_overlay_host_test.dart` uses — gives synchronous
 /// control over the `SessionStatus` stream `ExpiryOverlayHost` subscribes
@@ -122,6 +132,125 @@ class _FakePendingEntryWriteTracker implements PendingEntryWriteTracker {
   Future<void> dispose() async {}
 }
 
+/// A controllable `PendingEntryWriteTracker` fake — unlike the trivial one
+/// above (whose streams never emit), this one lets a test drive
+/// [pendingWrites] directly and records every [retry] call, so a test can
+/// assert the real screen's own tap-to-retry wiring
+/// (`meus_registros_screen.dart`'s `onRetryTap: (entry) =>
+/// widget.cubit.retry(entry.id)`) actually reaches the tracker with the
+/// right `tempId` — Review finding (round 2): this exact chain (screen tap
+/// -> cubit.retry(entry.id) -> tracker.retry(tempId)) had no end-to-end
+/// coverage before; every other link in it was only ever exercised in
+/// isolation (`entry_record_card_test.dart`, `meus_registros_cubit_test.
+/// dart`).
+class _ControllablePendingEntryWriteTracker
+    implements PendingEntryWriteTracker {
+  final _pendingController =
+      StreamController<List<PendingEntryWrite>>.broadcast();
+  final List<String> retryCalls = [];
+
+  void emitPendingWrites(List<PendingEntryWrite> writes) =>
+      _pendingController.add(writes);
+
+  @override
+  Stream<List<PendingEntryWrite>> get pendingWrites =>
+      _pendingController.stream;
+
+  @override
+  Stream<({String tempId, Entry entry})> get confirmedWrites =>
+      const Stream.empty();
+
+  @override
+  Future<Either<Failure, Entry>> create({
+    required String content,
+    required EntrySource source,
+    int? mediaDurationSeconds,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<void> retry(String tempId) async {
+    retryCalls.add(tempId);
+  }
+
+  @override
+  Future<void> dispose() async {
+    await _pendingController.close();
+  }
+}
+
+/// Trivial fakes for the three capture cubits' own ports (the next five
+/// classes: tracker, mic recorder, transcriber, photo picker, media
+/// repository) — the CTA test below never exercises a real save, just that
+/// tapping it opens the Insertion Modal on Texto; same rationale and shape
+/// as `placeholder_screens_test.dart`'s own "+ control" test fakes.
+class _UnusedPendingEntryWriteTracker implements PendingEntryWriteTracker {
+  @override
+  Future<Either<Failure, Entry>> create({
+    required String content,
+    required EntrySource source,
+    int? mediaDurationSeconds,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<void> retry(String tempId) async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<List<PendingEntryWrite>> get pendingWrites => const Stream.empty();
+
+  @override
+  Stream<({String tempId, Entry entry})> get confirmedWrites =>
+      const Stream.empty();
+
+  @override
+  Future<void> dispose() async {}
+}
+
+class _UnusedMicRecorder implements MicRecorder {
+  @override
+  Future<bool> hasPermission() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<void> start() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<MicRecording?> stop() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<void> cancel() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<double> get amplitudeStream => const Stream.empty();
+}
+
+class _UnusedAudioTranscriber implements AudioTranscriber {
+  @override
+  Future<String?> transcribe(String audioPath) async =>
+      throw UnimplementedError('not expected to be called');
+}
+
+class _UnusedPhotoPicker implements PhotoPicker {
+  @override
+  Future<PickedPhoto?> pickFromCamera() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<PickedPhoto?> pickFromGallery() async =>
+      throw UnimplementedError('not expected to be called');
+}
+
+class _UnusedMediaRepository implements MediaRepository {
+  @override
+  Future<Either<Failure, OcrResult>> recognizeText({
+    required Uint8List imageBytes,
+    required String mimeType,
+  }) async => throw UnimplementedError('not expected to be called');
+}
+
 Future<MeusRegistrosCubit> _pumpScreen(
   WidgetTester tester,
   _FakeEntriesRepository fakeRepository,
@@ -200,7 +329,7 @@ void main() {
         await tester.pump();
 
         expect(find.byType(EntrySkeletonCard), findsNothing);
-        expect(find.text('Nenhum registro ainda.'), findsOneWidget);
+        expect(find.text('Nenhum registro ainda'), findsOneWidget);
 
         // Even once the threshold elapses afterwards, the state is already
         // resolved — the skeleton branch never gets a chance to render.
@@ -212,8 +341,8 @@ void main() {
 
   group('zero / error states', () {
     testWidgets(
-      'zero entries renders the plain "no entries yet" text — Boundaries: '
-      'no polished CTA this story',
+      'zero entries renders the dedicated empty state — icon, "Nenhum '
+      'registro ainda" copy, and the "Criar primeiro registro" CTA (spec-4-3)',
       (tester) async {
         final fakeRepository = _FakeEntriesRepository()
           ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
@@ -221,7 +350,71 @@ void main() {
         await _pumpScreen(tester, fakeRepository);
         await tester.pumpAndSettle();
 
-        expect(find.text('Nenhum registro ainda.'), findsOneWidget);
+        expect(find.text('Nenhum registro ainda'), findsOneWidget);
+        expect(find.byIcon(Icons.menu_book_outlined), findsOneWidget);
+        expect(find.text('Criar primeiro registro'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'tapping the empty-state CTA opens the Insertion Modal on Texto, '
+      'identical to the Home/Chat "+" FAB\'s own modal (spec-4-3)',
+      (tester) async {
+        await resetCoreDependencies();
+        sl.registerFactory<TextEntryCubit>(
+          () => TextEntryCubit(_UnusedPendingEntryWriteTracker()),
+        );
+        sl.registerFactory<AudioEntryCubit>(
+          () => AudioEntryCubit(
+            _UnusedMicRecorder(),
+            _UnusedAudioTranscriber(),
+            _UnusedPendingEntryWriteTracker(),
+          ),
+        );
+        sl.registerFactory<PhotoEntryCubit>(
+          () => PhotoEntryCubit(
+            _UnusedPhotoPicker(),
+            _UnusedMediaRepository(),
+            _UnusedPendingEntryWriteTracker(),
+          ),
+        );
+        addTearDown(resetCoreDependencies);
+
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Criar primeiro registro'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Texto'), findsOneWidget);
+        expect(find.text('Áudio'), findsOneWidget);
+        expect(find.text('Foto'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'entries with every occurredAt malformed render the same dedicated '
+      'empty state (icon + CTA), not a blank list (I/O matrix, spec-4-3)',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(
+            right(
+              EntriesPage(
+                items: [_entry('e1', 'not-a-date')],
+                nextCursor: null,
+              ),
+            ),
+          );
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Nenhum registro ainda'), findsOneWidget);
+        expect(find.byIcon(Icons.menu_book_outlined), findsOneWidget);
+        expect(find.text('Criar primeiro registro'), findsOneWidget);
       },
     );
 
@@ -246,7 +439,7 @@ void main() {
         await tester.tap(find.text('Tentar novamente'));
         await tester.pumpAndSettle();
 
-        expect(find.text('Nenhum registro ainda.'), findsOneWidget);
+        expect(find.text('Nenhum registro ainda'), findsOneWidget);
         expect(fakeRepository.listCallCount, 2);
       },
     );
@@ -503,6 +696,47 @@ void main() {
         expect(tester.takeException(), isNull);
         expect(find.text('Sessão expirada'), findsOneWidget);
         expect(controller.offset, scrollOffsetBeforeExpiry);
+      },
+    );
+  });
+
+  group('retry wiring (spec-4-2, screen-level — Review finding, round 2)', () {
+    testWidgets(
+      "tapping a rendered retryable error SyncBadge calls the cubit's "
+      'retry() with that write\'s own tempId, exercising the full chain '
+      'from the real screen widget tree down to the tracker',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+        final fakeTracker = _ControllablePendingEntryWriteTracker();
+        final cubit = MeusRegistrosCubit(fakeRepository, fakeTracker);
+        addTearDown(cubit.close);
+
+        await tester.pumpWidget(
+          MaterialApp(home: MeusRegistrosScreen(cubit: cubit)),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Nenhum registro ainda'), findsOneWidget);
+
+        fakeTracker.emitPendingWrites([
+          PendingEntryWrite(
+            tempId: 'temp-1',
+            content: 'failed content',
+            source: EntrySource.manual,
+            mediaDurationSeconds: null,
+            startedAt: DateTime(2026, 1, 1),
+            status: const PendingEntryWriteFailed(
+              failure: Failure.networkTimeout(message: 'Timed out'),
+            ),
+          ),
+        ]);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(SyncBadge), findsOneWidget);
+        await tester.tap(find.byType(SyncBadge));
+        await tester.pumpAndSettle();
+
+        expect(fakeTracker.retryCalls, ['temp-1']);
       },
     );
   });

@@ -20,8 +20,10 @@ class MeusRegistrosLoading extends MeusRegistrosState {
   const MeusRegistrosLoading();
 }
 
-/// The first page resolved with zero entries (Boundaries: "Zero entries ->
-/// Plain 'no entries yet' text", no polished CTA — that's story 4.3).
+/// The first page resolved with zero entries — `MeusRegistrosScreen`'s
+/// `_EmptyState` renders the prototype's Tela 4 — Vazio dedicated empty
+/// state (icon, copy, "Criar primeiro registro" CTA opening the Insertion
+/// Modal) for this (story 4.3).
 class MeusRegistrosEmpty extends MeusRegistrosState {
   const MeusRegistrosEmpty();
 }
@@ -94,8 +96,14 @@ class MeusRegistrosLoaded extends MeusRegistrosState {
   /// (via the same [groupEntriesByDate] every confirmed entry already
   /// uses) naturally lands a pending write's own card at the top of
   /// "Hoje", with no separate rendering path needed in the screen itself.
+  ///
+  /// [pendingWrites] itself holds insertion order (oldest-started first,
+  /// `PendingEntryWriteTrackerImpl`'s own `Map` — Review finding, round 2):
+  /// reversed here so two writes pending at once still land newest-first,
+  /// matching [groupEntriesByDate]'s documented "callers always pass
+  /// entries already newest-first" contract.
   List<Entry> get _displayEntries => [
-    for (final pending in pendingWrites) _placeholderEntryFor(pending),
+    for (final pending in pendingWrites.reversed) _placeholderEntryFor(pending),
     ...entries,
   ];
 

@@ -3,7 +3,7 @@ title: 'Story 4.2: Per-Entry Sync Badge'
 type: 'feature'
 created: '2026-11-05'
 status: 'done'
-review_loop_iteration: 1
+review_loop_iteration: 2
 context: []
 baseline_commit: '5b3ba873db3a254e34ad44613d085dcdb0fb4f2e'
 ---
@@ -78,6 +78,16 @@ baseline_commit: '5b3ba873db3a254e34ad44613d085dcdb0fb4f2e'
 - [x] Given a failed retryable write, when the badge is tapped, then the same write replays and the badge updates on the new result.
 - [x] Given a failed non-retryable write, when the badge is tapped, then an inline explanation shows and no network call fires.
 - [x] Given a failed write, when the user retries by saving again from the same still-open capture modal (not via the badge), then the superseded failed record is dropped — no duplicate ghost card remains (`pending_entry_write_tracker_test.dart`'s "spec amendment" group).
+
+### Review Findings
+
+- [x] [Review][Patch] `tracker.retry()` has no internal `retryable` guard — invariant enforced only in `SyncBadge`'s `onTap`; add the same check inside `PendingEntryWriteTrackerImpl.retry()` for defense-in-depth [pending_entry_write_tracker.dart:180] — fixed: `retry()` now checks `failedStatus.failure.retryable` itself before replaying.
+- [x] [Review][Patch] No widget test exercises the full chain: tap a rendered error `SyncBadge` inside a real `MeusRegistrosScreen` → `MeusRegistrosCubit.retry(entry.id)`; a regression in `onRetryTap: (entry) => widget.cubit.retry(entry.id)` would ship undetected [meus_registros_screen.dart:109] — fixed: added `meus_registros_screen_test.dart`'s new "retry wiring (spec-4-2, screen-level)" group with a controllable tracker fake.
+- [x] [Review][Patch] `loadFirstPage()`'s failure branch ignores `_pendingWrites` — unlike the success branch, it emits `MeusRegistrosError` unconditionally, hiding a pending/failed write's placeholder card until the next `pendingWrites` emission [meus_registros_cubit.dart:147] — fixed: the failure branch now mirrors the success branch's `_pendingWrites` overlay.
+- [x] [Review][Patch] `EntryRecordCard`/`SyncBadge` built with no `key:` in the per-day `for` loop — when list order changes (placeholder → confirmed entry swap), Flutter can reuse `SyncBadge`'s local `_explanationExpanded` state across a different card at the same position [meus_registros_screen.dart:277] — fixed: added `key: ValueKey(entry.id)`.
+- [x] [Review][Patch] `_displayEntries` prepends `pendingWrites` oldest-first among themselves, inverted relative to the newest-first convention `groupEntriesByDate` documents its callers must follow; with 2+ concurrent pending writes the older one renders above the newer one [meus_registros_state.dart:980] — fixed: iterates `pendingWrites.reversed`.
+- [x] [Review][Patch] `_dedupedById` mutates the caller-supplied `seenIds` set in place when one is passed — harmless today (the one caller discards it afterward) but an undocumented side effect [meus_registros_cubit.dart:259] — fixed: now builds a local copy (`{...?seenIds}`) instead of reusing the caller's set.
+- [x] [Review][Defer] `create()` drops *any* existing failed pending write regardless of lineage (not scoped to the same modal session), silently discarding an unrelated previously-failed write's content with no replay possible — deferred, pre-existing: this is the literal rule the Spec Change Log above already added deliberately in round 1 ("create() drops any existing failed record before registering a new inFlight one"), but that entry's own rationale talks only about the same still-open modal retrying; the shipped rule is broader. Worth revisiting if product wants lineage-scoped dropping instead, but that's a spec renegotiation, not a code fix. [pending_entry_write_tracker.dart:156-158]
 
 ## Spec Change Log
 

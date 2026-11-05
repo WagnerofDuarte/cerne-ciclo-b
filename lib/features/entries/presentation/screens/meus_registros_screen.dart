@@ -4,7 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/design_tokens.dart';
+import '../../../../core/di/injection_container.dart';
+import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/back_arrow_header.dart';
+import '../../../capture/presentation/cubit/audio_entry_cubit.dart';
+import '../../../capture/presentation/cubit/photo_entry_cubit.dart';
+import '../../../capture/presentation/cubit/text_entry_cubit.dart';
+import '../../../capture/presentation/widgets/insertion_modal.dart';
 import '../../domain/entities/entry.dart';
 import '../../domain/entities/entry_date_group.dart';
 import '../../domain/entities/sync_badge_state.dart';
@@ -143,13 +149,38 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Boundaries: "polished empty-state CTA (4.3) — plain 'no entries yet'
-    // text only" this story.
+    // Tela 4 — Vazio: icon + copy + a primary CTA that opens the same
+    // Insertion Modal the Home/Chat "+" FAB opens (`placeholder_screens.
+    // dart`'s own call shape, mirrored verbatim) — spec-4-3.
     return Center(
-      child: Text(
-        'Nenhum registro ainda.',
-        style: DesignTokens.textBodyMd.copyWith(
-          color: DesignTokens.colorTextSecondary,
+      child: Padding(
+        padding: DesignTokens.screenPadding,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.menu_book_outlined,
+              size: DesignTokens.entriesEmptyStateIconSize,
+              color: DesignTokens.colorBorder,
+            ),
+            const SizedBox(height: DesignTokens.spacingMd),
+            Text(
+              'Nenhum registro ainda',
+              style: DesignTokens.textBodyMd.copyWith(
+                color: DesignTokens.colorTextSecondary,
+              ),
+            ),
+            const SizedBox(height: DesignTokens.spacingMd),
+            AppButton(
+              label: 'Criar primeiro registro',
+              onPressed: () => InsertionModal.show(
+                context,
+                cubit: sl<TextEntryCubit>(),
+                audioCubit: sl<AudioEntryCubit>(),
+                photoCubit: sl<PhotoEntryCubit>(),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -275,6 +306,7 @@ class _DateGroupSection extends StatelessWidget {
           const SizedBox(height: DesignTokens.spacingSm),
           for (final entry in group.entries) ...[
             EntryRecordCard(
+              key: ValueKey(entry.id),
               entry: entry,
               badgeState: badgeFor(entry),
               onRetryTap: () => onRetryTap(entry),
