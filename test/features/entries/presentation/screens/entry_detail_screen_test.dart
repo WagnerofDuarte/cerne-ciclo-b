@@ -63,6 +63,10 @@ class _FakeEntriesRepository implements EntriesRepository {
     }
     return _results.removeAt(0);
   }
+
+  @override
+  Future<Either<Failure, List<Entry>>> search(String query) async =>
+      throw UnimplementedError('not expected to be called');
 }
 
 class _FakePendingEntryWriteTracker implements PendingEntryWriteTracker {

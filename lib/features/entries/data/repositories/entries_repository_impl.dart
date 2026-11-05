@@ -121,6 +121,40 @@ class EntriesRepositoryImpl implements EntriesRepository {
     );
   }
 
+  @override
+  Future<Either<Failure, List<Entry>>> search(String query) async {
+    final result = await _remoteDataSource.search(query);
+    return result.match(
+      (failure) async {
+        // Boundaries/AD-9: no cache fallback for search, unlike
+        // list()/getById() — every Failure (including
+        // networkOffline/networkTimeout) propagates as Left, unmapped.
+        return left(failure);
+      },
+      (dtos) async {
+        // Review finding: de-duplicated by id first (first-occurrence-wins,
+        // same semantics as `MeusRegistrosCubit._dedupedById`'s own
+        // trust-but-verify convention for server data) — so the `putAll`
+        // below and the returned list stay consistent, and
+        // `_SearchResults`' `ListView.builder` (keyed by `ValueKey(entry.
+        // id)`) never sees a duplicate key even if the backend ever
+        // violated its own no-duplicate-ids invariant.
+        final dedupedDtos = _dedupedById(dtos);
+        // Same RNF09 rationale as create()/list()/getById()'s own
+        // Hive-write guards — a thrown Hive/disk exception must never
+        // escape unmapped.
+        try {
+          await _entriesBox.putAll({
+            for (final dto in dedupedDtos) dto.id: dto.toJson(),
+          });
+        } catch (error) {
+          return left(Failure.malformedResponse(message: error.toString()));
+        }
+        return right(dedupedDtos.map(_toEntry).toList());
+      },
+    );
+  }
+
   /// [getById]'s own offline/timeout fallback (Boundaries): a cache hit
   /// returns `Right` from the cached `EntryDto`; a cache miss propagates
   /// [originalFailure] unchanged — "no synthesized not-found" — rather than
@@ -183,4 +217,18 @@ class EntriesRepositoryImpl implements EntriesRepository {
     updatedAt: dto.updatedAt,
     mediaDurationSeconds: dto.mediaDurationSeconds,
   );
+}
+
+/// [search]'s own trust-but-verify guard (Review finding) — first-
+/// occurrence-wins, same semantics as `MeusRegistrosCubit._dedupedById`'s
+/// own defensive de-duplication of server data, applied here to the raw
+/// [EntryDto] list before it's ever persisted or mapped, so both the Hive
+/// box write and the returned `List<Entry>` stay duplicate-free and
+/// consistent with each other.
+List<EntryDto> _dedupedById(List<EntryDto> dtos) {
+  final seen = <String>{};
+  return [
+    for (final dto in dtos)
+      if (seen.add(dto.id)) dto,
+  ];
 }

@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/design_tokens.dart';
 import '../../../../core/di/injection_container.dart';
 import '../../../../core/navigation/app_route_paths.dart';
+import '../../../../core/resource.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/back_arrow_header.dart';
 import '../../../capture/presentation/cubit/audio_entry_cubit.dart';
@@ -16,8 +17,10 @@ import '../../../capture/presentation/widgets/insertion_modal.dart';
 import '../../domain/entities/entry.dart';
 import '../../domain/entities/entry_date_group.dart';
 import '../../domain/entities/sync_badge_state.dart';
+import '../cubit/entries_search_cubit.dart';
 import '../cubit/meus_registros_cubit.dart';
 import '../cubit/meus_registros_state.dart';
+import '../widgets/entries_search_bar.dart';
 import '../widgets/entry_record_card.dart';
 import '../widgets/entry_skeleton_card.dart';
 
@@ -37,9 +40,18 @@ import '../widgets/entry_skeleton_card.dart';
 /// and [cubit]'s state survive that overlay appearing with no extra code
 /// needed here (Acceptance Criteria's third bullet).
 class MeusRegistrosScreen extends StatefulWidget {
-  const MeusRegistrosScreen({required this.cubit, super.key});
+  const MeusRegistrosScreen({
+    required this.cubit,
+    required this.searchCubit,
+    super.key,
+  });
 
   final MeusRegistrosCubit cubit;
+
+  /// spec-5-1 — the permanently-docked `EntriesSearchBar`'s own cubit, a DI
+  /// `lazySingleton` like [cubit] (Code Map); this `StatefulWidget` never
+  /// closes it either, same rationale [cubit]'s own doc above gives.
+  final EntriesSearchCubit searchCubit;
 
   @override
   State<MeusRegistrosScreen> createState() => _MeusRegistrosScreenState();
@@ -53,6 +65,16 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
   final ScrollController _scrollController = ScrollController();
   Timer? _skeletonTimer;
   bool _showSkeleton = false;
+
+  /// spec-5-1 — the search surface's own 300ms skeleton threshold,
+  /// mirroring [_skeletonTimer]/[_showSkeleton] above but keyed off
+  /// `EntriesSearchCubit`'s `ResourceLoading` rather than
+  /// `MeusRegistrosLoading`: started fresh on every transition into
+  /// `ResourceLoading` (`_onSearchStateChanged` below), since unlike the
+  /// first-load timer above (started once, in [initState]) a search can
+  /// enter/leave loading many times across one screen visit.
+  Timer? _searchSkeletonTimer;
+  bool _showSearchSkeleton = false;
 
   /// Review fix (round 2, spec-4-4) — guards `_openDetail` against a rapid
   /// double-tap on a card pushing `/meus-registros/:id` twice (stacking two
@@ -75,10 +97,35 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
   @override
   void dispose() {
     _skeletonTimer?.cancel();
+    _searchSkeletonTimer?.cancel();
     _scrollController
       ..removeListener(_onScroll)
       ..dispose();
     super.dispose();
+  }
+
+  /// `BlocConsumer<EntriesSearchCubit, ...>`'s own listener (below) — starts
+  /// [_searchSkeletonTimer] fresh on every transition into
+  /// `ResourceLoading`, mirroring [initState]'s one-shot [_skeletonTimer]
+  /// but re-armed per search rather than once per screen visit; any other
+  /// state (including a fast resolve before the 300ms threshold, RNF01)
+  /// cancels it and resets [_showSearchSkeleton].
+  void _onSearchStateChanged(
+    BuildContext context,
+    Resource<List<Entry>> state,
+  ) {
+    _searchSkeletonTimer?.cancel();
+    if (state is ResourceLoading<List<Entry>>) {
+      _searchSkeletonTimer = Timer(_skeletonThreshold, () {
+        if (mounted) {
+          setState(() => _showSearchSkeleton = true);
+        }
+      });
+      return;
+    }
+    if (_showSearchSkeleton) {
+      setState(() => _showSearchSkeleton = false);
+    }
   }
 
   void _openDetail(Entry entry) {
@@ -116,36 +163,170 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider.value(
-      value: widget.cubit,
+    return MultiBlocProvider(
+      providers: [
+        BlocProvider.value(value: widget.cubit),
+        BlocProvider.value(value: widget.searchCubit),
+      ],
       child: Scaffold(
         backgroundColor: DesignTokens.colorSurfaceBg,
         body: Column(
           children: [
             const BackArrowHeader(title: 'Meus Registros'),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                DesignTokens.spacingMd,
+                DesignTokens.spacingMd,
+                DesignTokens.spacingMd,
+                0,
+              ),
+              child: EntriesSearchBar(onChanged: widget.searchCubit.onQueryChanged),
+            ),
             Expanded(
-              child: BlocBuilder<MeusRegistrosCubit, MeusRegistrosState>(
-                builder: (context, state) => switch (state) {
-                  MeusRegistrosLoading() =>
-                    _showSkeleton
-                        ? const _SkeletonList()
-                        : const SizedBox.shrink(),
-                  MeusRegistrosEmpty() => const _EmptyState(),
-                  MeusRegistrosError(message: final message) => _ErrorState(
-                    message: message,
-                    onRetry: widget.cubit.loadFirstPage,
-                  ),
-                  MeusRegistrosLoaded() => _EntryList(
-                    state: state,
-                    scrollController: _scrollController,
-                    onRetryLoadMore: widget.cubit.retryLoadMore,
-                    onRetryTap: (entry) => widget.cubit.retry(entry.id),
+              child: BlocConsumer<EntriesSearchCubit, Resource<List<Entry>>>(
+                listener: _onSearchStateChanged,
+                builder: (context, searchState) {
+                  // Boundaries: "an empty query reverts to the normal
+                  // timeline" — `ResourceIdle` is the only variant that
+                  // falls through to the pre-existing
+                  // `MeusRegistrosCubit`-driven timeline below; every other
+                  // variant renders the search surface instead.
+                  if (searchState is ResourceIdle<List<Entry>>) {
+                    return BlocBuilder<MeusRegistrosCubit, MeusRegistrosState>(
+                      builder: (context, state) => switch (state) {
+                        MeusRegistrosLoading() =>
+                          _showSkeleton
+                              ? const _SkeletonList()
+                              : const SizedBox.shrink(),
+                        MeusRegistrosEmpty() => const _EmptyState(),
+                        MeusRegistrosError(message: final message) =>
+                          _ErrorState(
+                            message: message,
+                            onRetry: widget.cubit.loadFirstPage,
+                          ),
+                        MeusRegistrosLoaded() => _EntryList(
+                          state: state,
+                          scrollController: _scrollController,
+                          onRetryLoadMore: widget.cubit.retryLoadMore,
+                          onRetryTap: (entry) => widget.cubit.retry(entry.id),
+                          onCardTap: _openDetail,
+                        ),
+                      },
+                    );
+                  }
+                  return _SearchResults(
+                    state: searchState,
+                    showSkeleton: _showSearchSkeleton,
                     onCardTap: _openDetail,
-                  ),
+                  );
                 },
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// spec-5-1's own search-results surface — `EntriesSearchCubit`'s
+/// `Resource<List<Entry>>` rendered in place of the timeline whenever
+/// [state] isn't `ResourceIdle` (the screen's own `build` filters that
+/// variant out before ever reaching here). Every result here is always a
+/// server-confirmed [Entry] (`EntriesRepository.search()`'s own contract —
+/// no cache fallback, no pending-write overlay), so every card's badge is
+/// unconditionally [SyncBadgeState.synchronized] — never recomputed via
+/// `deriveSyncBadgeState()` (Never: "any screen recomputing badge state
+/// inline" extends here too, there is simply no pending/offline state for
+/// a search result to derive).
+class _SearchResults extends StatelessWidget {
+  const _SearchResults({
+    required this.state,
+    required this.showSkeleton,
+    required this.onCardTap,
+  });
+
+  final Resource<List<Entry>> state;
+  final bool showSkeleton;
+  final void Function(Entry entry) onCardTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return switch (state) {
+      ResourceIdle<List<Entry>>() =>
+        // Unreachable — `MeusRegistrosScreen.build` never routes
+        // `ResourceIdle` here — kept only so this switch stays exhaustive.
+        const SizedBox.shrink(),
+      ResourceLoading<List<Entry>>() =>
+        showSkeleton ? const _SkeletonList() : const SizedBox.shrink(),
+      ResourceError<List<Entry>>(failure: final failure) =>
+        _SearchErrorState(message: failure.message),
+      ResourceData<List<Entry>>(data: final entries) => entries.isEmpty
+          ? const _EmptySearchResults()
+          : ListView.builder(
+              padding: DesignTokens.screenPadding,
+              itemCount: entries.length,
+              itemBuilder: (context, index) {
+                final entry = entries[index];
+                return Padding(
+                  key: ValueKey(entry.id),
+                  padding: const EdgeInsets.only(
+                    bottom: DesignTokens.spacingSm,
+                  ),
+                  child: EntryRecordCard(
+                    entry: entry,
+                    badgeState: const SyncBadgeState.synchronized(),
+                    onTap: () => onCardTap(entry),
+                  ),
+                );
+              },
+            ),
+    };
+  }
+}
+
+/// `ResourceError<List<Entry>>`'s own rendering (spec-5-1 I/O matrix:
+/// "ResourceError(networkOffline) rendered") — just the message, unlike
+/// [_ErrorState] above: there is no retry affordance named for search
+/// anywhere in Boundaries/the I/O matrix, since the user's own next
+/// keystroke (re-debounced through `EntriesSearchCubit`) is what retries,
+/// never an explicit button.
+class _SearchErrorState extends StatelessWidget {
+  const _SearchErrorState({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: DesignTokens.screenPadding,
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+          style: DesignTokens.textBodyMd.copyWith(
+            color: DesignTokens.colorTextPrimary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptySearchResults extends StatelessWidget {
+  const _EmptySearchResults();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: DesignTokens.screenPadding,
+        child: Text(
+          'Nenhum resultado encontrado',
+          textAlign: TextAlign.center,
+          style: DesignTokens.textBodyMd.copyWith(
+            color: DesignTokens.colorTextSecondary,
+          ),
         ),
       ),
     );

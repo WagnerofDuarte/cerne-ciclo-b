@@ -25,8 +25,10 @@ import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
+import 'package:cerne/features/entries/presentation/cubit/entries_search_cubit.dart';
 import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
 import 'package:cerne/features/entries/presentation/screens/meus_registros_screen.dart';
+import 'package:cerne/features/entries/presentation/widgets/entries_search_bar.dart';
 import 'package:cerne/features/entries/presentation/widgets/entry_record_card.dart';
 import 'package:cerne/features/entries/presentation/widgets/entry_skeleton_card.dart';
 import 'package:cerne/features/entries/presentation/widgets/sync_badge.dart';
@@ -79,8 +81,26 @@ class _FakeEntriesRepository implements EntriesRepository {
   int listCallCount = 0;
   Completer<void>? firstCallGate;
 
+  /// spec-5-1 — queued `search()` results, same per-call-queue convention
+  /// as [_listResults] above. This file's own tests never queue one
+  /// unless they specifically exercise the new docked search bar.
+  final List<Either<Failure, List<Entry>>> _searchResults = [];
+  final List<String> searchCalls = [];
+
+  /// spec-5-1 — same [firstCallGate] rationale as `list()`'s own gate,
+  /// applied to `search()` instead: lets a test hold the search call
+  /// unresolved to observe `_searchSkeletonTimer`'s own 300ms threshold
+  /// (Matrix: "Slow request"). Every queued test only ever makes one
+  /// `search()` call, so gating unconditionally (unlike [firstCallGate]'s
+  /// call-count check) is sufficient.
+  Completer<void>? searchGate;
+
   void queueList(Either<Failure, EntriesPage> result) {
     _listResults.add(result);
+  }
+
+  void queueSearch(Either<Failure, List<Entry>> result) {
+    _searchResults.add(result);
   }
 
   @override
@@ -108,6 +128,20 @@ class _FakeEntriesRepository implements EntriesRepository {
   @override
   Future<Either<Failure, Entry>> getById(String id) async =>
       throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, List<Entry>>> search(String query) async {
+    searchCalls.add(query);
+    if (searchGate != null) {
+      await searchGate!.future;
+    }
+    if (_searchResults.isEmpty) {
+      throw StateError(
+        'no queued search() result for call #${searchCalls.length}',
+      );
+    }
+    return _searchResults.removeAt(0);
+  }
 }
 
 /// A trivial `PendingEntryWriteTracker` fake — this file's own tests cover
@@ -255,6 +289,18 @@ class _UnusedMediaRepository implements MediaRepository {
   }) async => throw UnimplementedError('not expected to be called');
 }
 
+/// spec-5-1 — every `MeusRegistrosScreen` construction in this file now
+/// also needs its own `EntriesSearchCubit`; this suite's own tests never
+/// exercise the search surface itself (that's `entries_search_cubit_test.
+/// dart`'s/the new e2e test's job), so a throwaway instance over the same
+/// fake repository already in scope is enough to satisfy the screen's
+/// required constructor param.
+EntriesSearchCubit _searchCubitFor(EntriesRepository repository) {
+  final searchCubit = EntriesSearchCubit(repository);
+  addTearDown(searchCubit.close);
+  return searchCubit;
+}
+
 Future<MeusRegistrosCubit> _pumpScreen(
   WidgetTester tester,
   _FakeEntriesRepository fakeRepository,
@@ -264,7 +310,14 @@ Future<MeusRegistrosCubit> _pumpScreen(
     _FakePendingEntryWriteTracker(),
   );
   addTearDown(cubit.close);
-  await tester.pumpWidget(MaterialApp(home: MeusRegistrosScreen(cubit: cubit)));
+  await tester.pumpWidget(
+    MaterialApp(
+      home: MeusRegistrosScreen(
+        cubit: cubit,
+        searchCubit: _searchCubitFor(fakeRepository),
+      ),
+    ),
+  );
   return cubit;
 }
 
@@ -535,7 +588,10 @@ void main() {
             ),
             GoRoute(
               path: '/meus-registros',
-              builder: (context, state) => MeusRegistrosScreen(cubit: cubit),
+              builder: (context, state) => MeusRegistrosScreen(
+                cubit: cubit,
+                searchCubit: _searchCubitFor(fakeRepository),
+              ),
             ),
           ],
         );
@@ -679,7 +735,10 @@ void main() {
               child: Navigator(
                 key: navigatorKey,
                 onGenerateRoute: (settings) => MaterialPageRoute<void>(
-                  builder: (context) => MeusRegistrosScreen(cubit: cubit),
+                  builder: (context) => MeusRegistrosScreen(
+                    cubit: cubit,
+                    searchCubit: _searchCubitFor(fakeRepository),
+                  ),
                 ),
               ),
             ),
@@ -728,8 +787,10 @@ void main() {
           routes: [
             GoRoute(
               path: '/meus-registros',
-              builder: (context, state) =>
-                  MeusRegistrosScreen(cubit: cubit),
+              builder: (context, state) => MeusRegistrosScreen(
+                cubit: cubit,
+                searchCubit: _searchCubitFor(fakeRepository),
+              ),
             ),
             GoRoute(
               path: '/meus-registros/:id',
@@ -774,8 +835,10 @@ void main() {
           routes: [
             GoRoute(
               path: '/meus-registros',
-              builder: (context, state) =>
-                  MeusRegistrosScreen(cubit: cubit),
+              builder: (context, state) => MeusRegistrosScreen(
+                cubit: cubit,
+                searchCubit: _searchCubitFor(fakeRepository),
+              ),
             ),
             GoRoute(
               path: '/meus-registros/:id',
@@ -815,7 +878,12 @@ void main() {
         addTearDown(cubit.close);
 
         await tester.pumpWidget(
-          MaterialApp(home: MeusRegistrosScreen(cubit: cubit)),
+          MaterialApp(
+            home: MeusRegistrosScreen(
+              cubit: cubit,
+              searchCubit: _searchCubitFor(fakeRepository),
+            ),
+          ),
         );
         await tester.pumpAndSettle();
         expect(find.text('Nenhum registro ainda'), findsOneWidget);
@@ -839,6 +907,170 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(fakeTracker.retryCalls, ['temp-1']);
+      },
+    );
+  });
+
+  group('spec-5-1: docked search bar', () {
+    testWidgets(
+      'Acceptance Criteria: the search bar renders above the timeline on '
+      'first load',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(EntriesSearchBar), findsOneWidget);
+        expect(find.text('Nenhum registro ainda'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'typing a query shows the search results in place of the timeline, '
+      ' 300ms after the debounce window',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(
+            right(
+              EntriesPage(
+                items: [_entry('timeline-1', '2026-01-01T10:00:00')],
+                nextCursor: null,
+              ),
+            ),
+          )
+          ..queueSearch(
+            right([_entry('search-1', '2026-01-01T10:00:00')]),
+          );
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+        expect(find.textContaining('content-timeline-1'), findsOneWidget);
+
+        await tester.enterText(find.byType(TextField), 'ansiedade');
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+
+        expect(fakeRepository.searchCalls, ['ansiedade']);
+        expect(find.textContaining('content-search-1'), findsOneWidget);
+        expect(find.textContaining('content-timeline-1'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'I/O matrix: "Query cleared" — clearing the field back to empty '
+      'reverts to the normal timeline, with the search results gone',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(
+            right(
+              EntriesPage(
+                items: [_entry('timeline-1', '2026-01-01T10:00:00')],
+                nextCursor: null,
+              ),
+            ),
+          )
+          ..queueSearch(
+            right([_entry('search-1', '2026-01-01T10:00:00')]),
+          );
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField), 'ansiedade');
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('content-search-1'), findsOneWidget);
+
+        await tester.enterText(find.byType(TextField), '');
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('content-timeline-1'), findsOneWidget);
+        expect(find.textContaining('content-search-1'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'I/O matrix: "Offline" — a search Failure.networkOffline renders its '
+      'message, never a cache fallback',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..queueSearch(
+            left(const Failure.networkOffline(message: 'Sem conexão')),
+          );
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField), 'ansiedade');
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Sem conexão'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'I/O matrix: "Slow request" — the search skeleton stays blank below '
+      'the 300ms threshold while a search is still in flight',
+      (tester) async {
+        final gate = Completer<void>();
+        addTearDown(() {
+          if (!gate.isCompleted) {
+            gate.complete();
+          }
+        });
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..searchGate = gate
+          ..queueSearch(right([_entry('search-1', '2026-01-01T10:00:00')]));
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField), 'ansiedade');
+        // Debounce window elapses — EntriesSearchCubit emits
+        // ResourceLoading and calls the gated search(), starting the
+        // screen's own _searchSkeletonTimer.
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.pump(const Duration(milliseconds: 299));
+
+        expect(find.byType(EntrySkeletonCard), findsNothing);
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+
+        gate.complete();
+        await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets(
+      'I/O matrix: "Slow request" — the search skeleton shows once past '
+      'the 300ms threshold while still in flight',
+      (tester) async {
+        final gate = Completer<void>();
+        addTearDown(() {
+          if (!gate.isCompleted) {
+            gate.complete();
+          }
+        });
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..searchGate = gate
+          ..queueSearch(right([_entry('search-1', '2026-01-01T10:00:00')]));
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField), 'ansiedade');
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.pump(const Duration(milliseconds: 301));
+
+        expect(find.byType(EntrySkeletonCard), findsWidgets);
+
+        gate.complete();
+        await tester.pumpAndSettle();
       },
     );
   });

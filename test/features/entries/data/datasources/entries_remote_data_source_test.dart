@@ -453,4 +453,154 @@ void main() {
       );
     });
   });
+
+  // spec-5-1 — `EntriesRepository.search`'s own data-source call,
+  // `entries-search` with exactly one `q` query parameter (no
+  // `limit`/`cursor`, Boundaries).
+  group('EntriesRemoteDataSource.search', () {
+    test(
+      'calls GET entries-search with exactly {q: query} as queryParameters '
+      '— never limit/cursor',
+      () async {
+        when(
+          () => mockApiClient.get(
+            'entries-search',
+            queryParameters: any(named: 'queryParameters'),
+          ),
+        ).thenAnswer((_) async => right(_listBody()));
+
+        await dataSource.search('ansiedade');
+
+        final captured = verify(
+          () => mockApiClient.get(
+            'entries-search',
+            queryParameters: captureAny(named: 'queryParameters'),
+          ),
+        ).captured;
+        expect(captured.single, {'q': 'ansiedade'});
+      },
+    );
+
+    test('decodes every item in data via the same EntryDto.fromJson list() '
+        'already uses', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: any(named: 'queryParameters'),
+        ),
+      ).thenAnswer(
+        (_) async => right(_listBody(ids: ['e1', 'e2'])),
+      );
+
+      final result = await dataSource.search('ansiedade');
+
+      expect(result.isRight(), isTrue);
+      result.match((_) => fail('expected Right'), (items) {
+        expect(items.map((e) => e.id), ['e1', 'e2']);
+      });
+    });
+
+    test('an empty data array decodes to an empty list', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: any(named: 'queryParameters'),
+        ),
+      ).thenAnswer((_) async => right(_listBody(ids: const [])));
+
+      final result = await dataSource.search('nada encontrado');
+
+      result.match((_) => fail('expected Right'), (items) {
+        expect(items, isEmpty);
+      });
+    });
+
+    test(
+      'a superset response (similarity/mode fields) is simply ignored, '
+      'same as list()\'s/get()\'s own superset handling',
+      () async {
+        when(
+          () => mockApiClient.get(
+            'entries-search',
+            queryParameters: any(named: 'queryParameters'),
+          ),
+        ).thenAnswer(
+          (_) async => right({
+            'data': [
+              {..._entryJson('e1'), 'similarity': 0.87, 'mode': 'semantic'},
+            ],
+          }),
+        );
+
+        final result = await dataSource.search('ansiedade');
+
+        expect(result.isRight(), isTrue);
+        result.match((_) => fail('expected Right'), (items) {
+          expect(items.single.id, 'e1');
+        });
+      },
+    );
+
+    test('a malformed 200 body maps to Left(malformedResponse), never '
+        'throws (RNF09)', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: any(named: 'queryParameters'),
+        ),
+      ).thenAnswer((_) async => right({'unexpected': 'shape'}));
+
+      final result = await dataSource.search('ansiedade');
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
+
+    test('networkOffline from ApiClient passes straight through as Left, '
+        'unmapped — no cache fallback at this layer either (AD-9)',
+        () async {
+      when(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: any(named: 'queryParameters'),
+        ),
+      ).thenAnswer(
+        (_) async => left(const Failure.networkOffline(message: 'Offline')),
+      );
+
+      final result = await dataSource.search('ansiedade');
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<NetworkOffline>()),
+        (_) => fail('expected Left'),
+      );
+    });
+
+    test(
+      'a backend error code (e.g. authExpired) maps straight through',
+      () async {
+        when(
+          () => mockApiClient.get(
+            'entries-search',
+            queryParameters: any(named: 'queryParameters'),
+          ),
+        ).thenAnswer(
+          (_) async =>
+              left(const Failure.authExpired(message: 'Sessão expirada')),
+        );
+
+        final result = await dataSource.search('ansiedade');
+
+        expect(result.isLeft(), isTrue);
+        result.match(
+          (failure) => expect(failure, isA<AuthExpired>()),
+          (_) => fail('expected Left'),
+        );
+      },
+    );
+  });
 }

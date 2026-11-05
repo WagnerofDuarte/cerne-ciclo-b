@@ -37,12 +37,13 @@ abstract class EntriesRepository {
   /// [create] already uses.
   Future<Either<Failure, EntriesPage>> list({String? cursor, int limit = 20});
 
-  /// spec-4-4 (RF07) — this repository's third and last method (Boundaries:
-  /// "create+read only, forever"). Calls `entries-get` (`ApiClient.get`,
-  /// via `EntriesRemoteDataSource`) with [id] as the one path parameter,
-  /// then persists the fetched entry to the `entries` Hive box (`put`)
-  /// *before* returning `Right` — same "persist then return" ordering
-  /// [create]/[list] already use.
+  /// spec-4-4 (RF07) — calls `entries-get` (`ApiClient.get`, via
+  /// `EntriesRemoteDataSource`) with [id] as the one path parameter, then
+  /// persists the fetched entry to the `entries` Hive box (`put`) *before*
+  /// returning `Right` — same "persist then return" ordering
+  /// [create]/[list] already use. AD-11 keeps this port create+read-only,
+  /// not count-capped — [search] (spec-5-1) added a fourth method without
+  /// contradicting that.
   ///
   /// On [Failure.networkOffline]/[Failure.networkTimeout] specifically,
   /// falls back to `entriesBox.get(id)` if present; a cache miss propagates
@@ -54,4 +55,19 @@ abstract class EntriesRepository {
   /// treatment for both causes) is the caller's own rendering job, never
   /// this repository's.
   Future<Either<Failure, Entry>> getById(String id);
+
+  /// spec-5-1 — calls `entries-search` (`ApiClient.get`, via
+  /// `EntriesRemoteDataSource`) with [query] as the one `q` query
+  /// parameter (no `limit`/`cursor` — Boundaries). [query] is always
+  /// already a non-empty, pre-trimmed string by the time it reaches this
+  /// method — `EntriesSearchCubit` owns that guarantee, never this
+  /// repository.
+  ///
+  /// On success, persists every returned entry to the `entries` Hive box
+  /// (`putAll`) *before* returning `Right` — same "persist then return"
+  /// ordering [list]/[getById] already use. Unlike [list]/[getById], there
+  /// is no offline/timeout cache fallback here (AD-9: no client-side
+  /// vector index) — every [Failure], including
+  /// [Failure.networkOffline], is returned as `Left`, unmapped (RNF09).
+  Future<Either<Failure, List<Entry>>> search(String query);
 }

@@ -23,6 +23,7 @@ import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
+import 'package:cerne/features/entries/presentation/cubit/entries_search_cubit.dart';
 import 'package:cerne/features/entries/presentation/cubit/entry_detail_cubit.dart';
 import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
 import 'package:cerne/features/entries/presentation/screens/entry_detail_screen.dart';
@@ -71,6 +72,10 @@ class _FakeEntriesRepository implements EntriesRepository {
       updatedAt: '2026-01-01T10:00:00Z',
     ),
   );
+
+  @override
+  Future<Either<Failure, List<Entry>>> search(String query) async =>
+      throw UnimplementedError('not expected to be called');
 }
 
 /// A trivial fake `PendingEntryWriteTracker` — this suite never exercises
@@ -247,6 +252,13 @@ void main() {
         _FakeEntriesRepository(),
         _UnusedPendingEntryWriteTracker(),
       ),
+    );
+    // spec-5-1 — `/meus-registros`'s `GoRoute.builder` also resolves `sl<
+    // EntriesSearchCubit>()` now; same trivial-fake rationale as
+    // `MeusRegistrosCubit` above — this suite never exercises a real
+    // search.
+    sl.registerLazySingleton<EntriesSearchCubit>(
+      () => EntriesSearchCubit(_FakeEntriesRepository()),
     );
     // `/meus-registros/:id`'s `GoRoute.builder` resolves `sl<
     // EntryDetailCubit>()` (spec-4-4) — same rationale as `MeusRegistros

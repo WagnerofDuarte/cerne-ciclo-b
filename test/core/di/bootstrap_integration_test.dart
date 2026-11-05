@@ -20,6 +20,7 @@ import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
+import 'package:cerne/features/entries/presentation/cubit/entries_search_cubit.dart';
 import 'package:cerne/features/entries/presentation/cubit/entry_detail_cubit.dart';
 import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
@@ -195,6 +196,11 @@ void main() {
       // rationale as `AccountSettingsCubit` above), not a factory.
       expect(sl.isRegistered<MeusRegistrosCubit>(), isTrue);
       expect(() => sl<MeusRegistrosCubit>(), returnsNormally);
+
+      // spec-5-1 — `EntriesSearchCubit` is also a `lazySingleton`, same
+      // rationale as `MeusRegistrosCubit` directly above.
+      expect(sl.isRegistered<EntriesSearchCubit>(), isTrue);
+      expect(() => sl<EntriesSearchCubit>(), returnsNormally);
 
       // spec-4-4 — `EntryDetailCubit` is a `factory` (reaches into
       // `SessionRepository` too, registered by the `auth` feature) — a

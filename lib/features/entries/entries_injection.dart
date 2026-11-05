@@ -7,6 +7,7 @@ import 'data/datasources/entries_remote_data_source.dart';
 import 'data/repositories/entries_repository_impl.dart';
 import 'domain/repositories/entries_repository.dart';
 import 'domain/services/pending_entry_write_tracker.dart';
+import 'presentation/cubit/entries_search_cubit.dart';
 import 'presentation/cubit/entry_detail_cubit.dart';
 import 'presentation/cubit/meus_registros_cubit.dart';
 
@@ -56,6 +57,15 @@ Future<void> registerEntriesFeature() async {
       sl<EntriesRepository>(),
       sl<PendingEntryWriteTracker>(),
     ),
+    dispose: (cubit) => cubit.close(),
+  );
+
+  // spec-5-1 — `EntriesSearchCubit` is a `lazySingleton` too (Code Map),
+  // mirroring `MeusRegistrosCubit` immediately above: long-lived, so
+  // `dispose:` wires its `close()` into `get_it`'s own reset lifecycle the
+  // same way.
+  sl.registerLazySingleton<EntriesSearchCubit>(
+    () => EntriesSearchCubit(sl<EntriesRepository>()),
     dispose: (cubit) => cubit.close(),
   );
 

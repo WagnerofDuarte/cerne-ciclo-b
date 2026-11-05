@@ -94,4 +94,31 @@ class EntriesRemoteDataSource {
       }
     });
   }
+
+  /// spec-5-1 — calls `entries-search` (`ApiClient.get`) with exactly one
+  /// query parameter, `q` (Boundaries: no `limit`/`cursor`). The response's
+  /// `data` array decodes with the exact same `EntryDto.fromJson` [list]
+  /// already uses — a superset response (`similarity`/`mode` fields the
+  /// Code Map names) is simply ignored by `json_serializable`'s generated
+  /// `fromJson`, same convention [get]'s own superset-response doc already
+  /// gives.
+  Future<Either<Failure, List<EntryDto>>> search(String query) async {
+    final result = await _apiClient.get(
+      'entries-search',
+      queryParameters: {'q': query},
+    );
+    return result.flatMap((json) {
+      try {
+        final data = json['data'] as List<dynamic>;
+        final items = data
+            .map((item) => EntryDto.fromJson(item as Map<String, dynamic>))
+            .toList();
+        return right(items);
+      } catch (error) {
+        // Same client-side-parse-failure rationale as `create()`/`list()`/
+        // `get()` above.
+        return left(Failure.malformedResponse(message: error.toString()));
+      }
+    });
+  }
 }

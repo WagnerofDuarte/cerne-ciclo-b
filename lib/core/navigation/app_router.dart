@@ -11,6 +11,7 @@ import '../../features/auth/domain/entities/session_status.dart';
 import '../../features/auth/domain/repositories/session_repository.dart';
 import '../../features/auth/presentation/cubit/auth_cubit.dart';
 import '../../features/auth/presentation/screens/auth_screen.dart';
+import '../../features/entries/presentation/cubit/entries_search_cubit.dart';
 import '../../features/entries/presentation/cubit/entry_detail_cubit.dart';
 import '../../features/entries/presentation/cubit/meus_registros_cubit.dart';
 import '../../features/entries/presentation/screens/entry_detail_screen.dart';
@@ -108,7 +109,10 @@ GoRouter buildAppRouter({
       GoRoute(
         path: AppRoutePaths.meusRegistros,
         builder: (context, state) =>
-            MeusRegistrosScreen(cubit: sl<MeusRegistrosCubit>()),
+            MeusRegistrosScreen(
+              cubit: sl<MeusRegistrosCubit>(),
+              searchCubit: sl<EntriesSearchCubit>(),
+            ),
         routes: [
           // spec-4-4 (RF07) — `:id` is either a real server id or a
           // still-pending/failed placeholder's synthetic `tempId`

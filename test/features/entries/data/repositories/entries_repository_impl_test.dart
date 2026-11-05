@@ -583,4 +583,146 @@ void main() {
       verifyNever(() => mockBox.get(any()));
     });
   });
+
+  // spec-5-1 — `EntriesRepository`'s fourth method.
+  group('search() — success', () {
+    test('writes every EntryDto.toJson() to the Hive box (putAll), then '
+        'returns Right(List<Entry>) mapped from the dtos, same order the '
+        'data source returned', () async {
+      when(() => mockRemoteDataSource.search('ansiedade')).thenAnswer(
+        (_) async => right([
+          _listDto('e1', '2026-01-02T00:00:00Z'),
+          _listDto('e2', '2026-01-01T00:00:00Z'),
+        ]),
+      );
+
+      final result = await repository.search('ansiedade');
+
+      verify(
+        () => mockBox.putAll({
+          'e1': _listDto('e1', '2026-01-02T00:00:00Z').toJson(),
+          'e2': _listDto('e2', '2026-01-01T00:00:00Z').toJson(),
+        }),
+      ).called(1);
+      expect(result.isRight(), isTrue);
+      result.match((_) => fail('expected Right'), (entries) {
+        expect(entries.map((e) => e.id), ['e1', 'e2']);
+      });
+    });
+
+    test('an empty result decodes to an empty list — putAll still called '
+        'with an empty map, never throws', () async {
+      when(() => mockRemoteDataSource.search('nada')).thenAnswer(
+        (_) async => right(<EntryDto>[]),
+      );
+
+      final result = await repository.search('nada');
+
+      verify(() => mockBox.putAll(<String, Map>{})).called(1);
+      result.match((_) => fail('expected Right'), (entries) {
+        expect(entries, isEmpty);
+      });
+    });
+
+    test('a Hive write failure maps to Left(malformedResponse), never '
+        'throws (RNF09)', () async {
+      when(() => mockRemoteDataSource.search('ansiedade')).thenAnswer(
+        (_) async => right([_listDto('e1', '2026-01-01T00:00:00Z')]),
+      );
+      when(() => mockBox.putAll(any())).thenThrow(Exception('disk full'));
+
+      final result = await repository.search('ansiedade');
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
+
+    test(
+      'Review finding: a duplicate id across the data source\'s own '
+      'response is de-duplicated (first-occurrence-wins) before both the '
+      'putAll write and the returned list — so the two stay consistent '
+      'and a ListView keyed by entry id never sees a repeated key',
+      () async {
+        when(() => mockRemoteDataSource.search('ansiedade')).thenAnswer(
+          (_) async => right([
+            _listDto('e1', '2026-01-02T00:00:00Z'),
+            _listDto('e1', '2026-01-01T00:00:00Z'),
+            _listDto('e2', '2026-01-01T00:00:00Z'),
+          ]),
+        );
+
+        final result = await repository.search('ansiedade');
+
+        verify(
+          () => mockBox.putAll({
+            'e1': _listDto('e1', '2026-01-02T00:00:00Z').toJson(),
+            'e2': _listDto('e2', '2026-01-01T00:00:00Z').toJson(),
+          }),
+        ).called(1);
+        result.match((_) => fail('expected Right'), (entries) {
+          expect(entries.map((e) => e.id), ['e1', 'e2']);
+        });
+      },
+    );
+  });
+
+  group('search() — failure (Boundaries/AD-9: no cache fallback)', () {
+    test('networkOffline propagates as Left, unmapped — unlike list()/'
+        'getById(), there is no offline cache fallback for search',
+        () async {
+      when(() => mockRemoteDataSource.search('ansiedade')).thenAnswer(
+        (_) async =>
+            left(const Failure.networkOffline(message: 'Offline')),
+      );
+
+      final result = await repository.search('ansiedade');
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) {
+          expect(failure, isA<NetworkOffline>());
+          expect(failure.message, 'Offline');
+        },
+        (_) => fail('expected Left'),
+      );
+      verifyNever(() => mockBox.putAll(any()));
+      verifyNever(() => mockBox.get(any()));
+    });
+
+    test('networkTimeout propagates as Left too, same as networkOffline —'
+        ' no fallback either', () async {
+      when(() => mockRemoteDataSource.search('ansiedade')).thenAnswer(
+        (_) async =>
+            left(const Failure.networkTimeout(message: 'Timed out')),
+      );
+
+      final result = await repository.search('ansiedade');
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<NetworkTimeout>()),
+        (_) => fail('expected Left'),
+      );
+      verifyNever(() => mockBox.putAll(any()));
+    });
+
+    test('every other Failure (e.g. authExpired) propagates as Left, '
+        'unmapped too', () async {
+      when(() => mockRemoteDataSource.search('ansiedade')).thenAnswer(
+        (_) async =>
+            left(const Failure.authExpired(message: 'Sessão expirada')),
+      );
+
+      final result = await repository.search('ansiedade');
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<AuthExpired>()),
+        (_) => fail('expected Left'),
+      );
+    });
+  });
 }
