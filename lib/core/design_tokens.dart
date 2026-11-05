@@ -626,4 +626,38 @@ class DesignTokens {
     spacingSm + 4,
     spacingSm + 4,
   );
+
+  // ---------------------------------------------------------------------
+  // Chat (spec-6-1) — `prototype-extract.md` §2.2 names the bubble
+  // colors/corner shapes but, unlike the Insertion Modal/kanban blocks
+  // above, gives no pixel values for the bubble's own sizing — decided
+  // here (Design Notes: "decide and proceed") rather than left hardcoded
+  // in `chat_bubble.dart`/`chat_screen.dart` (RNF08).
+  // ---------------------------------------------------------------------
+
+  /// A chat bubble's own max width, as a fraction of the screen width —
+  /// leaves visible breathing room on the opposite side of every bubble,
+  /// the same proportion common chat UIs (including this prototype's own
+  /// screenshots) use; the fixed 390×844 frame (`prototype-extract.md`
+  /// §1) has no responsive breakpoint of its own to key this off instead.
+  static const double chatBubbleMaxWidthFraction = 0.78;
+
+  /// A chat bubble's own internal padding — `cerne-prototype.html`'s
+  /// bubble blocks use `padding:12px 16px`; vertical isn't on the 4dp
+  /// scale, horizontal already matches [spacingMd].
+  static const EdgeInsets chatBubblePadding = EdgeInsets.symmetric(
+    horizontal: spacingMd,
+    vertical: 12,
+  );
+
+  /// Gap between consecutive chat bubbles in the message list.
+  static const double chatBubbleGap = spacingSm;
+
+  /// The failed-bubble indicator's own padding, replacing the timestamp
+  /// slot — same shape as [pinErrorBandPadding]'s own band, scaled down
+  /// for an inline caption rather than a full-width band.
+  static const EdgeInsets chatFailureIndicatorPadding = EdgeInsets.symmetric(
+    horizontal: spacingSm,
+    vertical: spacingXs,
+  );
 }

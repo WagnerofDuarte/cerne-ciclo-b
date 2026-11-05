@@ -10,13 +10,18 @@ import 'package:path_provider_platform_interface/path_provider_platform_interfac
 
 import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/failure/failure.dart';
-import 'package:cerne/core/navigation/placeholder_screens.dart';
 import 'package:cerne/core/widgets/confirmation_dialog.dart';
 import 'package:cerne/features/account/domain/repositories/account_settings_repository.dart';
 import 'package:cerne/features/auth/domain/entities/authenticated_user.dart';
 import 'package:cerne/features/auth/domain/entities/session_status.dart';
 import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
 import 'package:cerne/features/auth/domain/repositories/session_repository.dart';
+import 'package:cerne/features/chat/domain/entities/chat_message.dart';
+import 'package:cerne/features/chat/domain/entities/chat_session.dart';
+import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
+import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
+import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
+import 'package:cerne/features/chat/presentation/screens/chat_screen.dart';
 import 'package:cerne/features/vault/domain/entities/vault_status.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 import 'package:cerne/features/vault/presentation/screens/vault_lock_screen.dart';
@@ -161,6 +166,47 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
   }
 }
 
+/// A trivial fake — swapped in for the real `ChatRepositoryImpl` (same
+/// rationale as [_FakeVaultRepository]/[_FakeAccountSettingsRepository]
+/// replacing their own real implementations): `ChatScreen`'s own
+/// `initState()` now calls `ChatCubit.init()` unconditionally on every
+/// mount, which would otherwise hit the real `ApiClient`/`Dio` pipeline
+/// (no mock server exists in this suite) the moment any test reaches
+/// Home/Chat. Always resolves one pre-existing session with an empty
+/// history, so `ChatCubit.init()` settles on [ChatReady] without ever
+/// calling [createSession]/[sendMessage] — no test below exercises the
+/// chat feature's own behavior (that's `chat_cubit_test.dart`'s job),
+/// only that the real composition root reaches a real [ChatScreen].
+class _FakeChatRepository implements ChatRepository {
+  @override
+  Future<Either<Failure, List<ChatSession>>> listSessions() async => right([
+    const ChatSession(
+      id: 'fake-session',
+      title: '',
+      persona: ChatPersona.analitico,
+      userMessageCount: 0,
+      lastUserMessageAt: null,
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+    ),
+  ]);
+
+  @override
+  Future<Either<Failure, ChatSession>> createSession() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, List<ChatMessage>>> listMessages(
+    String sessionId,
+  ) async => right(const []);
+
+  @override
+  Stream<Either<Failure, ChatStreamEvent>> sendMessage(
+    String sessionId,
+    String content,
+  ) => const Stream.empty();
+}
+
 /// Proves the one real production composition root — `CerneApp` resolving
 /// `sl<AuthCubit>()`/`sl<SessionRepository>()`/`sl<VaultRepository>()`,
 /// building the one `go_router` (Story 1.6; AD-14's vault gate), and
@@ -232,6 +278,15 @@ void main() {
       () => _FakeAccountSettingsRepository(),
       dispose: (repository) => repository.dispose(),
     );
+    // spec-6-1 — same rationale as the two swaps above: `setupCoreDependencies()`
+    // also registers the real `ChatCubit` (backed by the real
+    // `ChatRepositoryImpl`/`ApiClient`/`Dio` pipeline), swapped for one backed
+    // by `_FakeChatRepository` so reaching Home/Chat never hits the network.
+    sl.unregister<ChatCubit>();
+    sl.registerLazySingleton<ChatCubit>(
+      () => ChatCubit(_FakeChatRepository()),
+      dispose: (cubit) => cubit.close(),
+    );
     // `ConfirmationDialog.isOpen` is a static single-overlay guard (shared
     // across every instance by design, Story 1.5) — reset it so one test's
     // unclosed dialog never leaks into the next.
@@ -292,7 +347,7 @@ void main() {
       await tester.tap(find.text('Entrar'));
       await tester.pumpAndSettle();
 
-      expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
+      expect(find.byType(ChatScreen), findsOneWidget);
       expect(find.text('Bem-vindo de volta'), findsNothing);
     },
   );
@@ -339,7 +394,7 @@ void main() {
           password: 'segredo123',
         ),
       ).called(1);
-      expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
+      expect(find.byType(ChatScreen), findsOneWidget);
       expect(find.text('Crie sua conta'), findsNothing);
     },
   );
@@ -357,7 +412,7 @@ void main() {
     await tester.pumpWidget(const CerneApp());
     await tester.pumpAndSettle();
 
-    expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
+    expect(find.byType(ChatScreen), findsOneWidget);
     expect(find.text('Entrar'), findsNothing);
   });
 
@@ -376,7 +431,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Entrar'), findsOneWidget);
-      expect(find.byType(HomeChatPlaceholderScreen), findsNothing);
+      expect(find.byType(ChatScreen), findsNothing);
     },
   );
 
@@ -421,7 +476,7 @@ void main() {
         fakeSessionRepository.setStatus(SessionStatus.authenticated);
         await tester.pumpAndSettle();
 
-        expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
+        expect(find.byType(ChatScreen), findsOneWidget);
         expect(find.text('Sessão expirada'), findsNothing);
 
         fakeSessionRepository.setStatus(SessionStatus.expired);
@@ -431,7 +486,7 @@ void main() {
         // The underlying screen is still mounted and visible underneath the
         // overlay — it was never navigated away from or rebuilt as a
         // different widget (Boundaries: Story 1.5 behavior unchanged).
-        expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
+        expect(find.byType(ChatScreen), findsOneWidget);
       });
 
       testWidgets(
@@ -597,7 +652,7 @@ void main() {
         // call (the fake defaults `authenticateSucceeds: false`) left it
         // that way.
         expect(find.byType(VaultLockScreen), findsOneWidget);
-        expect(find.byType(HomeChatPlaceholderScreen), findsNothing);
+        expect(find.byType(ChatScreen), findsNothing);
 
         // Simulates the OS biometric prompt succeeding: flips VaultStatus
         // straight to unlocked (same effect `VaultRepositoryImpl.
@@ -607,7 +662,7 @@ void main() {
         fakeVaultRepository.setStatus(VaultStatus.unlocked);
         await tester.pumpAndSettle();
 
-        expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
+        expect(find.byType(ChatScreen), findsOneWidget);
         expect(find.byType(VaultLockScreen), findsNothing);
       },
     );
@@ -654,7 +709,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 350));
         await tester.pumpAndSettle();
 
-        expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
+        expect(find.byType(ChatScreen), findsOneWidget);
         expect(find.byType(VaultLockScreen), findsNothing);
       },
     );

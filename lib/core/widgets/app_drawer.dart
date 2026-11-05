@@ -37,7 +37,7 @@ class _AppDrawerState extends State<AppDrawer> {
       shape: const RoundedRectangleBorder(),
       // No `SafeArea` here — `drawerContentPadding`'s fixed top value (59)
       // already clears the status bar, same convention every other header
-      // in this story uses (`HomeChatPlaceholderScreen`, `_BackArrowHeader`
+      // in this story uses (`ChatScreen`'s own header, `_BackArrowHeader`
       // in `placeholder_screens.dart`); the epic's fixed 390x844 single
       // frame has no responsive/dynamic-inset handling anywhere else, so
       // stacking `SafeArea` on top would double-count that clearance.

@@ -18,6 +18,12 @@ import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
 import 'package:cerne/features/auth/domain/repositories/session_repository.dart';
 import 'package:cerne/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:cerne/features/auth/presentation/screens/auth_screen.dart';
+import 'package:cerne/features/chat/domain/entities/chat_message.dart';
+import 'package:cerne/features/chat/domain/entities/chat_session.dart';
+import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
+import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
+import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
+import 'package:cerne/features/chat/presentation/screens/chat_screen.dart';
 import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
@@ -109,6 +115,44 @@ class _UnusedPendingEntryWriteTracker implements PendingEntryWriteTracker {
 
   @override
   Future<void> dispose() async {}
+}
+
+/// A trivial fake — mirrors `_FakeEntriesRepository` above: this suite's
+/// `/`'s `GoRoute.builder` now resolves `sl<ChatCubit>()` (spec-6-1), so
+/// `ChatScreen`'s own `ChatCubit.init()` needs a repository that resolves
+/// without reaching a real network. `listSessions()` always resolves one
+/// session so `init()` settles on `ChatReady` without ever calling
+/// `createSession()`/`sendMessage()` — this suite never exercises the
+/// chat feature's own behavior (`chat_cubit_test.dart`'s job), only that
+/// the router's own `GoRoute.builder` resolves correctly.
+class _FakeChatRepository implements ChatRepository {
+  @override
+  Future<Either<Failure, List<ChatSession>>> listSessions() async => right([
+    const ChatSession(
+      id: 'fake-session',
+      title: '',
+      persona: ChatPersona.analitico,
+      userMessageCount: 0,
+      lastUserMessageAt: null,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    ),
+  ]);
+
+  @override
+  Future<Either<Failure, ChatSession>> createSession() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, List<ChatMessage>>> listMessages(
+    String sessionId,
+  ) async => right(const []);
+
+  @override
+  Stream<Either<Failure, ChatStreamEvent>> sendMessage(
+    String sessionId,
+    String content,
+  ) => const Stream.empty();
 }
 
 /// A plain (non-mocktail) fake — the redirect matrix needs [currentStatus]
@@ -280,6 +324,12 @@ void main() {
         fakeSessionRepository,
       ),
     );
+    // spec-6-1 — `/`'s `GoRoute.builder` resolves `sl<ChatCubit>()`; same
+    // trivial-fake rationale as `MeusRegistrosCubit`/`EntriesSearchCubit`
+    // above — this suite never exercises a real chat session.
+    sl.registerLazySingleton<ChatCubit>(
+      () => ChatCubit(_FakeChatRepository()),
+    );
   });
 
   tearDown(() async {
@@ -328,7 +378,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(location(router), AppRoutePaths.home);
-    expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
+    expect(find.byType(ChatScreen), findsOneWidget);
   });
 
   testWidgets(
@@ -340,7 +390,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(location(router), AppRoutePaths.home);
-      expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
+      expect(find.byType(ChatScreen), findsOneWidget);
     },
   );
 
@@ -411,7 +461,7 @@ void main() {
 
         expect(location(router), AppRoutePaths.vaultLock);
         expect(find.byType(VaultLockScreen), findsOneWidget);
-        expect(find.byType(HomeChatPlaceholderScreen), findsNothing);
+        expect(find.byType(ChatScreen), findsNothing);
       },
     );
 
@@ -447,7 +497,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(location(router), AppRoutePaths.home);
-        expect(find.byType(HomeChatPlaceholderScreen), findsOneWidget);
+        expect(find.byType(ChatScreen), findsOneWidget);
       },
     );
   });

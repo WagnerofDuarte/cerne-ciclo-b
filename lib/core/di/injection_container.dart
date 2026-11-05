@@ -7,6 +7,7 @@ import 'package:hive_ce_flutter/hive_ce_flutter.dart';
 import '../../features/account/account_injection.dart';
 import '../../features/auth/auth_injection.dart';
 import '../../features/capture/capture_injection.dart';
+import '../../features/chat/chat_injection.dart';
 import '../../features/entries/entries_injection.dart';
 import '../../features/vault/vault_injection.dart';
 import '../network/access_token_provider.dart';
@@ -90,6 +91,10 @@ Future<void> setupCoreDependencies() async {
   await Hive.initFlutter();
   await registerEntriesFeature();
   registerCaptureFeature();
+  // spec-6-1 — `registerChatFeature()` opens its own two Hive boxes, same
+  // `Hive.initFlutter()`-must-run-first requirement `registerEntriesFeature()`
+  // already documents for itself.
+  await registerChatFeature();
 }
 
 /// Test/teardown helper — resets the single `get_it` instance so each test

@@ -18,6 +18,9 @@ import 'package:cerne/features/capture/domain/services/audio_transcriber.dart';
 import 'package:cerne/features/capture/domain/services/mic_recorder.dart';
 import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
+import 'package:cerne/features/chat/chat_injection.dart';
+import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
+import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 import 'package:cerne/features/entries/presentation/cubit/entries_search_cubit.dart';
@@ -240,6 +243,36 @@ void main() {
       expect(firstAudio, isNot(same(secondAudio)));
       await firstAudio.close();
       await secondAudio.close();
+    },
+  );
+
+  test(
+    'setupCoreDependencies also wires the chat feature (spec-6-1) — a '
+    'broken registration/dependency cycle (including the two Hive boxes) '
+    'must surface here, not only at real app launch (review finding: no '
+    'test anywhere else resolves the real registered graph — the feature '
+    'unit tests inject fakes straight into constructors, and the '
+    'navigation tests unregister-and-replace ChatCubit before ever '
+    'resolving it)',
+    () {
+      expect(sl.isRegistered<ChatRepository>(), isTrue);
+
+      // Actually resolves the whole chain (ChatCubit -> ChatRepository ->
+      // ChatRemoteDataSource/Box<Map> -> ApiClient/Dio) rather than just
+      // checking the registration exists — same rationale as every other
+      // forced resolution above.
+      expect(() => sl<ChatCubit>(), returnsNormally);
+
+      // The two `Box<Map>` singletons are disambiguated only by
+      // `instanceName` (same static type) — resolving each by its own
+      // name and checking `Box.name` against it catches a swapped-
+      // argument mistake in `registerChatFeature()` that `fvm flutter
+      // analyze` cannot (review finding's own demonstration).
+      final sessionsBox = sl<Box<Map>>(instanceName: chatSessionsBoxName);
+      final messagesBox = sl<Box<Map>>(instanceName: chatMessagesBoxName);
+      expect(sessionsBox.name, chatSessionsBoxName);
+      expect(messagesBox.name, chatMessagesBoxName);
+      expect(sessionsBox, isNot(same(messagesBox)));
     },
   );
 

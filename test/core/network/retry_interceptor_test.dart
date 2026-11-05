@@ -129,6 +129,50 @@ void main() {
       );
       expect(RetryInterceptor.shouldRetry(err, 0), isTrue);
     });
+
+    group(
+      'neverRetriedFunctions — non-idempotent chat POSTs are never '
+      'auto-retried, even with a retryable code (review finding: '
+      'dioErrorCodeOf can return NETWORK_TIMEOUT/NETWORK_OFFLINE from '
+      'DioException.type alone, before any {code,message} body exists, '
+      'so a transparent retry here would silently resend the identical '
+      'chat message / create a second session)',
+      () {
+        for (final function in RetryInterceptor.neverRetriedFunctions) {
+          test(
+            '$function is never retried on a retryable connect timeout '
+            '(no response body yet)',
+            () {
+              final err = DioException(
+                requestOptions: RequestOptions(path: '/$function'),
+                type: DioExceptionType.connectionTimeout,
+              );
+              expect(RetryInterceptor.shouldRetry(err, 0), isFalse);
+            },
+          );
+
+          test(
+            '$function is never retried even when the error body does '
+            'carry a retryable code',
+            () {
+              final err = _errorWithCode(
+                'AI_GENERATION_TIMEOUT',
+                requestOptions: RequestOptions(path: '/$function'),
+              );
+              expect(RetryInterceptor.shouldRetry(err, 0), isFalse);
+            },
+          );
+        }
+
+        test('an unrelated function with the same code still retries', () {
+          final err = DioException(
+            requestOptions: RequestOptions(path: '/chat-messages-list'),
+            type: DioExceptionType.connectionTimeout,
+          );
+          expect(RetryInterceptor.shouldRetry(err, 0), isTrue);
+        });
+      },
+    );
   });
 
   group('RetryInterceptor.onError — end-to-end retry behavior', () {
@@ -141,7 +185,7 @@ void main() {
     });
 
     test('retries a retryable error and resolves on success', () async {
-      final options = RequestOptions(path: '/chat-messages-send');
+      final options = RequestOptions(path: '/dashboard-summary');
       final err = _errorWithCode('AI_GENERATION_TIMEOUT', requestOptions: options);
       final successResponse = Response<dynamic>(
         requestOptions: options,
@@ -179,7 +223,7 @@ void main() {
       'maxRetries attempts, finally calling handler.next and never '
       'handler.resolve',
       () async {
-        final options = RequestOptions(path: '/chat-messages-send');
+        final options = RequestOptions(path: '/dashboard-summary');
 
         when(() => mockDio.fetch<dynamic>(any())).thenAnswer((invocation) {
           final opts = invocation.positionalArguments.first as RequestOptions;

@@ -16,7 +16,8 @@ import 'sync_badge.dart';
 /// elsewhere in the app for the same origin: `Icons.mic`
 /// (`insertion_modal.dart`'s Áudio tab), `Icons.image_outlined`
 /// (its Foto tab), `Icons.chat_bubble_outline`
-/// (`HomeChatPlaceholderScreen`'s own chat icon).
+/// (the deleted `HomeChatPlaceholderScreen`'s own chat icon, now
+/// `ChatScreen`'s own `_ChatBootstrapErrorView`).
 class _SourceMeta {
   const _SourceMeta(this.icon, this.color);
 

@@ -11,6 +11,8 @@ import '../../features/auth/domain/entities/session_status.dart';
 import '../../features/auth/domain/repositories/session_repository.dart';
 import '../../features/auth/presentation/cubit/auth_cubit.dart';
 import '../../features/auth/presentation/screens/auth_screen.dart';
+import '../../features/chat/presentation/cubit/chat_cubit.dart';
+import '../../features/chat/presentation/screens/chat_screen.dart';
 import '../../features/entries/presentation/cubit/entries_search_cubit.dart';
 import '../../features/entries/presentation/cubit/entry_detail_cubit.dart';
 import '../../features/entries/presentation/cubit/meus_registros_cubit.dart';
@@ -104,7 +106,7 @@ GoRouter buildAppRouter({
       ),
       GoRoute(
         path: AppRoutePaths.home,
-        builder: (context, state) => const HomeChatPlaceholderScreen(),
+        builder: (context, state) => ChatScreen(cubit: sl<ChatCubit>()),
       ),
       GoRoute(
         path: AppRoutePaths.meusRegistros,
