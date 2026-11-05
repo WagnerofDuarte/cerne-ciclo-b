@@ -175,23 +175,26 @@ void main() {
   });
 
   testWidgets(
-    'renders both groups ("INTERVALO DE DATA"/"TIPO DE ENTRADA") and no '
-    '"CATEGORIA" group (Design Notes: the backend has no category filter)',
+    'renders the "Filtrar registros" title, both groups ("TIPO DE '
+    'ENTRADA"/"PERÍODO") and no "CATEGORIA" group (Design Notes: the '
+    'backend has no category filter), with a single "Aplicar" button and '
+    'no separate "Limpar"',
     (tester) async {
       await _pumpSheet(tester, cubit, searchCubit);
 
-      expect(find.text('INTERVALO DE DATA'), findsOneWidget);
-      expect(find.text('Todo o período'), findsOneWidget);
-      expect(find.text('Esta semana'), findsOneWidget);
-      expect(find.text('Este mês'), findsOneWidget);
+      expect(find.text('Filtrar registros'), findsOneWidget);
       expect(find.text('TIPO DE ENTRADA'), findsOneWidget);
       expect(find.text('Manual'), findsOneWidget);
       expect(find.text('Áudio'), findsOneWidget);
       expect(find.text('Foto'), findsOneWidget);
       expect(find.text('Chat'), findsOneWidget);
+      expect(find.text('PERÍODO'), findsOneWidget);
+      expect(find.text('Todo o período'), findsOneWidget);
+      expect(find.text('Esta semana'), findsOneWidget);
+      expect(find.text('Este mês'), findsOneWidget);
       expect(find.text('CATEGORIA'), findsNothing);
       expect(find.text('Aplicar'), findsOneWidget);
-      expect(find.text('Limpar'), findsOneWidget);
+      expect(find.text('Limpar'), findsNothing);
     },
   );
 
@@ -302,34 +305,6 @@ void main() {
     },
   );
 
-  testWidgets(
-    'Boundaries: "Limpar" resets only the sheet\'s own pending selection '
-    '— it never calls applyFilters() on the cubit and never closes the '
-    'sheet',
-    (tester) async {
-      await _pumpSheet(tester, cubit, searchCubit);
-
-      await tester.tap(find.text('Áudio'));
-      await tester.tap(find.text('Esta semana'));
-      await tester.tap(find.text('Limpar'));
-      await tester.pumpAndSettle();
-
-      // No list() call at all yet — "Limpar" never touched the cubit.
-      expect(fakeRepository.listFilterCalls, isEmpty);
-      // The sheet is still showing (never popped).
-      expect(find.text('Aplicar'), findsOneWidget);
-
-      // Confirms the pending selection itself was actually reset, not
-      // just left as-is: applying now (with nothing re-selected after
-      // Limpar) commits an all-null selection.
-      await tester.tap(find.text('Aplicar'));
-      await tester.pumpAndSettle();
-
-      expect(cubit.activeSource, isNull);
-      expect(cubit.activeDateFrom, isNull);
-    },
-  );
-
   testWidgets('reopening the sheet pre-selects whichever filters are already '
       'active on the cubit — applying immediately (no further taps) '
       'commits that exact same selection back unchanged', (tester) async {
@@ -414,7 +389,7 @@ void main() {
     // equivalent test uses.
     await tester.pump();
 
-    expect(find.text('INTERVALO DE DATA'), findsOneWidget);
+    expect(find.text('PERÍODO'), findsOneWidget);
     expect(find.text('Aplicar'), findsOneWidget);
   });
 

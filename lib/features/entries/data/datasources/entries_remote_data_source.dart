@@ -116,8 +116,11 @@ class EntriesRemoteDataSource {
   }
 
   /// spec-5-1 — calls `entries-search` (`ApiClient.get`) with exactly one
-  /// required query parameter, `q` (Boundaries: no `limit`/`cursor`). The
-  /// response's `data` array decodes with the exact same `EntryDto.
+  /// query parameter, `q` — [query] is this method's own non-optional
+  /// positional parameter (Boundaries: no `limit`/`cursor`); the backend's
+  /// own contract (`openapi.yaml`) marks `q` itself as optional, this
+  /// client just always supplies it. The response's `data` array decodes
+  /// with the exact same `EntryDto.
   /// fromJson` [list] already uses — a superset response (`similarity`/
   /// `mode` fields the Code Map names) is simply ignored by
   /// `json_serializable`'s generated `fromJson`, same convention [get]'s

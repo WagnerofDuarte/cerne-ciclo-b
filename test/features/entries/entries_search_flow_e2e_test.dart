@@ -11,6 +11,7 @@ import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/network/access_token_provider.dart';
 import 'package:cerne/core/network/retry_interceptor.dart';
 import 'package:cerne/core/network/url_builder.dart';
+import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 
 import '../../support/fake_path_provider_platform.dart';
@@ -227,6 +228,82 @@ void main() {
       // or writes it on a failure path.
       expect(box.length, 1);
       expect(box.get('cached-1'), isNotNull);
+    },
+  );
+
+  // spec-5-3 (deferred-work.md, 2026-11-05): closes the self-disclosed gap
+  // that no e2e test drove `entries-search` with `source`/`dateFrom`/
+  // `dateTo` over the real network/Hive pipeline — only the mocked-
+  // `ApiClient` tier (`entries_remote_data_source_test.dart`) and the
+  // fake-repository tier (cubit/widget tests) covered them until now.
+  // Same source/date serialization convention
+  // `entries_filters_flow_e2e_test.dart` already proves for `list()`:
+  // `source` as `.name`, `dateFrom`/`dateTo` as `.toUtc().toIso8601String()`.
+  test(
+    'source filter: search(source: audio) sends {q, source} to '
+    'entries-search over the real pipeline and persists the real result',
+    () async {
+      adapter.queueJsonResponse(200, {
+        'data': [
+          _entryJson(
+            id: 'entry-audio-1',
+            content: 'Um áudio sobre ansiedade.',
+            source: 'audio',
+            occurredAt: '2026-01-02T10:00:00Z',
+          ),
+        ],
+      });
+
+      final result = await sl<EntriesRepository>().search(
+        'ansiedade',
+        source: EntrySource.audio,
+      );
+
+      expect(result.isRight(), isTrue);
+      final sent = adapter.requests.single.queryParameters;
+      expect(sent, {'q': 'ansiedade', 'source': 'audio'});
+
+      final box = sl<Box<Map>>();
+      expect(box.get('entry-audio-1')!['source'], 'audio');
+    },
+  );
+
+  test(
+    'date range filter: search(dateFrom/dateTo) sends both as their own '
+    'UTC ISO8601 strings to entries-search over the real pipeline, with '
+    'no source param',
+    () async {
+      adapter.queueJsonResponse(200, {
+        'data': [
+          _entryJson(
+            id: 'entry-dated-1',
+            content: 'Um registro de janeiro sobre ansiedade.',
+            source: 'manual',
+            occurredAt: '2026-01-15T10:00:00Z',
+          ),
+        ],
+      });
+
+      final dateFrom = DateTime(2026, 1, 1);
+      final dateTo = DateTime(2026, 1, 31);
+
+      final result = await sl<EntriesRepository>().search(
+        'ansiedade',
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+      );
+
+      expect(result.isRight(), isTrue);
+      final sent = adapter.requests.single.queryParameters;
+      expect(sent['q'], 'ansiedade');
+      expect(sent.containsKey('source'), isFalse);
+      expect(sent['dateFrom'], dateFrom.toUtc().toIso8601String());
+      expect(sent['dateTo'], dateTo.toUtc().toIso8601String());
+      expect(sent['dateFrom'], endsWith('Z'));
+      expect(sent['dateTo'], endsWith('Z'));
+
+      final box = sl<Box<Map>>();
+      expect(box.get('entry-dated-1')!['content'], isNotNull);
     },
   );
 }

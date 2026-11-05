@@ -6,8 +6,9 @@ import 'package:cerne/features/entries/presentation/widgets/entries_search_bar.d
 
 void main() {
   testWidgets(
-    'Acceptance Criteria: renders the hint text, a trailing funnel icon, '
-    'and no submit button anywhere on the widget',
+    'Acceptance Criteria: renders the hint text, a leading magnifying-glass '
+    'icon, a trailing funnel icon, and no submit button anywhere on the '
+    'widget',
     (tester) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -18,11 +19,13 @@ void main() {
       );
 
       expect(find.text('Buscar nos registros...'), findsOneWidget);
+      // Correction: `cerne-prototype.html`'s own search field has its own
+      // leading magnifying-glass icon, same as the filter button's own
+      // funnel.
+      expect(find.byIcon(Icons.search), findsOneWidget);
       expect(find.byIcon(Icons.filter_list), findsOneWidget);
-      // No `Icons.search`/submit affordance anywhere, and the one
-      // `TextField` never wires `onSubmitted` (Boundaries: "never
-      // submitted via a button").
-      expect(find.byIcon(Icons.search), findsNothing);
+      // No submit affordance anywhere — the one `TextField` never wires
+      // `onSubmitted` (Boundaries: "never submitted via a button").
       final textField = tester.widget<TextField>(find.byType(TextField));
       expect(textField.onSubmitted, isNull);
     },

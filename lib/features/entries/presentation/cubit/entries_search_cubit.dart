@@ -97,13 +97,19 @@ class EntriesSearchCubit extends Cubit<Resource<List<Entry>>> {
   ///
   /// Only when [_lastQuery] is non-empty — a search is actually active —
   /// *and* at least one of [source]/[dateFrom]/[dateTo] actually differs
-  /// from what was already stored (review finding: skips a wasted
-  /// `entries-search` network call when `initState()`'s own unconditional
-  /// reset finds nothing to actually reset) — does this cancel any pending
-  /// debounce and immediately re-run [_search] with that same term and the
-  /// just-stored filters (Boundaries: "no debounce on the filter-triggered
-  /// re-search"); while idle, the new selection is simply kept for
-  /// whenever the next query starts.
+  /// from what was already stored, *or* the last search attempt failed
+  /// (review finding: a filter-triggered re-search landing in
+  /// `ResourceError` must stay retriable even when the user reapplies the
+  /// exact same selection — `_SearchErrorState` has no retry button of its
+  /// own, so silently no-op'ing here would strand the user with no visible
+  /// recovery short of editing the search text) — the unchanged-and-ok case
+  /// still short-circuits (review finding: skips a wasted `entries-search`
+  /// network call when `initState()`'s own unconditional reset finds
+  /// nothing to actually reset) — does this cancel any pending debounce and
+  /// immediately re-run [_search] with that same term and the just-stored
+  /// filters (Boundaries: "no debounce on the filter-triggered re-search");
+  /// while idle, the new selection is simply kept for whenever the next
+  /// query starts.
   void updateFilters({
     EntrySource? source,
     DateTime? dateFrom,
@@ -116,7 +122,7 @@ class EntriesSearchCubit extends Cubit<Resource<List<Entry>>> {
     _activeSource = source;
     _activeDateFrom = dateFrom;
     _activeDateTo = dateTo;
-    if (_lastQuery.isEmpty || !filtersChanged) {
+    if (_lastQuery.isEmpty || (!filtersChanged && state is! ResourceError)) {
       return;
     }
     // Review finding: `close()` can race this call too (e.g. `initState()`

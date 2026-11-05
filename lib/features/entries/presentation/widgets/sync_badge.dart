@@ -25,7 +25,12 @@ import '../../domain/entities/sync_badge_state.dart';
 /// tap affordance"). [SyncBadgeSynchronizing]/[SyncBadgeSynchronized] are
 /// never tappable at all.
 class SyncBadge extends StatefulWidget {
-  const SyncBadge({required this.state, this.onRetryTap, super.key});
+  const SyncBadge({
+    required this.state,
+    this.onRetryTap,
+    this.compact = false,
+    super.key,
+  });
 
   final SyncBadgeState state;
 
@@ -35,6 +40,14 @@ class SyncBadge extends StatefulWidget {
   /// not no tap at all — tapping a non-retryable error still reveals its
   /// explanation, just never calls this).
   final VoidCallback? onRetryTap;
+
+  /// `EntryRecordCard`'s own variant (correction) — `cerne-prototype.html`'s
+  /// Tela 4 record card renders the label lowercase in plain
+  /// `colorTextSecondary`, next to the colored dot, not the state's own
+  /// color; `EntryDetailScreen` (no prototype ground truth for that
+  /// screen) keeps the default colored/capitalized rendering, so this is
+  /// opt-in rather than this widget's new default.
+  final bool compact;
 
   @override
   State<SyncBadge> createState() => _SyncBadgeState();
@@ -83,6 +96,13 @@ class _SyncBadgeState extends State<SyncBadge> {
       ),
     );
 
+    // [compact]: lowercase text in `colorTextSecondary` instead of the
+    // state's own color — the dot alone still carries that color. Only
+    // the *visible* text changes; [label] itself (the accessible string
+    // below) stays capitalized either way.
+    final displayLabel = widget.compact ? label.toLowerCase() : label;
+    final textColor = widget.compact ? DesignTokens.colorTextSecondary : color;
+
     // `ExcludeSemantics` (Review finding): without it, the visible `Text`
     // below contributes its *own* implicit semantics label ("Sincronizando",
     // same string) that merges straight into the explicit `Semantics(label:
@@ -97,8 +117,8 @@ class _SyncBadgeState extends State<SyncBadge> {
           dot,
           const SizedBox(width: DesignTokens.spacingXs),
           Text(
-            label,
-            style: DesignTokens.textMonoCaption.copyWith(color: color),
+            displayLabel,
+            style: DesignTokens.textMonoCaption.copyWith(color: textColor),
           ),
         ],
       ),

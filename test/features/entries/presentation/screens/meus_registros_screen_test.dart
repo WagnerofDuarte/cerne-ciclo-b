@@ -1247,7 +1247,7 @@ void main() {
         await tester.tap(find.byIcon(Icons.filter_list));
         await tester.pumpAndSettle();
 
-        expect(find.text('INTERVALO DE DATA'), findsOneWidget);
+        expect(find.text('PERÍODO'), findsOneWidget);
         expect(find.text('TIPO DE ENTRADA'), findsOneWidget);
         expect(find.text('CATEGORIA'), findsNothing);
       },

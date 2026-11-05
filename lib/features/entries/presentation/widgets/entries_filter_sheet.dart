@@ -30,11 +30,16 @@ String dateRangePresetLabel(DateRangePreset preset) => switch (preset) {
   DateRangePreset.thisMonth => 'Este mês',
 };
 
-/// The filter bottom sheet (spec-5-2) — two single-choice groups
-/// ("INTERVALO DE DATA", "TIPO DE ENTRADA"; Design Notes: no "CATEGORIA"
-/// group — the backend has no category filter, RF06) plus "Aplicar"/
-/// "Limpar". Mirrors `InsertionModal.show()`'s own bottom-sheet
-/// choreography (`isScrollControlled`, `useSafeArea`, `colorScrimHeavy`, a
+/// The filter bottom sheet (spec-5-2) — a "Filtrar registros" title over
+/// two single-choice groups, "TIPO DE ENTRADA" then "PERÍODO" (correction:
+/// `cerne-prototype.html`'s own Tela 4 filter-sheet markup has the type
+/// group first and names the date group "PERÍODO", not "INTERVALO DE
+/// DATA"; Design Notes: no "CATEGORIA" group either way — the backend has
+/// no category filter, RF06), plus a single full-width "Aplicar" button —
+/// the prototype's own sheet has no separate "Limpar" button; clearing is
+/// `MeusRegistrosScreen`'s own "Limpar filtros" link, outside this sheet.
+/// Mirrors `InsertionModal.show()`'s own bottom-sheet choreography
+/// (`isScrollControlled`, `useSafeArea`, `colorScrimHeavy`, a
 /// Reduce-Motion-aware `durationSheetUp` entrance) — Code Map.
 class EntriesFilterSheet extends StatefulWidget {
   const EntriesFilterSheet({
@@ -151,17 +156,6 @@ class _EntriesFilterSheetState extends State<EntriesFilterSheet> {
     Navigator.of(context).pop();
   }
 
-  /// "Limpar" (Boundaries: "resets only the sheet's own pending
-  /// selection") — never touches [widget.cubit]/closes the sheet; that's
-  /// `MeusRegistrosScreen`'s separate "Limpar filtros" link's own job
-  /// (`MeusRegistrosCubit.clearFilters()`).
-  void _clearPending() {
-    setState(() {
-      _pendingSource = null;
-      _pendingDateRange = DateRangePreset.allTime;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -189,7 +183,46 @@ class _EntriesFilterSheetState extends State<EntriesFilterSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'INTERVALO DE DATA',
+                'Filtrar registros',
+                style: DesignTokens.textTitleSm.copyWith(
+                  color: DesignTokens.colorTextPrimary,
+                ),
+              ),
+              const SizedBox(height: DesignTokens.spacingMd),
+              Text(
+                'TIPO DE ENTRADA',
+                style: DesignTokens.textMonoCaption.copyWith(
+                  color: DesignTokens.colorTextSecondary,
+                ),
+              ),
+              const SizedBox(height: DesignTokens.spacingSm),
+              Wrap(
+                spacing: DesignTokens.spacingSm,
+                runSpacing: DesignTokens.spacingSm,
+                children: [
+                  for (final source in EntrySource.values)
+                    _FilterChip(
+                      label: entrySourceLabel(source),
+                      selected: _pendingSource == source,
+                      // Single choice (Design Notes): unlike the date-range
+                      // group below (whose 3 choices always include an
+                      // explicit "none" — [DateRangePreset.allTime]),
+                      // source has no dedicated "any source" chip — tapping
+                      // the already-selected one toggles it back off
+                      // instead of being a no-op, since that's otherwise
+                      // the only way to clear just this one group (the
+                      // sheet has no "Limpar" of its own).
+                      onTap: () => setState(
+                        () => _pendingSource = _pendingSource == source
+                            ? null
+                            : source,
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: DesignTokens.spacingMd),
+              Text(
+                'PERÍODO',
                 style: DesignTokens.textMonoCaption.copyWith(
                   color: DesignTokens.colorTextSecondary,
                 ),
@@ -207,57 +240,8 @@ class _EntriesFilterSheetState extends State<EntriesFilterSheet> {
                     ),
                 ],
               ),
-              const SizedBox(height: DesignTokens.spacingLg),
-              Text(
-                'TIPO DE ENTRADA',
-                style: DesignTokens.textMonoCaption.copyWith(
-                  color: DesignTokens.colorTextSecondary,
-                ),
-              ),
-              const SizedBox(height: DesignTokens.spacingSm),
-              Wrap(
-                spacing: DesignTokens.spacingSm,
-                runSpacing: DesignTokens.spacingSm,
-                children: [
-                  for (final source in EntrySource.values)
-                    _FilterChip(
-                      label: entrySourceLabel(source),
-                      selected: _pendingSource == source,
-                      // Single choice (Design Notes): unlike the date-range
-                      // group above (whose 3 choices always include an
-                      // explicit "none" — [DateRangePreset.allTime]),
-                      // source has no dedicated "any source" chip — tapping
-                      // the already-selected one toggles it back off
-                      // instead of being a no-op, since that's otherwise
-                      // the only way to clear just this one group without
-                      // "Limpar" resetting the date group too.
-                      onTap: () => setState(
-                        () => _pendingSource = _pendingSource == source
-                            ? null
-                            : source,
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: DesignTokens.spacingLg),
-              Row(
-                children: [
-                  Expanded(
-                    child: AppButton(
-                      label: 'Limpar',
-                      variant: AppButtonVariant.textGhost,
-                      onPressed: _clearPending,
-                    ),
-                  ),
-                  const SizedBox(width: DesignTokens.spacingMd),
-                  Expanded(
-                    child: AppButton(
-                      label: 'Aplicar',
-                      onPressed: _applyAndClose,
-                    ),
-                  ),
-                ],
-              ),
+              const SizedBox(height: DesignTokens.spacingMd),
+              AppButton(label: 'Aplicar', onPressed: _applyAndClose),
             ],
           ),
         ),
@@ -266,11 +250,13 @@ class _EntriesFilterSheetState extends State<EntriesFilterSheet> {
   }
 }
 
-/// One selectable group option — reused by both groups ("INTERVALO DE
-/// DATA"/"TIPO DE ENTRADA"); selected state is `colorSecondary` fill +
-/// `colorCategoryChipText` text, same token pair the active-filter chip
-/// row (`MeusRegistrosScreen`) reuses for its own chips (Boundaries: exact
-/// token reuse, no new token). Unselected state is a plain `colorBorder`
+/// One selectable group option — reused by both groups ("TIPO DE
+/// ENTRADA"/"PERÍODO"); selected state is `colorPrimary` fill +
+/// `colorOnPrimary` text (correction: `cerne-prototype.html`'s own filter-
+/// sheet markup fills a selected chip dark green, `background:#1F3D34`,
+/// not the olive `colorSecondary` a previous pass shared with the
+/// *active-filter* chip row outside this sheet — the two surfaces use
+/// different token pairs now). Unselected state is a plain `colorBorder`
 /// outline — not itself named by Boundaries, since only the *selected*
 /// look is actually specified there.
 class _FilterChip extends StatelessWidget {
@@ -303,7 +289,7 @@ class _FilterChip extends StatelessWidget {
           ),
           decoration: BoxDecoration(
             color: selected
-                ? DesignTokens.colorSecondary
+                ? DesignTokens.colorPrimary
                 : DesignTokens.colorSurfaceBg,
             borderRadius: const BorderRadius.all(
               Radius.circular(DesignTokens.radiusFull),
@@ -319,7 +305,7 @@ class _FilterChip extends StatelessWidget {
             label,
             style: DesignTokens.textLabelMd.copyWith(
               color: selected
-                  ? DesignTokens.colorCategoryChipText
+                  ? DesignTokens.colorOnPrimary
                   : DesignTokens.colorTextPrimary,
             ),
           ),

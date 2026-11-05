@@ -389,6 +389,31 @@ void main() {
     );
 
     test(
+      'review finding: updateFilters() retries even with no filter change '
+      'when the last search landed in ResourceError — the no-op-when-'
+      'unchanged guard must not strand the user with no way to recover '
+      'other than editing the search text',
+      () async {
+        fakeRepository.queueSearch(
+          left(const Failure.networkOffline(message: 'offline')),
+        );
+        cubit.onQueryChanged('ansiedade');
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        expect(cubit.state, isA<ResourceError<List<Entry>>>());
+        expect(fakeRepository.searchCalls, ['ansiedade']);
+
+        // Same values already stored (both default to null) — must still
+        // retry, since the prior attempt failed.
+        fakeRepository.queueSearch(right([_entry('e1')]));
+        cubit.updateFilters();
+        await Future<void>.delayed(Duration.zero);
+
+        expect(fakeRepository.searchCalls, ['ansiedade', 'ansiedade']);
+        expect(cubit.state, isA<ResourceData<List<Entry>>>());
+      },
+    );
+
+    test(
       'review finding: updateFilters() during an active search never '
       'throws after close() — same emit-after-close guard '
       'onQueryChanged()\'s own empty-query branch already has',

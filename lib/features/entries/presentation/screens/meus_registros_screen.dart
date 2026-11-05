@@ -609,8 +609,8 @@ class _DateGroupSection extends StatelessWidget {
         children: [
           Text(
             _dayLabel(group.date),
-            style: DesignTokens.textTitleSm.copyWith(
-              color: DesignTokens.colorTextPrimary,
+            style: DesignTokens.textMonoCaption.copyWith(
+              color: DesignTokens.colorTextSecondary,
             ),
           ),
           const SizedBox(height: DesignTokens.spacingSm),
@@ -735,15 +735,23 @@ class _ActiveFiltersRow extends StatelessWidget {
                 searchCubit.updateFilters(source: source);
               },
             ),
-          AppButton(
-            variant: AppButtonVariant.textGhost,
-            label: 'Limpar filtros',
-            // I/O matrix: "Clear all filters" — restores the full
-            // unfiltered list in place, no reload/re-mount (Boundaries).
-            onPressed: () {
+          // Correction: `cerne-prototype.html`'s own active-filters row
+          // renders "Limpar filtros" as a plain small mono-caption link
+          // on the same row as the chips, not a full `AppButton` on its
+          // own line.
+          GestureDetector(
+            onTap: () {
+              // I/O matrix: "Clear all filters" — restores the full
+              // unfiltered list in place, no reload/re-mount (Boundaries).
               cubit.clearFilters();
               searchCubit.updateFilters();
             },
+            child: Text(
+              'Limpar filtros',
+              style: DesignTokens.textMonoCaption.copyWith(
+                color: DesignTokens.colorTextSecondary,
+              ),
+            ),
           ),
         ],
       ),
@@ -751,9 +759,13 @@ class _ActiveFiltersRow extends StatelessWidget {
   }
 }
 
-/// One removable active-filter chip — `colorSecondary`/
-/// `colorCategoryChipText`/`radiusFull` (Boundaries: exact token reuse,
-/// no new token).
+/// One removable active-filter chip (correction) — `cerne-prototype.html`'s
+/// own active-filter chip row renders a small, left-aligned,
+/// `radiusSm`-rounded chip (`colorSecondaryTint` fill, `colorCategoryChipText`
+/// text) rather than a large, fully-rounded, solid-`colorSecondary` pill —
+/// the filter *sheet*'s own selected chip uses that bolder pill look now
+/// instead (`EntriesFilterSheet`'s `_FilterChip`), so the two surfaces no
+/// longer share one token pair.
 class _ActiveFilterChip extends StatelessWidget {
   const _ActiveFilterChip({required this.label, required this.onRemove});
 
@@ -768,18 +780,15 @@ class _ActiveFilterChip extends StatelessWidget {
       excludeSemantics: true,
       child: InkWell(
         borderRadius: const BorderRadius.all(
-          Radius.circular(DesignTokens.radiusFull),
+          Radius.circular(DesignTokens.radiusSm),
         ),
         onTap: onRemove,
         child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: DesignTokens.spacingMd,
-            vertical: DesignTokens.spacingXs,
-          ),
+          padding: DesignTokens.activeFilterChipPadding,
           decoration: const BoxDecoration(
-            color: DesignTokens.colorSecondary,
+            color: DesignTokens.colorSecondaryTint,
             borderRadius: BorderRadius.all(
-              Radius.circular(DesignTokens.radiusFull),
+              Radius.circular(DesignTokens.radiusSm),
             ),
           ),
           child: Row(
@@ -787,13 +796,14 @@ class _ActiveFilterChip extends StatelessWidget {
             children: [
               Text(
                 label,
-                style: DesignTokens.textLabelMd.copyWith(
+                style: DesignTokens.textCaptionSm.copyWith(
                   color: DesignTokens.colorCategoryChipText,
                 ),
               ),
-              const SizedBox(width: DesignTokens.spacingXs),
+              const SizedBox(width: DesignTokens.activeFilterChipIconGap),
               const Icon(
                 Icons.close,
+                size: DesignTokens.activeFilterChipCloseIconSize,
                 color: DesignTokens.colorCategoryChipText,
               ),
             ],

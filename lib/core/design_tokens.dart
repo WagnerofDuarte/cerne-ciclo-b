@@ -89,6 +89,14 @@ class DesignTokens {
   /// at 8% alpha.
   static const Color colorErrorBg = Color(0x14B3402A);
 
+  /// Meus Registros active-filter chip fill (spec-5-2 correction) —
+  /// `rgba(124,139,111,.18)`, `cerne-prototype.html`'s own active-filter
+  /// chip/tag background, `colorSecondary` at 18% alpha. Distinct from the
+  /// filter *sheet*'s own selected-chip fill, which uses plain
+  /// [colorPrimary] (same correction) — the two surfaces no longer share
+  /// one token pair.
+  static const Color colorSecondaryTint = Color(0x2E7C8B6F);
+
   // ---------------------------------------------------------------------
   // Typography — prototype-extract.md §3 "Typography"
   // ---------------------------------------------------------------------
@@ -421,6 +429,32 @@ class DesignTokens {
 
   /// Kanban card's left color spine — `width:3px`.
   static const double kanbanCardSpineWidth = 3;
+
+  // ---------------------------------------------------------------------
+  // Meus Registros search/filter (spec-5-1/5-2 correction) —
+  // `cerne-prototype.html`'s Tela 4 search row (`ph-magnifying-glass`/
+  // `ph-funnel`, both `font-size:16px`) and its active-filter chip row
+  // (`gap:6px` label-to-"x", `ph-x` at `font-size:10px`, `padding:6px
+  // 10px`) — a previous pass merged the search field and funnel into one
+  // pill and gave the active chips the filter sheet's own pill/token pair.
+  // ---------------------------------------------------------------------
+
+  /// Search field's leading magnifying-glass and the filter button's own
+  /// funnel icon.
+  static const double entriesSearchBarIconSize = 16;
+
+  /// Active-filter chip's label-to-"x" gap — not on the 4dp spacing scale.
+  static const double activeFilterChipIconGap = 6;
+
+  /// Active-filter chip's own "x" icon.
+  static const double activeFilterChipCloseIconSize = 10;
+
+  /// Active-filter chip's own padding — `padding:6px 10px`; neither value
+  /// is on the 4dp spacing scale.
+  static const EdgeInsets activeFilterChipPadding = EdgeInsets.symmetric(
+    horizontal: 10,
+    vertical: 6,
+  );
 
   // ---------------------------------------------------------------------
   // PIN keypad (Story 2.2) — prototype-extract.md §6 names the "PIN

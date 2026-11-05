@@ -120,14 +120,29 @@ class EntryRecordCard extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Icon(meta.icon, color: meta.color),
-                          const SizedBox(width: DesignTokens.spacingSm),
-                          Text(
-                            time,
-                            style: DesignTokens.textMonoCaption.copyWith(
-                              color: DesignTokens.colorTextSecondary,
-                            ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(meta.icon, color: meta.color),
+                              const SizedBox(width: DesignTokens.spacingSm),
+                              Text(
+                                time,
+                                style: DesignTokens.textMonoCaption.copyWith(
+                                  color: DesignTokens.colorTextSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                          // Correction: `cerne-prototype.html`'s own record
+                          // card puts the sync indicator on the right of
+                          // this same row, next to the time — not below
+                          // the content excerpt.
+                          SyncBadge(
+                            state: badgeState,
+                            onRetryTap: onRetryTap,
+                            compact: true,
                           ),
                         ],
                       ),
@@ -140,8 +155,6 @@ class EntryRecordCard extends StatelessWidget {
                           color: DesignTokens.colorTextPrimary,
                         ),
                       ),
-                      const SizedBox(height: DesignTokens.spacingXs),
-                      SyncBadge(state: badgeState, onRetryTap: onRetryTap),
                     ],
                   ),
                 ),
