@@ -141,6 +141,45 @@ void main() {
     );
 
     testWidgets(
+      'tapping within the colored spine strip itself also calls onTap '
+      '(round-1 review fix: the tappable InkWell wraps the whole Stack, '
+      'spine included, not just the content Padding — review finding, '
+      'round 2: no test previously hit a point inside the spine\'s own '
+      'bounds)',
+      (tester) async {
+        var tapped = false;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: EntryRecordCard(
+                entry: _entry(EntrySource.manual),
+                badgeState: const SyncBadgeState.synchronized(),
+                onTap: () => tapped = true,
+              ),
+            ),
+          ),
+        );
+
+        final cardTopLeft = tester.getTopLeft(find.byType(EntryRecordCard));
+        final cardSize = tester.getSize(find.byType(EntryRecordCard));
+        // Well inside the spine's own width (DesignTokens
+        // .kanbanCardSpineWidth), never inside the content Padding beside
+        // it.
+        final spinePoint =
+            cardTopLeft +
+            Offset(
+              DesignTokens.kanbanCardSpineWidth / 2,
+              cardSize.height / 2,
+            );
+
+        await tester.tapAt(spinePoint);
+        await tester.pump();
+
+        expect(tapped, isTrue);
+      },
+    );
+
+    testWidgets(
       'tapping a retryable error SyncBadge calls onRetryTap, never onTap '
       '(the badge\'s own InkWell wins the hit test)',
       (tester) async {

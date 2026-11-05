@@ -749,6 +749,57 @@ void main() {
         expect(find.text('Detail: e1'), findsOneWidget);
       },
     );
+
+    testWidgets(
+      'a rapid double-tap on a card pushes the detail route only once '
+      '(review fix, round 2 — no debounce guard previously)',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(
+            right(
+              EntriesPage(
+                items: [_entry('e1', '2026-01-01T10:00:00')],
+                nextCursor: null,
+              ),
+            ),
+          );
+        final cubit = MeusRegistrosCubit(
+          fakeRepository,
+          _FakePendingEntryWriteTracker(),
+        );
+        addTearDown(cubit.close);
+        var pushCount = 0;
+        final router = GoRouter(
+          initialLocation: '/meus-registros',
+          routes: [
+            GoRoute(
+              path: '/meus-registros',
+              builder: (context, state) =>
+                  MeusRegistrosScreen(cubit: cubit),
+            ),
+            GoRoute(
+              path: '/meus-registros/:id',
+              builder: (context, state) {
+                pushCount++;
+                return Text('Detail: ${state.pathParameters['id']}');
+              },
+            ),
+          ],
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+        await tester.pumpAndSettle();
+
+        // Two taps before the first transition settles — `tester.tap`
+        // alone doesn't pump, so both land while `_navigatingToDetail`
+        // is still true from the first.
+        await tester.tap(find.textContaining('content-e1'));
+        await tester.tap(find.textContaining('content-e1'));
+        await tester.pumpAndSettle();
+
+        expect(pushCount, 1);
+      },
+    );
   });
 
   group('retry wiring (spec-4-2, screen-level — Review finding, round 2)', () {

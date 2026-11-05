@@ -68,7 +68,8 @@ class EntryRecordCard extends StatelessWidget {
 
   /// spec-4-4 — opens this entry's detail view
   /// (`MeusRegistrosScreen`'s `context.push('${AppRoutePaths.
-  /// meusRegistros}/${entry.id}')`). A pending/failed placeholder's own
+  /// meusRegistros}/${Uri.encodeComponent(entry.id)}')` — the id is
+  /// URL-encoded, round-1 review fix). A pending/failed placeholder's own
   /// synthetic `tempId` is a valid, un-special-cased target here too
   /// (Boundaries) — this card never knows or cares which kind of id it
   /// holds.

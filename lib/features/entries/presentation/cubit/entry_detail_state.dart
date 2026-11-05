@@ -1,3 +1,4 @@
+import '../../../auth/domain/entities/session_status.dart';
 import '../../domain/entities/entry.dart';
 import '../../domain/entities/sync_badge_state.dart';
 
@@ -7,15 +8,38 @@ import '../../domain/entities/sync_badge_state.dart';
 /// `MeusRegistrosState`'s own doc already gives): this screen's one-shot
 /// fetch still has its own distinct "not found" outcome `Resource<T>`
 /// doesn't model.
+///
+/// [sessionStatus] carries `EntryDetailCubit`'s own composed
+/// `SessionRepository.statusStream` snapshot (Boundaries, Acceptance
+/// Criteria's third bullet: "combines ... into its own sealed
+/// `EntryDetailState`") — review fix (round 2): previously held only as a
+/// side field on the cubit, outside this sealed type. [sessionStatus]
+/// participates in every variant's `==`/`hashCode` below *on purpose*: a
+/// `Cubit` skips `emit` entirely when the new state equals the current one
+/// (`flutter_bloc`'s own `Emitter`/`Cubit.emit` short-circuit), so excluding
+/// it would silently swallow the cubit's own re-stamp-on-status-change path
+/// below, even though `EntryDetailScreen` itself never branches on it
+/// (`ExpiryOverlayHost`'s own separate, pre-existing subscription is what
+/// actually renders the overlay).
 sealed class EntryDetailState {
-  const EntryDetailState();
+  const EntryDetailState({this.sessionStatus});
+
+  final SessionStatus? sessionStatus;
 }
 
 /// The one `EntriesRepository.getById` fetch is in flight — `EntryDetail
 /// Screen` renders nothing below this (no skeleton of its own; this
 /// screen has no prototype precedent to match, Intent).
 class EntryDetailLoading extends EntryDetailState {
-  const EntryDetailLoading();
+  const EntryDetailLoading({super.sessionStatus});
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is EntryDetailLoading && other.sessionStatus == sessionStatus);
+
+  @override
+  int get hashCode => Object.hash(runtimeType, sessionStatus);
 }
 
 /// The fetch resolved to a real [Entry] — [badgeState] is always
@@ -24,7 +48,11 @@ class EntryDetailLoading extends EntryDetailState {
 /// `deriveSyncBadgeState()` rather than hardcoded here (Never: "a second
 /// sync-badge derivation path").
 class EntryDetailData extends EntryDetailState {
-  const EntryDetailData({required this.entry, required this.badgeState});
+  const EntryDetailData({
+    required this.entry,
+    required this.badgeState,
+    super.sessionStatus,
+  });
 
   final Entry entry;
   final SyncBadgeState badgeState;
@@ -34,14 +62,16 @@ class EntryDetailData extends EntryDetailState {
       identical(this, other) ||
       (other is EntryDetailData &&
           other.entry == entry &&
-          other.badgeState == badgeState);
+          other.badgeState == badgeState &&
+          other.sessionStatus == sessionStatus);
 
   @override
-  int get hashCode => Object.hash(entry, badgeState);
+  int get hashCode => Object.hash(entry, badgeState, sessionStatus);
 
   @override
   String toString() =>
-      'EntryDetailData(entry: ${entry.id}, badgeState: $badgeState)';
+      'EntryDetailData(entry: ${entry.id}, badgeState: $badgeState, '
+      'sessionStatus: $sessionStatus)';
 }
 
 /// `Failure.notFound` specifically — an id that never existed or belongs
@@ -52,7 +82,15 @@ class EntryDetailData extends EntryDetailState {
 /// here to "never a distinguishable failure-reason state" either, Code
 /// Map) — the two variants never look different on screen.
 class EntryDetailNotFound extends EntryDetailState {
-  const EntryDetailNotFound();
+  const EntryDetailNotFound({super.sessionStatus});
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is EntryDetailNotFound && other.sessionStatus == sessionStatus);
+
+  @override
+  int get hashCode => Object.hash(runtimeType, sessionStatus);
 }
 
 /// Every other `Failure` this screen's fetch can surface that the
@@ -65,18 +103,21 @@ class EntryDetailNotFound extends EntryDetailState {
 /// surfaced as screen copy — kept only for this state's own equality/
 /// toString and tests.
 class EntryDetailError extends EntryDetailState {
-  const EntryDetailError({required this.message});
+  const EntryDetailError({required this.message, super.sessionStatus});
 
   final String message;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      (other is EntryDetailError && other.message == message);
+      (other is EntryDetailError &&
+          other.message == message &&
+          other.sessionStatus == sessionStatus);
 
   @override
-  int get hashCode => message.hashCode;
+  int get hashCode => Object.hash(message, sessionStatus);
 
   @override
-  String toString() => 'EntryDetailError(message: $message)';
+  String toString() =>
+      'EntryDetailError(message: $message, sessionStatus: $sessionStatus)';
 }

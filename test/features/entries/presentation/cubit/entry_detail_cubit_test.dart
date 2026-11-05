@@ -293,10 +293,10 @@ void main() {
 
   group('session expiry while viewing detail', () {
     test(
-      'SessionRepository.statusStream emitting expired is composed into '
-      'this cubit (the one documented compose point) without altering the '
-      'already-resolved EntryDetailData — no crash, no new overlay built '
-      'by this cubit itself',
+      'SessionRepository.statusStream emitting expired is folded into the '
+      'sealed EntryDetailState itself (round-2 review fix) without '
+      'disturbing the already-resolved entry/badge data — no crash, no '
+      'new overlay built by this cubit itself',
       () async {
         fakeRepository.queueGetById(right(_entry('e1')));
         await cubit.load('e1');
@@ -305,8 +305,66 @@ void main() {
         fakeSessionRepository.setStatus(SessionStatus.expired);
         await Future<void>.delayed(Duration.zero);
 
-        expect(cubit.sessionStatus, SessionStatus.expired);
-        expect(cubit.state, dataState);
+        expect(cubit.state.sessionStatus, SessionStatus.expired);
+        expect(cubit.state, isA<EntryDetailData>());
+        // The resolved entry/badge data itself is unchanged — only
+        // sessionStatus differs from dataState (equality intentionally
+        // includes it, entry_detail_state.dart's own doc, so this cubit's
+        // re-stamp actually reaches a new emit rather than being
+        // short-circuited by Cubit.emit's own equality check).
+        expect(
+          (cubit.state as EntryDetailData).entry,
+          (dataState as EntryDetailData).entry,
+        );
+        expect(
+          (cubit.state as EntryDetailData).badgeState,
+          dataState.badgeState,
+        );
+      },
+    );
+
+    test(
+      'a status already known before load() resolves is stamped onto the '
+      'very first emitted state too, not only onto a later re-emit',
+      () async {
+        fakeSessionRepository.setStatus(SessionStatus.authenticated);
+        await Future<void>.delayed(Duration.zero);
+        fakeRepository.queueGetById(right(_entry('e1')));
+
+        await cubit.load('e1');
+
+        expect(cubit.state.sessionStatus, SessionStatus.authenticated);
+      },
+    );
+
+    test(
+      'the session expiring while a load() fetch is still in flight is '
+      'reflected on the EntryDetailLoading state it arrives during, then '
+      'carried over onto the resolved EntryDetailData once the fetch '
+      'completes (review finding: previously only the already-resolved '
+      'ordering was covered)',
+      () async {
+        final gatedRepository = _GatedEntriesRepository();
+        final gatedCubit = EntryDetailCubit(
+          gatedRepository,
+          fakeTracker,
+          fakeSessionRepository,
+        );
+        addTearDown(gatedCubit.close);
+
+        final load = gatedCubit.load('e1');
+        expect(gatedCubit.state, isA<EntryDetailLoading>());
+
+        fakeSessionRepository.setStatus(SessionStatus.expired);
+        await Future<void>.delayed(Duration.zero);
+        expect(gatedCubit.state, isA<EntryDetailLoading>());
+        expect(gatedCubit.state.sessionStatus, SessionStatus.expired);
+
+        gatedRepository.resolve(0, right(_entry('e1')));
+        await load;
+
+        expect(gatedCubit.state, isA<EntryDetailData>());
+        expect(gatedCubit.state.sessionStatus, SessionStatus.expired);
       },
     );
   });

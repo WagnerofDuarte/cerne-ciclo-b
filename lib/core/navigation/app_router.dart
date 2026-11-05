@@ -18,23 +18,10 @@ import '../../features/entries/presentation/screens/meus_registros_screen.dart';
 import '../../features/vault/domain/entities/vault_status.dart';
 import '../../features/vault/domain/repositories/vault_repository.dart';
 import '../../features/vault/presentation/screens/vault_lock_screen.dart';
+import 'app_route_paths.dart';
 import 'placeholder_screens.dart';
 
-/// Every route this app shell resolves — Story 1.6's original set
-/// (`/boot`, `/auth`, `/reauth`, `/`, `/meus-registros`, `/planos-de-acao`,
-/// `/configuracoes`) plus Epic 2/spec-2-1's `/vault` lock screen. Named
-/// constants so no call site retypes a path literal that could drift from
-/// the one `GoRouter` below.
-abstract final class AppRoutePaths {
-  static const boot = '/boot';
-  static const auth = '/auth';
-  static const reauth = '/reauth';
-  static const vaultLock = '/vault';
-  static const home = '/';
-  static const meusRegistros = '/meus-registros';
-  static const planosDeAcao = '/planos-de-acao';
-  static const configuracoes = '/configuracoes';
-}
+export 'app_route_paths.dart';
 
 /// The epic's ONE `GoRouter`/`redirect` (Boundaries: "never a second
 /// competing `redirect`") — composes [VaultRepository.currentStatus] first,

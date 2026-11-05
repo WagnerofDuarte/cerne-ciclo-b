@@ -310,3 +310,9 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-4-4-entry-detail-view.md`
   summary: `EntryDetailCubit`'s pending-write-vs-fetched-entry matching (`for (pending in _pendingWrites) if (pending.tempId == entry.id)`) is provably unreachable in real usage — a `getById` success can only ever return a real, backend-confirmed `Entry.id`, which can never equal a synthetic `tempId`, so `matchingPending` is always `null` and the badge always resolves to `Synchronized`; the subscription/matching code exists to mirror the shared-derivation convention but adds complexity with no observable effect.
   evidence: `lib/features/entries/presentation/cubit/entry_detail_cubit.dart`'s `load()` success branch and `PendingEntryWriteTrackerImpl._generateTempId()` (`'pending-${...}'` prefix, never a real server id). The one test exercising this path (`entry_detail_cubit_test.dart`'s `'a pending write that happens to share this entry's id...'`) can only pass by manufacturing that impossible-in-production coincidence directly.
+
+## Deferred from: code review of spec-4-4-entry-detail-view, round 2 (2026-11-05)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-4-4-entry-detail-view.md`
+  summary: `EntryDetailCubit`'s `_tracker.pendingWrites.listen(...)` and `_sessionRepository.statusStream.listen(...)` subscriptions have no `onError` handler.
+  evidence: `lib/features/entries/presentation/cubit/entry_detail_cubit.dart:31-39`. Not introduced by this story — `MeusRegistrosCubit` subscribes to the same `pendingWrites` stream the identical way (`meus_registros_cubit.dart:27-29`), and `app_router.dart`'s own `_GoRouterRefreshStream` comment already documents that no current implementation of these streams ever errors; a fix belongs to all these call sites together, not this one.

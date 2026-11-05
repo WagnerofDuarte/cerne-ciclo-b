@@ -14,15 +14,15 @@ import 'entry_detail_state.dart';
 /// Drives `EntryDetailScreen` (spec-4-4) — the Boundaries' three-source
 /// composition, merged only here (AD-7: "it never imports/reaches into
 /// `MeusRegistrosCubit` or any other Cubit"):
-/// [SessionRepository.statusStream] (auth status — this cubit is the one
-/// documented compose point the Acceptance Criteria's third bullet names,
-/// even though nothing this screen renders branches on it today:
-/// `ExpiryOverlayHost`'s own independent subscription to the same stream,
-/// unchanged, is still what actually shows the session-expired overlay
-/// above this screen, Boundaries: "no new overlay"), [PendingEntryWrite
-/// Tracker.pendingWrites] feeding the one shared `deriveSyncBadgeState()`
-/// (never recomputed inline), and one [EntriesRepository.getById] fetch
-/// per [load] call.
+/// [SessionRepository.statusStream] (auth status — folded into
+/// [EntryDetailState.sessionStatus] on every emit, the documented compose
+/// point the Acceptance Criteria's third bullet names, even though nothing
+/// this screen renders branches on it today: `ExpiryOverlayHost`'s own
+/// independent subscription to the same stream, unchanged, is still what
+/// actually shows the session-expired overlay above this screen,
+/// Boundaries: "no new overlay"), [PendingEntryWriteTracker.pendingWrites]
+/// feeding the one shared `deriveSyncBadgeState()` (never recomputed
+/// inline), and one [EntriesRepository.getById] fetch per [load] call.
 ///
 /// A DI `factory` (Code Map) — unlike `MeusRegistrosCubit`'s
 /// `lazySingleton`, a fresh instance per visit to `/meus-registros/:id`
@@ -35,7 +35,7 @@ class EntryDetailCubit extends Cubit<EntryDetailState> {
       (writes) => _pendingWrites = writes,
     );
     _sessionSubscription = _sessionRepository.statusStream.listen(
-      (status) => _sessionStatus = status,
+      _onSessionStatusChanged,
     );
   }
 
@@ -52,13 +52,35 @@ class EntryDetailCubit extends Cubit<EntryDetailState> {
   List<PendingEntryWrite> _pendingWrites = const [];
 
   /// The latest [SessionStatus] this cubit has observed off the composed
-  /// [SessionRepository.statusStream] — exposed purely so a test can
-  /// assert this cubit (not `EntryDetailScreen` itself) is the one
-  /// composition point for auth status alongside Entry/badge data
-  /// (Acceptance Criteria's third bullet, AD-7); never read by
-  /// `EntryDetailScreen`, which renders only from [state].
-  SessionStatus? get sessionStatus => _sessionStatus;
+  /// [SessionRepository.statusStream] — stamped onto every emitted
+  /// [EntryDetailState] (including a re-emit of the current state below,
+  /// so a status tick that arrives after [load] has already resolved is
+  /// still reflected without disturbing the resolved entry/badge data).
   SessionStatus? _sessionStatus;
+
+  void _onSessionStatusChanged(SessionStatus status) {
+    _sessionStatus = status;
+    if (!isClosed) {
+      emit(_restamped(state, status));
+    }
+  }
+
+  /// Returns [current] with [status] stamped on, preserving every other
+  /// field — used both by [_onSessionStatusChanged] (re-emit) and [load]
+  /// (first emit of each new variant).
+  EntryDetailState _restamped(EntryDetailState current, SessionStatus? status) =>
+      switch (current) {
+        EntryDetailLoading() => EntryDetailLoading(sessionStatus: status),
+        EntryDetailData(entry: final entry, badgeState: final badgeState) =>
+          EntryDetailData(
+            entry: entry,
+            badgeState: badgeState,
+            sessionStatus: status,
+          ),
+        EntryDetailNotFound() => EntryDetailNotFound(sessionStatus: status),
+        EntryDetailError(message: final message) =>
+          EntryDetailError(message: message, sessionStatus: status),
+      };
 
   /// Guards a stale in-flight [load] call's result landing after a newer
   /// one (e.g. a quick back-then-forward re-navigation) — same rationale
@@ -73,7 +95,7 @@ class EntryDetailCubit extends Cubit<EntryDetailState> {
   /// getById] with no branching here.
   Future<void> load(String id) async {
     final generation = ++_generation;
-    emit(const EntryDetailLoading());
+    emit(EntryDetailLoading(sessionStatus: _sessionStatus));
     final result = await _repository.getById(id);
     if (isClosed || generation != _generation) {
       return;
@@ -81,14 +103,19 @@ class EntryDetailCubit extends Cubit<EntryDetailState> {
     result.match(
       (failure) {
         if (failure is NotFound) {
-          emit(const EntryDetailNotFound());
+          emit(EntryDetailNotFound(sessionStatus: _sessionStatus));
           return;
         }
         // Boundaries: every other non-absorbed Failure renders the exact
         // same generic not-found treatment `EntryDetailScreen` gives
         // EntryDetailNotFound — kept as its own state only for a test's
         // sake (entry_detail_state.dart's own doc).
-        emit(EntryDetailError(message: failure.message));
+        emit(
+          EntryDetailError(
+            message: failure.message,
+            sessionStatus: _sessionStatus,
+          ),
+        );
       },
       (entry) {
         PendingEntryWrite? matchingPending;
@@ -102,6 +129,7 @@ class EntryDetailCubit extends Cubit<EntryDetailState> {
           EntryDetailData(
             entry: entry,
             badgeState: deriveSyncBadgeState(entry, matchingPending),
+            sessionStatus: _sessionStatus,
           ),
         );
       },

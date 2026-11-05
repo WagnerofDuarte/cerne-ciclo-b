@@ -525,6 +525,46 @@ void main() {
           expect(location(router), '${AppRoutePaths.meusRegistros}/e1');
         },
       );
+
+      testWidgets(
+        'the nested route is gated by the same shared redirect as every '
+        'other destination — navigating to it while unauthenticated is '
+        'bounced to /auth, never reaching EntryDetailScreen (review '
+        'finding, round 2: previously only the authenticated happy path '
+        'was covered)',
+        (tester) async {
+          final router = await pumpRouter(tester);
+          fakeSessionRepository.setStatus(SessionStatus.unauthenticated);
+          await tester.pumpAndSettle();
+
+          router.go('${AppRoutePaths.meusRegistros}/e1');
+          await tester.pumpAndSettle();
+
+          expect(location(router), AppRoutePaths.auth);
+          expect(find.byType(EntryDetailScreen), findsNothing);
+        },
+      );
+
+      testWidgets(
+        'a mid-session expiry while already on the nested route never '
+        'navigates away, same as any other non-boot/non-auth destination '
+        '(review finding, round 2)',
+        (tester) async {
+          final router = await pumpRouter(tester);
+          fakeSessionRepository.setStatus(SessionStatus.authenticated);
+          await tester.pumpAndSettle();
+
+          router.go('${AppRoutePaths.meusRegistros}/e1');
+          await tester.pumpAndSettle();
+          expect(location(router), '${AppRoutePaths.meusRegistros}/e1');
+
+          fakeSessionRepository.setStatus(SessionStatus.expired);
+          await tester.pumpAndSettle();
+
+          expect(location(router), '${AppRoutePaths.meusRegistros}/e1');
+          expect(find.byType(EntryDetailScreen), findsOneWidget);
+        },
+      );
     },
   );
 }

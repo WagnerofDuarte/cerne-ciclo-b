@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/design_tokens.dart';
 import '../../../../core/di/injection_container.dart';
-import '../../../../core/navigation/app_router.dart';
+import '../../../../core/navigation/app_route_paths.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/back_arrow_header.dart';
 import '../../../capture/presentation/cubit/audio_entry_cubit.dart';
@@ -54,6 +54,12 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
   Timer? _skeletonTimer;
   bool _showSkeleton = false;
 
+  /// Review fix (round 2, spec-4-4) — guards `_openDetail` against a rapid
+  /// double-tap on a card pushing `/meus-registros/:id` twice (stacking two
+  /// detail-route instances); cleared once the pushed route is popped, via
+  /// `whenComplete` below.
+  bool _navigatingToDetail = false;
+
   @override
   void initState() {
     super.initState();
@@ -73,6 +79,25 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
       ..removeListener(_onScroll)
       ..dispose();
     super.dispose();
+  }
+
+  void _openDetail(Entry entry) {
+    if (_navigatingToDetail) {
+      return;
+    }
+    _navigatingToDetail = true;
+    context
+        .push(
+          '${AppRoutePaths.meusRegistros}/'
+          '${Uri.encodeComponent(entry.id)}',
+        )
+        .whenComplete(() {
+          if (mounted) {
+            setState(() => _navigatingToDetail = false);
+          } else {
+            _navigatingToDetail = false;
+          }
+        });
   }
 
   void _onScroll() {
@@ -115,10 +140,7 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
                     scrollController: _scrollController,
                     onRetryLoadMore: widget.cubit.retryLoadMore,
                     onRetryTap: (entry) => widget.cubit.retry(entry.id),
-                    onCardTap: (entry) => context.push(
-                      '${AppRoutePaths.meusRegistros}/'
-                      '${Uri.encodeComponent(entry.id)}',
-                    ),
+                    onCardTap: _openDetail,
                   ),
                 },
               ),
