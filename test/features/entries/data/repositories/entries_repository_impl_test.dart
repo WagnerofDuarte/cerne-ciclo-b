@@ -667,7 +667,14 @@ void main() {
     test('writes every EntryDto.toJson() to the Hive box (putAll), then '
         'returns Right(List<Entry>) mapped from the dtos, same order the '
         'data source returned', () async {
-      when(() => mockRemoteDataSource.search('ansiedade')).thenAnswer(
+      when(
+        () => mockRemoteDataSource.search(
+          'ansiedade',
+          source: any(named: 'source'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
+        ),
+      ).thenAnswer(
         (_) async => right([
           _listDto('e1', '2026-01-02T00:00:00Z'),
           _listDto('e2', '2026-01-01T00:00:00Z'),
@@ -690,8 +697,14 @@ void main() {
 
     test('an empty result decodes to an empty list — putAll still called '
         'with an empty map, never throws', () async {
-      when(() => mockRemoteDataSource.search('nada'))
-          .thenAnswer((_) async => right(<EntryDto>[]));
+      when(
+        () => mockRemoteDataSource.search(
+          'nada',
+          source: any(named: 'source'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
+        ),
+      ).thenAnswer((_) async => right(<EntryDto>[]));
 
       final result = await repository.search('nada');
 
@@ -703,7 +716,14 @@ void main() {
 
     test('a Hive write failure maps to Left(malformedResponse), never '
         'throws (RNF09)', () async {
-      when(() => mockRemoteDataSource.search('ansiedade')).thenAnswer(
+      when(
+        () => mockRemoteDataSource.search(
+          'ansiedade',
+          source: any(named: 'source'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
+        ),
+      ).thenAnswer(
         (_) async => right([_listDto('e1', '2026-01-01T00:00:00Z')]),
       );
       when(() => mockBox.putAll(any())).thenThrow(Exception('disk full'));
@@ -721,7 +741,14 @@ void main() {
         'response is de-duplicated (first-occurrence-wins) before both the '
         'putAll write and the returned list — so the two stay consistent '
         'and a ListView keyed by entry id never sees a repeated key', () async {
-      when(() => mockRemoteDataSource.search('ansiedade')).thenAnswer(
+      when(
+        () => mockRemoteDataSource.search(
+          'ansiedade',
+          source: any(named: 'source'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
+        ),
+      ).thenAnswer(
         (_) async => right([
           _listDto('e1', '2026-01-02T00:00:00Z'),
           _listDto('e1', '2026-01-01T00:00:00Z'),
@@ -741,12 +768,49 @@ void main() {
         expect(entries.map((e) => e.id), ['e1', 'e2']);
       });
     });
+
+    test('spec-5-3: forwards source/dateFrom/dateTo straight through to '
+        'the data source, verbatim', () async {
+      final dateFrom = DateTime(2026, 1, 1);
+      final dateTo = DateTime(2026, 1, 31);
+      when(
+        () => mockRemoteDataSource.search(
+          'ansiedade',
+          source: any(named: 'source'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
+        ),
+      ).thenAnswer((_) async => right(<EntryDto>[]));
+
+      await repository.search(
+        'ansiedade',
+        source: EntrySource.audio,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+      );
+
+      verify(
+        () => mockRemoteDataSource.search(
+          'ansiedade',
+          source: EntrySource.audio,
+          dateFrom: dateFrom,
+          dateTo: dateTo,
+        ),
+      ).called(1);
+    });
   });
 
   group('search() — failure (Boundaries/AD-9: no cache fallback)', () {
     test('networkOffline propagates as Left, unmapped — unlike list()/'
         'getById(), there is no offline cache fallback for search', () async {
-      when(() => mockRemoteDataSource.search('ansiedade')).thenAnswer(
+      when(
+        () => mockRemoteDataSource.search(
+          'ansiedade',
+          source: any(named: 'source'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
+        ),
+      ).thenAnswer(
         (_) async => left(const Failure.networkOffline(message: 'Offline')),
       );
 
@@ -763,7 +827,14 @@ void main() {
 
     test('networkTimeout propagates as Left too, same as networkOffline —'
         ' no fallback either', () async {
-      when(() => mockRemoteDataSource.search('ansiedade')).thenAnswer(
+      when(
+        () => mockRemoteDataSource.search(
+          'ansiedade',
+          source: any(named: 'source'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
+        ),
+      ).thenAnswer(
         (_) async => left(const Failure.networkTimeout(message: 'Timed out')),
       );
 
@@ -779,7 +850,14 @@ void main() {
 
     test('every other Failure (e.g. authExpired) propagates as Left, '
         'unmapped too', () async {
-      when(() => mockRemoteDataSource.search('ansiedade')).thenAnswer(
+      when(
+        () => mockRemoteDataSource.search(
+          'ansiedade',
+          source: any(named: 'source'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
+        ),
+      ).thenAnswer(
         (_) async =>
             left(const Failure.authExpired(message: 'Sessão expirada')),
       );

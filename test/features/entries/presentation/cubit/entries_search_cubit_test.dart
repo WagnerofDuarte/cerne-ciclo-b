@@ -32,6 +32,12 @@ class _FakeEntriesRepository implements EntriesRepository {
   final List<Completer<Either<Failure, List<Entry>>>> _completers = [];
   final List<String> searchCalls = [];
 
+  /// spec-5-3 — every `source`/`dateFrom`/`dateTo` [search] was called
+  /// with, in order; `updateFilters()`'s own tests below read this to
+  /// assert what the cubit actually forwarded.
+  final List<({EntrySource? source, DateTime? dateFrom, DateTime? dateTo})>
+      searchFilterCalls = [];
+
   /// When `true`, [search] returns a `Completer`-backed future the test
   /// resolves explicitly (via [resolve]) rather than immediately returning
   /// a queued result — needed to reproduce a stale in-flight call landing
@@ -47,8 +53,16 @@ class _FakeEntriesRepository implements EntriesRepository {
   }
 
   @override
-  Future<Either<Failure, List<Entry>>> search(String query) {
+  Future<Either<Failure, List<Entry>>> search(
+    String query, {
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) {
     searchCalls.add(query);
+    searchFilterCalls.add(
+      (source: source, dateFrom: dateFrom, dateTo: dateTo),
+    );
     if (gated) {
       final completer = Completer<Either<Failure, List<Entry>>>();
       _completers.add(completer);
@@ -341,4 +355,182 @@ void main() {
       // No exception means the generation/isClosed guard held.
     },
   );
+
+  group('spec-5-3: updateFilters()', () {
+    test(
+      'Boundaries: "While idle: silent storage, no call" — updateFilters() '
+      'with no active query stores the fields but never calls search()',
+      () {
+        cubit.updateFilters(source: EntrySource.audio);
+
+        expect(fakeRepository.searchCalls, isEmpty);
+      },
+    );
+
+    test(
+      'review finding: calling updateFilters() with the exact same '
+      'source/dateFrom/dateTo already stored is a no-op during an active '
+      'search — no redundant entries-search call, since nothing actually '
+      'changed (e.g. MeusRegistrosScreen.initState()\'s own unconditional '
+      'reset-to-null on every mount, when no filter was ever active)',
+      () async {
+        fakeRepository.queueSearch(right([_entry('e1')]));
+        cubit.onQueryChanged('ansiedade');
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        expect(fakeRepository.searchCalls, ['ansiedade']);
+
+        // Same values already stored (both default to null) — must not
+        // fire a second search() call.
+        cubit.updateFilters();
+        await Future<void>.delayed(Duration.zero);
+
+        expect(fakeRepository.searchCalls, ['ansiedade']);
+      },
+    );
+
+    test(
+      'review finding: updateFilters() during an active search never '
+      'throws after close() — same emit-after-close guard '
+      'onQueryChanged()\'s own empty-query branch already has',
+      () async {
+        fakeRepository.gated = true;
+        cubit.onQueryChanged('ansiedade');
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        expect(cubit.state, isA<ResourceLoading<List<Entry>>>());
+
+        await cubit.close();
+
+        // A genuinely different filter value, so the no-op-when-unchanged
+        // guard above doesn't mask this one — only the isClosed guard
+        // should prevent the emit.
+        expect(
+          () => cubit.updateFilters(source: EntrySource.audio),
+          returnsNormally,
+        );
+      },
+    );
+
+    test(
+      'I/O matrix: "Apply filter during active search" — updateFilters() '
+      'while a search is active cancels any pending debounce and '
+      'immediately re-runs the same term with the new filter — no 300ms '
+      'wait',
+      () async {
+        fakeRepository.queueSearch(right([_entry('e1')]));
+        cubit.onQueryChanged('ansiedade');
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        expect(fakeRepository.searchCalls, ['ansiedade']);
+
+        fakeRepository.queueSearch(right([_entry('e2')]));
+        cubit.updateFilters(source: EntrySource.audio);
+        // No delay at all — the re-search must fire immediately, not
+        // wait out another debounce window.
+        await Future<void>.delayed(Duration.zero);
+
+        expect(fakeRepository.searchCalls, ['ansiedade', 'ansiedade']);
+        expect(
+          fakeRepository.searchFilterCalls.last.source,
+          EntrySource.audio,
+        );
+      },
+    );
+
+    test(
+      'a filter applied, then a brand-new query typed, carries that same '
+      'filter forward to the new query too (the filter selection outlives '
+      'any single search term)',
+      () async {
+        cubit.updateFilters(source: EntrySource.audio);
+        fakeRepository.queueSearch(right([_entry('e1')]));
+
+        cubit.onQueryChanged('nervosismo');
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+
+        expect(
+          fakeRepository.searchFilterCalls.single.source,
+          EntrySource.audio,
+        );
+      },
+    );
+
+    test(
+      'I/O matrix: "Clear filters during active search" — updateFilters() '
+      'with no args while active re-queries the same term with every '
+      'field null',
+      () async {
+        cubit.updateFilters(
+          source: EntrySource.audio,
+          dateFrom: DateTime(2026, 1, 1),
+          dateTo: DateTime(2026, 1, 31),
+        );
+        fakeRepository.queueSearch(right([_entry('e1')]));
+        cubit.onQueryChanged('ansiedade');
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        expect(
+          fakeRepository.searchFilterCalls.last.source,
+          EntrySource.audio,
+        );
+
+        fakeRepository.queueSearch(right([_entry('e2')]));
+        cubit.updateFilters();
+        await Future<void>.delayed(Duration.zero);
+
+        final call = fakeRepository.searchFilterCalls.last;
+        expect(call.source, isNull);
+        expect(call.dateFrom, isNull);
+        expect(call.dateTo, isNull);
+      },
+    );
+
+    test(
+      'cancels a pending (not-yet-fired) debounce — updateFilters() during '
+      'the 300ms window fires the re-search with the already-typed term '
+      'immediately, and the original debounced call never also fires',
+      () async {
+        fakeRepository.queueSearch(right([_entry('e1')]));
+
+        cubit.onQueryChanged('ansiedade');
+        // Still well inside the 300ms debounce window — no call yet.
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(fakeRepository.searchCalls, isEmpty);
+
+        cubit.updateFilters(source: EntrySource.audio);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(fakeRepository.searchCalls, ['ansiedade']);
+
+        // The original debounce timer, had it fired, would have called
+        // search() a second time — confirm it never does.
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        expect(fakeRepository.searchCalls, ['ansiedade']);
+      },
+    );
+
+    test(
+      'updateFilters() bumps the generation, discarding a stale in-flight '
+      'call the same way a new query does',
+      () async {
+        fakeRepository.gated = true;
+        cubit.onQueryChanged('ansiedade');
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        expect(cubit.state, isA<ResourceLoading<List<Entry>>>());
+
+        cubit.updateFilters(source: EntrySource.audio);
+        await Future<void>.delayed(Duration.zero);
+        expect(fakeRepository.searchCalls, ['ansiedade', 'ansiedade']);
+
+        // Call #0 (the stale, pre-filter one) resolving must never land.
+        fakeRepository.resolve(0, right([_entry('stale')]));
+        await Future<void>.delayed(Duration.zero);
+        expect(cubit.state, isA<ResourceLoading<List<Entry>>>());
+
+        fakeRepository.resolve(1, right([_entry('fresh')]));
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          (cubit.state as ResourceData<List<Entry>>).data.map((e) => e.id),
+          ['fresh'],
+        );
+      },
+    );
+  });
 }

@@ -132,8 +132,18 @@ class EntriesRepositoryImpl implements EntriesRepository {
   }
 
   @override
-  Future<Either<Failure, List<Entry>>> search(String query) async {
-    final result = await _remoteDataSource.search(query);
+  Future<Either<Failure, List<Entry>>> search(
+    String query, {
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
+    final result = await _remoteDataSource.search(
+      query,
+      source: source,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+    );
     return result.match(
       (failure) async {
         // Boundaries/AD-9: no cache fallback for search, unlike

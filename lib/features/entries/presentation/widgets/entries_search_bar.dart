@@ -74,7 +74,10 @@ class EntriesSearchBar extends StatelessWidget {
                 onPressed: onFilterTap,
                 // Review finding: an unlabeled icon-only button gives a
                 // screen-reader user no indication of its purpose.
-                tooltip: 'Filtros',
+                // Round-2 review fix: also distinguishes "filters active"
+                // for a screen-reader user, who otherwise has no way to
+                // learn that beyond separately discovering the chip row.
+                tooltip: hasActiveFilters ? 'Filtros (ativos)' : 'Filtros',
                 icon: Icon(
                   Icons.filter_list,
                   color: hasActiveFilters

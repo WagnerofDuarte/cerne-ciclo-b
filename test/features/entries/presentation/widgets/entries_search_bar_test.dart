@@ -46,6 +46,28 @@ void main() {
   );
 
   testWidgets(
+    'Round-2 review fix: with hasActiveFilters true, the tooltip itself '
+    'also signals that filters are currently applied, not just the '
+    'filled icon color',
+    (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: EntriesSearchBar(
+              onChanged: (_) {},
+              onFilterTap: () {},
+              hasActiveFilters: true,
+            ),
+          ),
+        ),
+      );
+
+      final iconButton = tester.widget<IconButton>(find.byType(IconButton));
+      expect(iconButton.tooltip, 'Filtros (ativos)');
+    },
+  );
+
+  testWidgets(
     'every keystroke feeds onChanged directly, with the raw (untrimmed) '
     'value — trimming/debouncing is EntriesSearchCubit\'s own job, never '
     'this widget\'s',

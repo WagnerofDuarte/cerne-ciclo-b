@@ -79,11 +79,24 @@ abstract class EntriesRepository {
   /// method — `EntriesSearchCubit` owns that guarantee, never this
   /// repository.
   ///
+  /// spec-5-3 — [source]/[dateFrom]/[dateTo] are forwarded to
+  /// `entries-search` as its own `source`/`dateFrom`/`dateTo` query
+  /// parameters, each only when non-null — same AND-narrowing convention
+  /// [list]'s own doc already gives, now carried by `EntriesSearchCubit`'s
+  /// own filter fields (`updateFilters()`) instead of `MeusRegistrosCubit`'s
+  /// (the two cubits never share state directly, RNF06 — only
+  /// `MeusRegistrosScreen` bridges them).
+  ///
   /// On success, persists every returned entry to the `entries` Hive box
   /// (`putAll`) *before* returning `Right` — same "persist then return"
   /// ordering [list]/[getById] already use. Unlike [list]/[getById], there
   /// is no offline/timeout cache fallback here (AD-9: no client-side
   /// vector index) — every [Failure], including
   /// [Failure.networkOffline], is returned as `Left`, unmapped (RNF09).
-  Future<Either<Failure, List<Entry>>> search(String query);
+  Future<Either<Failure, List<Entry>>> search(
+    String query, {
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  });
 }

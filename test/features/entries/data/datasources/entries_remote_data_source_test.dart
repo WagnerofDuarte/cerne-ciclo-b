@@ -588,6 +588,105 @@ void main() {
       expect(captured.single, {'q': 'ansiedade'});
     });
 
+    test('spec-5-3: source/dateFrom/dateTo are omitted entirely when null '
+        '(same convention as list())', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: any(named: 'queryParameters'),
+        ),
+      ).thenAnswer((_) async => right(_listBody()));
+
+      await dataSource.search('ansiedade');
+
+      final captured = verify(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: captureAny(named: 'queryParameters'),
+        ),
+      ).captured;
+      expect(captured.single, {'q': 'ansiedade'});
+    });
+
+    test('spec-5-3: a non-null source is sent as its own .name', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: any(named: 'queryParameters'),
+        ),
+      ).thenAnswer((_) async => right(_listBody()));
+
+      await dataSource.search('ansiedade', source: EntrySource.audio);
+
+      final captured = verify(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: captureAny(named: 'queryParameters'),
+        ),
+      ).captured;
+      expect(captured.single, {'q': 'ansiedade', 'source': 'audio'});
+    });
+
+    test('spec-5-3: non-null dateFrom/dateTo are sent as their own '
+        '.toUtc().toIso8601String() — same RFC3339 rationale list() already '
+        'has', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: any(named: 'queryParameters'),
+        ),
+      ).thenAnswer((_) async => right(_listBody()));
+      final dateFrom = DateTime(2026, 1, 1);
+      final dateTo = DateTime(2026, 1, 31);
+
+      await dataSource.search('ansiedade', dateFrom: dateFrom, dateTo: dateTo);
+
+      final captured = verify(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: captureAny(named: 'queryParameters'),
+        ),
+      ).captured;
+      final sent = captured.single as Map<String, dynamic>;
+      expect(sent['q'], 'ansiedade');
+      expect(sent['dateFrom'], dateFrom.toUtc().toIso8601String());
+      expect(sent['dateTo'], dateTo.toUtc().toIso8601String());
+      expect(sent['dateFrom'], endsWith('Z'));
+      expect(sent['dateTo'], endsWith('Z'));
+    });
+
+    test('spec-5-3: q + source + dateFrom + dateTo are all sent together in '
+        'one query — AND narrowing is the backend\'s own job', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: any(named: 'queryParameters'),
+        ),
+      ).thenAnswer((_) async => right(_listBody()));
+      final dateFrom = DateTime(2026, 1, 1);
+      final dateTo = DateTime(2026, 1, 31);
+
+      await dataSource.search(
+        'ansiedade',
+        source: EntrySource.photo,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+      );
+
+      final captured = verify(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: captureAny(named: 'queryParameters'),
+        ),
+      ).captured;
+      expect(captured.single, {
+        'q': 'ansiedade',
+        'source': 'photo',
+        'dateFrom': dateFrom.toUtc().toIso8601String(),
+        'dateTo': dateTo.toUtc().toIso8601String(),
+      });
+    });
+
     test('decodes every item in data via the same EntryDto.fromJson list() '
         'already uses', () async {
       when(

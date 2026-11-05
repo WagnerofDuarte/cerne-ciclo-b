@@ -331,3 +331,19 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-5-1-semantic-search-with-debounced-input.md`
   summary: `search()`'s DTO→Entity mapping (`dedupedDtos.map(_toEntry).toList()`) runs after the `_entriesBox.putAll` try/catch, so an exception thrown during mapping would escape `EntriesRepositoryImpl.search()` unmapped (RNF09 expects every repository exception caught).
   evidence: `lib/features/entries/data/repositories/entries_repository_impl.dart:153`. Not introduced by this story — the identical gap already exists in `list()`'s and `getById()`'s own DTO→Entity mapping, so a fix belongs to all three methods together, not this one in isolation.
+
+## Deferred from: code review of spec-5-2-metadata-filters, round 2 (2026-11-05)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-2-metadata-filters.md`
+  summary: The round-2 fix for story 5.1 bundled into the same commit (`MeusRegistrosScreen.initState` arming `_searchSkeletonTimer` when `EntriesSearchCubit` is already `ResourceLoading` at remount) always starts a fresh 300ms timer regardless of how long the search has already been loading — a remount after the search has been loading well past the threshold still waits up to another full 300ms before showing the skeleton.
+  evidence: `lib/features/entries/presentation/screens/meus_registros_screen.dart:96-105`. A complete fix needs `EntriesSearchCubit` (story 5.1, already `done`) to expose a `loadingStartedAt` timestamp, which is out of story 5.2's own scope; the consequence is a sub-300ms cosmetic delay in an already-narrow remount-while-loading scenario, not a correctness issue.
+
+## Deferred from: code review of spec-5-3-combined-search-filter-non-disruptive-clearing (2026-11-05)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-3-combined-search-filter-non-disruptive-clearing.md`
+  summary: Story 5.2's round-2 fix for the source-chip's "x" (`_ActiveFiltersRow`'s `onRemove` now passes `dateRangePreset: dateRangePreset` back into `cubit.applyFilters()` so the remaining date-range chip keeps its real preset label instead of reverting to "Todo o período") has no test exercising the one scenario it was written for — source and date-range both active, remove the source chip specifically.
+  evidence: `lib/features/entries/presentation/screens/meus_registros_screen.dart:716-728`. Grepping `activeDateRangePreset`/`Icons.close` across `test/` shows every existing assertion either applies a fresh filter, exercises the *other* chip's removal (date-range "x", which correctly resets to `allTime`), or taps a lone/`.last` chip when only one is present — none taps the source chip's "x" while a date-range chip is also showing. Dropping that argument back out would silently mislabel the remaining chip and mis-pre-select the sheet on reopen, with no test failing. Not introduced by this story — the fix itself predates 5.3 (bundled 5.2 round-2 work); only the gap was surfaced here.
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-5-3-combined-search-filter-non-disruptive-clearing.md`
+  summary: No e2e test exercises `entries-search` with `source`/`dateFrom`/`dateTo` over the real network/Hive pipeline (real `UrlBuilder`/interceptors/`Dio`) — only the mocked-`ApiClient` tier (`entries_remote_data_source_test.dart`) and the fake-repository tier (cubit/widget tests) cover the new combined-query params.
+  evidence: `test/features/entries/entries_filters_flow_e2e_test.dart` (5.2's own e2e, covering `entries-list` only) and `test/features/entries/entries_search_flow_e2e_test.dart` (5.1's, covering unfiltered `entries-search` only) were both left untouched — neither was in this story's Code Map/Tasks list, and the search e2e file's existing calls remain valid against the new optional params (no filters passed = unchanged request shape). Every I/O-matrix row is still covered at the unit/widget tier, so this isn't a blocking gap, just a thin spot in the pyramid's top layer.

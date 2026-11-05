@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/design_tokens.dart';
 import '../../../../core/widgets/app_button.dart';
+import '../../domain/entities/date_range_preset.dart';
 import '../../domain/entities/entry.dart';
+import '../cubit/entries_search_cubit.dart';
 import '../cubit/meus_registros_cubit.dart';
 
 /// TIPO DE ENTRADA's own label for each [EntrySource]
@@ -18,71 +20,15 @@ String entrySourceLabel(EntrySource source) => switch (source) {
   EntrySource.chat => 'Chat',
 };
 
-/// INTERVALO DE DATA's own 3 choices (`prototype-extract.md`; Design
-/// Notes confirms single-choice, same as the prototype itself already
-/// shows for this one group) — each computes its own `dateFrom`/`dateTo`
-/// pair via [rangeFrom]. [allTime] is itself a selectable choice meaning
-/// "no date filter at all", not some maximal range — it resolves to
-/// `(null, null)`.
-enum DateRangePreset {
-  allTime,
-  thisWeek,
-  thisMonth;
-
-  String get label => switch (this) {
-    DateRangePreset.allTime => 'Todo o período',
-    DateRangePreset.thisWeek => 'Esta semana',
-    DateRangePreset.thisMonth => 'Este mês',
-  };
-
-  /// This preset's own `(dateFrom, dateTo)` pair, anchored to [now] (a
-  /// parameter only so a test can pin it — every real call site passes
-  /// `DateTime.now()`). `dateTo` is always [now] itself — "through right
-  /// now" — `docs/input/` is silent on inclusive/exclusive bounds here
-  /// (AGENTS.md policy: "decide and proceed"). `dateFrom` is local
-  /// midnight of the Monday starting this week, or the 1st of this
-  /// calendar month.
-  (DateTime?, DateTime?) rangeFrom(DateTime now) {
-    final today = DateTime(now.year, now.month, now.day);
-    switch (this) {
-      case DateRangePreset.allTime:
-        return (null, null);
-      case DateRangePreset.thisWeek:
-        return (today.subtract(Duration(days: today.weekday - 1)), now);
-      case DateRangePreset.thisMonth:
-        return (DateTime(today.year, today.month), now);
-    }
-  }
-}
-
-/// The reverse of [DateRangePreset.rangeFrom] — which preset (if any) a
-/// given [dateFrom] matches, by its own start boundary alone (`dateTo`
-/// drifts with "now" on every render, so it's never part of this match).
-/// A `null` [dateFrom] (no date filter active) always matches
-/// [DateRangePreset.allTime]; shared by this sheet's own pre-selection
-/// (reopening with a filter already active) and `MeusRegistrosScreen`'s
-/// active-filter chip row (labeling the currently-active range the same
-/// way the sheet itself would).
-///
-/// Checks [DateRangePreset.thisMonth] *before* [DateRangePreset.thisWeek]
-/// (code-review fix) — when the month's 1st day also happens to be this
-/// week's own Monday, the two presets' start boundaries are identical, so
-/// whichever is checked first always wins; checking `thisWeek` first (the
-/// original order) mislabeled a month-long filter as "Esta semana" on
-/// every such month.
-DateRangePreset dateRangePresetMatching(DateTime? dateFrom, DateTime now) {
-  if (dateFrom == null) {
-    return DateRangePreset.allTime;
-  }
-  final today = DateTime(now.year, now.month, now.day);
-  if (dateFrom == DateTime(today.year, today.month)) {
-    return DateRangePreset.thisMonth;
-  }
-  if (dateFrom == today.subtract(Duration(days: today.weekday - 1))) {
-    return DateRangePreset.thisWeek;
-  }
-  return DateRangePreset.allTime;
-}
+/// [DateRangePreset]'s own UI copy — kept out of the domain enum itself,
+/// same split [entrySourceLabel] already gives [EntrySource]; shared by
+/// this sheet's own chips and `MeusRegistrosScreen`'s active-filter chip
+/// row.
+String dateRangePresetLabel(DateRangePreset preset) => switch (preset) {
+  DateRangePreset.allTime => 'Todo o período',
+  DateRangePreset.thisWeek => 'Esta semana',
+  DateRangePreset.thisMonth => 'Este mês',
+};
 
 /// The filter bottom sheet (spec-5-2) — two single-choice groups
 /// ("INTERVALO DE DATA", "TIPO DE ENTRADA"; Design Notes: no "CATEGORIA"
@@ -91,7 +37,11 @@ DateRangePreset dateRangePresetMatching(DateTime? dateFrom, DateTime now) {
 /// choreography (`isScrollControlled`, `useSafeArea`, `colorScrimHeavy`, a
 /// Reduce-Motion-aware `durationSheetUp` entrance) — Code Map.
 class EntriesFilterSheet extends StatefulWidget {
-  const EntriesFilterSheet({required this.cubit, super.key});
+  const EntriesFilterSheet({
+    required this.cubit,
+    required this.searchCubit,
+    super.key,
+  });
 
   /// Passed in directly rather than read via `context.read` (same
   /// rationale `InsertionModal`'s own cubit constructor params give): a
@@ -101,6 +51,13 @@ class EntriesFilterSheet extends StatefulWidget {
   /// anyway.
   final MeusRegistrosCubit cubit;
 
+  /// spec-5-3 — `MeusRegistrosScreen`'s own bridge to
+  /// `EntriesSearchCubit` (Design Notes: the two cubits never import each
+  /// other, RNF06); [_EntriesFilterSheetState._applyAndClose] calls
+  /// [cubit]'s `applyFilters()` and this cubit's own `updateFilters()`
+  /// side by side.
+  final EntriesSearchCubit searchCubit;
+
   /// Presents the sheet exactly as the class doc describes. [cubit]'s own
   /// `applyFilters()` is called directly by this sheet's "Aplicar" button
   /// (`_EntriesFilterSheetState._applyAndClose`) — this `static` method
@@ -108,6 +65,7 @@ class EntriesFilterSheet extends StatefulWidget {
   static Future<void> show(
     BuildContext context, {
     required MeusRegistrosCubit cubit,
+    required EntriesSearchCubit searchCubit,
   }) async {
     final reduceMotion = MediaQuery.of(context).disableAnimations;
     final controller =
@@ -125,7 +83,8 @@ class EntriesFilterSheet extends StatefulWidget {
         backgroundColor: Colors.transparent,
         elevation: 0,
         transitionAnimationController: controller,
-        builder: (_) => EntriesFilterSheet(cubit: cubit),
+        builder: (_) =>
+            EntriesFilterSheet(cubit: cubit, searchCubit: searchCubit),
       );
     } finally {
       // Same "wait for the exit animation before disposing the
@@ -164,16 +123,27 @@ class _EntriesFilterSheetState extends State<EntriesFilterSheet> {
     // silent on this exact behavior (AGENTS.md policy: "decide and
     // proceed") — rather than always reopening blank, so reopening the
     // sheet to tweak just one filter doesn't silently discard the other.
+    // Round-2 review fix: reads the cubit's own stored preset directly
+    // rather than re-deriving it from `activeDateFrom` by equality match —
+    // that re-derivation went stale (mis-pre-selecting "Todo o período")
+    // the moment a day/week/month boundary rolled over while the filter
+    // stayed active.
     _pendingSource = widget.cubit.activeSource;
-    _pendingDateRange = dateRangePresetMatching(
-      widget.cubit.activeDateFrom,
-      DateTime.now(),
-    );
+    _pendingDateRange = widget.cubit.activeDateRangePreset;
   }
 
   void _applyAndClose() {
     final (dateFrom, dateTo) = _pendingDateRange.rangeFrom(DateTime.now());
     widget.cubit.applyFilters(
+      source: _pendingSource,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+      dateRangePreset: _pendingDateRange,
+    );
+    // spec-5-3 — right alongside the existing `applyFilters()` call above:
+    // a search that's currently active must carry this same filter
+    // selection too (Boundaries), not just the plain/filtered timeline.
+    widget.searchCubit.updateFilters(
       source: _pendingSource,
       dateFrom: dateFrom,
       dateTo: dateTo,
@@ -231,7 +201,7 @@ class _EntriesFilterSheetState extends State<EntriesFilterSheet> {
                 children: [
                   for (final preset in DateRangePreset.values)
                     _FilterChip(
-                      label: preset.label,
+                      label: dateRangePresetLabel(preset),
                       selected: _pendingDateRange == preset,
                       onTap: () => setState(() => _pendingDateRange = preset),
                     ),

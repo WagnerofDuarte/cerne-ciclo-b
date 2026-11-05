@@ -89,6 +89,15 @@ class _FakeEntriesRepository implements EntriesRepository {
   final List<Either<Failure, List<Entry>>> _searchResults = [];
   final List<String> searchCalls = [];
 
+  /// spec-5-3 — every `query`/`source`/`dateFrom`/`dateTo` this fake's
+  /// `search()` was called with, in order; the combined search+filter
+  /// tests below read this to assert what `EntriesSearchCubit` actually
+  /// sent, same rationale [listFilterCalls] already gives `list()`.
+  final List<
+    ({String query, EntrySource? source, DateTime? dateFrom, DateTime? dateTo})
+  >
+  searchFilterCalls = [];
+
   /// spec-5-1 — same [firstCallGate] rationale as `list()`'s own gate,
   /// applied to `search()` instead: lets a test hold the search call
   /// unresolved to observe `_searchSkeletonTimer`'s own 300ms threshold
@@ -142,8 +151,19 @@ class _FakeEntriesRepository implements EntriesRepository {
       throw UnimplementedError('not expected to be called');
 
   @override
-  Future<Either<Failure, List<Entry>>> search(String query) async {
+  Future<Either<Failure, List<Entry>>> search(
+    String query, {
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
     searchCalls.add(query);
+    searchFilterCalls.add((
+      query: query,
+      source: source,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+    ));
     if (searchGate != null) {
       await searchGate!.future;
     }
@@ -510,6 +530,45 @@ void main() {
 
         expect(find.text('Nenhum registro ainda'), findsOneWidget);
         expect(fakeRepository.listCallCount, 2);
+      },
+    );
+
+    testWidgets(
+      'round-2 review fix: with a filter active, a load failure\'s inline '
+      '"Tentar novamente" retries with that same filter intact — the '
+      'actual UI wiring this story\'s retryCurrentPage() fix was for, '
+      'unlike the cubit-level test which calls retryCurrentPage() '
+      'directly and the widget test above which never has a filter '
+      'active (where loadFirstPage()/retryCurrentPage() are identical)',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        fakeRepository.queueList(
+          left(const Failure.authExpired(message: 'Sessão expirada')),
+        );
+        await tester.tap(find.byIcon(Icons.filter_list));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Áudio'));
+        await tester.tap(find.text('Aplicar'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Sessão expirada'), findsOneWidget);
+        expect(find.text('Tentar novamente'), findsOneWidget);
+
+        fakeRepository.queueList(
+          right(const EntriesPage(items: [], nextCursor: null)),
+        );
+        await tester.tap(find.text('Tentar novamente'));
+        await tester.pumpAndSettle();
+
+        // The retried call still carries the filter that was active when
+        // it failed — reverting `onRetry` to `loadFirstPage` would show
+        // isNull here instead.
+        expect(fakeRepository.listFilterCalls.last.source, EntrySource.audio);
       },
     );
 
@@ -1078,7 +1137,13 @@ void main() {
         'back while EntriesSearchCubit (a DI singleton) is still mid-search; '
         'BlocConsumer\'s listener never fires for a state already current at '
         'subscription time, so only initState inspecting the cubit\'s state '
-        'up front catches this', (tester) async {
+        'up front catches this. spec-5-3: initState now also calls '
+        'searchCubit.updateFilters(source: null, dateFrom: null, dateTo: '
+        'null) unconditionally on every mount (Boundaries: "no stale '
+        'filter carried forward") — neither mount here ever had an active '
+        'filter to begin with, so updateFilters()\'s own no-op-when-'
+        'unchanged guard (review finding) keeps this a single search() '
+        'call, not two', (tester) async {
       final gate = Completer<void>();
       addTearDown(() {
         if (!gate.isCompleted) {
@@ -1253,10 +1318,11 @@ void main() {
       },
     );
 
-    testWidgets('code-review fix: the funnel must not read as "filled" while a '
-        'search is active — filters+search integration is out of scope '
-        'this story (5.3) — and reverts to "filled" once the search query '
-        'is cleared again', (tester) async {
+    testWidgets('spec-5-3: reverses 5.2\'s own "must not read as filled while '
+        'searching" behavior — the funnel now stays filled (colorPrimary) '
+        'while a search is active too, since a filter now narrows that '
+        'search as well, rather than reading as misleadingly "filled" next '
+        'to results that were never actually filtered', (tester) async {
       final fakeRepository = _FakeEntriesRepository()
         ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
         ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
@@ -1278,15 +1344,16 @@ void main() {
       await tester.pump(const Duration(milliseconds: 350));
       await tester.pumpAndSettle();
 
-      // A search is now on screen — the filter is still active on the
-      // cubit, but it was never applied to this search, so the funnel
-      // must not read as "filled" here.
-      expect(funnelIcon().color, DesignTokens.colorTextSecondary);
+      // A search is now on screen — the filter applied above was also
+      // forwarded to this search (spec-5-3), so the funnel still reads
+      // as "filled" here.
+      expect(funnelIcon().color, DesignTokens.colorPrimary);
+      expect(fakeRepository.searchFilterCalls.last.source, EntrySource.manual);
 
       await tester.enterText(find.byType(TextField), '');
       await tester.pumpAndSettle();
 
-      // Back to the plain filtered timeline — "filled" again.
+      // Back to the plain filtered timeline — still "filled".
       expect(funnelIcon().color, DesignTokens.colorPrimary);
     });
 
@@ -1328,6 +1395,189 @@ void main() {
         expect(fakeRepository.listFilterCalls.last.dateTo, isNull);
         expect(find.text('Áudio'), findsOneWidget);
         expect(find.text('Este mês'), findsNothing);
+      },
+    );
+  });
+
+  group('spec-5-3: combined search + filter & non-disruptive clearing', () {
+    testWidgets(
+      'I/O matrix: "Apply filter during active search" — Aplicar fires one '
+      'entries-search call carrying both the already-typed term and the '
+      'new filter, and the chip row/funnel both reflect it over the '
+      'search results',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..queueSearch(right([_entry('search-1', '2026-01-01T10:00:00')]))
+          ..queueSearch(right([_entry('search-2', '2026-01-01T10:00:00')]));
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField), 'ansiedade');
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+        expect(fakeRepository.searchFilterCalls, hasLength(1));
+
+        await tester.tap(find.byIcon(Icons.filter_list));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Áudio'));
+        await tester.tap(find.text('Aplicar'));
+        await tester.pumpAndSettle();
+
+        expect(fakeRepository.searchFilterCalls, hasLength(2));
+        final call = fakeRepository.searchFilterCalls.last;
+        expect(call.query, 'ansiedade');
+        expect(call.source, EntrySource.audio);
+        // The chip row now renders above the search results, and the
+        // funnel reads as "filled".
+        expect(find.text('Áudio'), findsOneWidget);
+        expect(
+          tester.widget<Icon>(find.byIcon(Icons.filter_list)).color,
+          DesignTokens.colorPrimary,
+        );
+      },
+    );
+
+    testWidgets('I/O matrix: "Clear filters during active search" — "Limpar '
+        'filtros" re-queries entries-search with only q, no search-box/'
+        'screen disruption', (tester) async {
+      final fakeRepository = _FakeEntriesRepository()
+        ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+        ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+        ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+        ..queueSearch(right([_entry('search-1', '2026-01-01T10:00:00')]))
+        ..queueSearch(right([_entry('search-2', '2026-01-01T10:00:00')]));
+
+      await _pumpScreen(tester, fakeRepository);
+      await tester.pumpAndSettle();
+
+      // Filter applied first, while idle.
+      await tester.tap(find.byIcon(Icons.filter_list));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Áudio'));
+      await tester.tap(find.text('Este mês'));
+      await tester.tap(find.text('Aplicar'));
+      await tester.pumpAndSettle();
+      expect(fakeRepository.searchFilterCalls, isEmpty);
+
+      // Now a search starts, carrying that same filter selection.
+      await tester.enterText(find.byType(TextField), 'ansiedade');
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      expect(fakeRepository.searchFilterCalls, hasLength(1));
+      expect(fakeRepository.searchFilterCalls.single.source, EntrySource.audio);
+
+      await tester.tap(find.text('Limpar filtros'));
+      await tester.pumpAndSettle();
+
+      expect(fakeRepository.searchFilterCalls, hasLength(2));
+      final call = fakeRepository.searchFilterCalls.last;
+      expect(call.query, 'ansiedade');
+      expect(call.source, isNull);
+      expect(call.dateFrom, isNull);
+      // The search box itself was never touched/cleared.
+      expect(find.text('ansiedade'), findsOneWidget);
+      expect(find.text('Limpar filtros'), findsNothing);
+    });
+
+    testWidgets('I/O matrix: "Remove one of two active chips mid-search" — the '
+        'date-range chip\'s own "x" re-queries entries-search with q plus '
+        'only the still-active source filter', (tester) async {
+      final fakeRepository = _FakeEntriesRepository()
+        ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+        ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+        ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+        ..queueSearch(right([_entry('search-1', '2026-01-01T10:00:00')]))
+        ..queueSearch(right([_entry('search-2', '2026-01-01T10:00:00')]));
+
+      await _pumpScreen(tester, fakeRepository);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.filter_list));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Áudio'));
+      await tester.tap(find.text('Este mês'));
+      await tester.tap(find.text('Aplicar'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'ansiedade');
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      expect(fakeRepository.searchFilterCalls, hasLength(1));
+
+      // Two chips above the search results — the date-range one is the
+      // second, same ordering `_ActiveFiltersRow` always uses.
+      expect(find.byIcon(Icons.close), findsNWidgets(2));
+      await tester.tap(find.byIcon(Icons.close).last);
+      await tester.pumpAndSettle();
+
+      expect(fakeRepository.searchFilterCalls, hasLength(2));
+      final call = fakeRepository.searchFilterCalls.last;
+      expect(call.query, 'ansiedade');
+      expect(call.source, EntrySource.audio);
+      expect(call.dateFrom, isNull);
+      expect(find.text('Áudio'), findsOneWidget);
+      expect(find.text('Este mês'), findsNothing);
+    });
+
+    testWidgets(
+      'Boundaries: "Re-enter screen after a prior combined session" — '
+      'leaving with search+filter active and returning resets both '
+      'cubits\' filters, with no stale filter carried into the still-'
+      'active search',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..queueSearch(right([_entry('search-1', '2026-01-01T10:00:00')]))
+          ..queueSearch(right([_entry('search-2', '2026-01-01T10:00:00')]));
+
+        final cubit = MeusRegistrosCubit(
+          fakeRepository,
+          _FakePendingEntryWriteTracker(),
+        );
+        addTearDown(cubit.close);
+        final searchCubit = _searchCubitFor(fakeRepository);
+
+        Widget buildScreen() => MaterialApp(
+          home: MeusRegistrosScreen(cubit: cubit, searchCubit: searchCubit),
+        );
+
+        await tester.pumpWidget(buildScreen());
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byIcon(Icons.filter_list));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Áudio'));
+        await tester.tap(find.text('Aplicar'));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField), 'ansiedade');
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.pumpAndSettle();
+        expect(fakeRepository.searchFilterCalls.last.source, EntrySource.audio);
+        expect(cubit.hasActiveFilters, isTrue);
+
+        // Leave (tear down the screen's own State) and come back — both
+        // cubits are DI singletons that keep running underneath.
+        await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+        await tester.pumpWidget(buildScreen());
+        await tester.pumpAndSettle();
+
+        expect(cubit.hasActiveFilters, isFalse);
+        // The still-active search (never cleared by the remount) is now
+        // re-queried without the stale filter.
+        expect(fakeRepository.searchFilterCalls, hasLength(2));
+        final call = fakeRepository.searchFilterCalls.last;
+        expect(call.query, 'ansiedade');
+        expect(call.source, isNull);
+        expect(
+          tester.widget<Icon>(find.byIcon(Icons.filter_list)).color,
+          DesignTokens.colorTextSecondary,
+        );
       },
     );
   });

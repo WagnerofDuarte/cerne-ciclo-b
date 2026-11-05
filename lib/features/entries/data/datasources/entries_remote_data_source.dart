@@ -116,16 +116,31 @@ class EntriesRemoteDataSource {
   }
 
   /// spec-5-1 — calls `entries-search` (`ApiClient.get`) with exactly one
-  /// query parameter, `q` (Boundaries: no `limit`/`cursor`). The response's
-  /// `data` array decodes with the exact same `EntryDto.fromJson` [list]
-  /// already uses — a superset response (`similarity`/`mode` fields the
-  /// Code Map names) is simply ignored by `json_serializable`'s generated
-  /// `fromJson`, same convention [get]'s own superset-response doc already
-  /// gives.
-  Future<Either<Failure, List<EntryDto>>> search(String query) async {
+  /// required query parameter, `q` (Boundaries: no `limit`/`cursor`). The
+  /// response's `data` array decodes with the exact same `EntryDto.
+  /// fromJson` [list] already uses — a superset response (`similarity`/
+  /// `mode` fields the Code Map names) is simply ignored by
+  /// `json_serializable`'s generated `fromJson`, same convention [get]'s
+  /// own superset-response doc already gives.
+  ///
+  /// spec-5-3 — [source]/[dateFrom]/[dateTo] are sent only when non-null,
+  /// mirroring [list]'s own convention exactly: [source] as its own
+  /// `.name`, [dateFrom]/[dateTo] as `.toUtc().toIso8601String()` (same
+  /// RFC3339 rationale [list]'s own doc already gives).
+  Future<Either<Failure, List<EntryDto>>> search(
+    String query, {
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
     final result = await _apiClient.get(
       'entries-search',
-      queryParameters: {'q': query},
+      queryParameters: {
+        'q': query,
+        'source': ?source?.name,
+        'dateFrom': ?dateFrom?.toUtc().toIso8601String(),
+        'dateTo': ?dateTo?.toUtc().toIso8601String(),
+      },
     );
     return result.flatMap((json) {
       try {

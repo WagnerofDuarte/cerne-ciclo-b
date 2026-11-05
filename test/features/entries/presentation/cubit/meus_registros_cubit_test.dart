@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 
 import 'package:cerne/core/failure/failure.dart';
+import 'package:cerne/features/entries/domain/entities/date_range_preset.dart';
 import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
@@ -82,8 +83,12 @@ class _FakeEntriesRepository implements EntriesRepository {
       throw UnimplementedError('not expected to be called');
 
   @override
-  Future<Either<Failure, List<Entry>>> search(String query) async =>
-      throw UnimplementedError('not expected to be called');
+  Future<Either<Failure, List<Entry>>> search(
+    String query, {
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async => throw UnimplementedError('not expected to be called');
 }
 
 /// A `Completer`-per-call fake, letting a test resolve `list()` calls in
@@ -122,8 +127,12 @@ class _GatedEntriesRepository implements EntriesRepository {
       throw UnimplementedError('not expected to be called');
 
   @override
-  Future<Either<Failure, List<Entry>>> search(String query) async =>
-      throw UnimplementedError('not expected to be called');
+  Future<Either<Failure, List<Entry>>> search(
+    String query, {
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async => throw UnimplementedError('not expected to be called');
 }
 
 /// A controllable `PendingEntryWriteTracker` fake — lets a test drive
@@ -747,6 +756,34 @@ void main() {
       },
     );
 
+    test(
+      'I/O matrix: "Date range filter only" (round-2 review fix) — '
+      'applyFilters(dateFrom/dateTo) with no source sends exactly that '
+      'date range to list(), with no source param — the symmetric '
+      'counterpart to "Source filter only" above, applied from a clean '
+      'start rather than reached by removing an already-applied chip',
+      () async {
+        fakeRepository.queueList(
+          right(EntriesPage(items: [_entry('e1')], nextCursor: null)),
+        );
+        final dateFrom = DateTime(2026, 1, 1);
+        final dateTo = DateTime(2026, 1, 31);
+
+        await cubit.applyFilters(
+          dateFrom: dateFrom,
+          dateTo: dateTo,
+          dateRangePreset: DateRangePreset.thisMonth,
+        );
+
+        expect(fakeRepository.listCalls.single.source, isNull);
+        expect(fakeRepository.listCalls.single.dateFrom, dateFrom);
+        expect(fakeRepository.listCalls.single.dateTo, dateTo);
+        expect(cubit.hasActiveFilters, isTrue);
+        expect(cubit.activeSource, isNull);
+        expect(cubit.activeDateRangePreset, DateRangePreset.thisMonth);
+      },
+    );
+
     test('I/O matrix: "Source + date range together" — a single query '
         'carries both params at once (AND narrowing)', () async {
       fakeRepository.queueList(
@@ -791,6 +828,35 @@ void main() {
       expect(call.dateFrom, dateFrom);
       expect(call.dateTo, dateTo);
       expect(cubit.activeSource, isNull);
+    });
+
+    test('I/O matrix: "Remove one of two active chips" (round-2 review fix, '
+        'reverse direction) — re-applying with only the source re-queries '
+        'with the date range omitted, at the cubit level (previously only '
+        'covered at the screen widget-test level)', () async {
+      fakeRepository.queueList(
+        right(const EntriesPage(items: [], nextCursor: null)),
+      );
+      final dateFrom = DateTime(2026, 1, 1);
+      final dateTo = DateTime(2026, 1, 31);
+      await cubit.applyFilters(
+        source: EntrySource.chat,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+        dateRangePreset: DateRangePreset.thisMonth,
+      );
+
+      fakeRepository.queueList(
+        right(const EntriesPage(items: [], nextCursor: null)),
+      );
+      await cubit.applyFilters(source: EntrySource.chat);
+
+      final call = fakeRepository.listCalls.last;
+      expect(call.source, EntrySource.chat);
+      expect(call.dateFrom, isNull);
+      expect(call.dateTo, isNull);
+      expect(cubit.activeDateFrom, isNull);
+      expect(cubit.activeDateRangePreset, DateRangePreset.allTime);
     });
 
     test('I/O matrix: "Clear all filters" — clearFilters() restores the full '
@@ -929,8 +995,8 @@ void main() {
         expect(state.entries.map((e) => e.id), ['e1']);
       });
 
-      test('a confirmed entry outside the active date range is never '
-          'prepended into entries', () async {
+      test('a confirmed entry before the active dateFrom is never prepended '
+          'into entries', () async {
         fakeRepository.queueList(
           right(const EntriesPage(items: [], nextCursor: null)),
         );
@@ -942,13 +1008,102 @@ void main() {
 
         fakeTracker.emitConfirmed(
           'temp-1',
-          _entry('new-1', occurredAt: '2026-02-01T00:00:00Z'),
+          _entry('new-1', occurredAt: '2025-12-31T00:00:00Z'),
         );
         await Future<void>.delayed(Duration.zero);
 
         // Still MeusRegistrosEmpty — nothing new matched the filter, so
         // there was nothing to transition into MeusRegistrosLoaded for.
         expect(cubit.state, isA<MeusRegistrosEmpty>());
+      });
+
+      test(
+        'round-2 review fix: a confirmed entry created after the active '
+        'dateTo still shows live — dateTo only narrows the server list() '
+        'query (Design Notes: it\'s frozen to "now" at apply-time), so a '
+        'brand-new entry written moments later while "Esta semana"/"Este '
+        'mês" is still active must not be permanently hidden by it',
+        () async {
+          fakeRepository.queueList(
+            right(const EntriesPage(items: [], nextCursor: null)),
+          );
+          final dateTo = DateTime(2026, 1, 1);
+          await cubit.applyFilters(
+            dateFrom: DateTime(2025, 12, 1),
+            dateTo: dateTo,
+          );
+          expect(cubit.state, isA<MeusRegistrosEmpty>());
+
+          fakeTracker.emitConfirmed(
+            'temp-1',
+            _entry(
+              'new-1',
+              occurredAt: dateTo.add(const Duration(days: 1)).toIso8601String(),
+            ),
+          );
+          await Future<void>.delayed(Duration.zero);
+
+          final state = cubit.state as MeusRegistrosLoaded;
+          expect(state.entries.map((e) => e.id), ['new-1']);
+        },
+      );
+
+      test('round-2 review fix: a pending write started after the active '
+          'dateTo still shows its own placeholder card, same rationale as '
+          'the confirmed-entry case above', () async {
+        fakeRepository.queueList(
+          right(const EntriesPage(items: [], nextCursor: null)),
+        );
+        final dateTo = DateTime(2026, 1, 1);
+        await cubit.applyFilters(
+          dateFrom: DateTime(2025, 12, 1),
+          dateTo: dateTo,
+        );
+        expect(cubit.state, isA<MeusRegistrosEmpty>());
+
+        fakeTracker.emitPendingWrites([
+          _pendingWrite(
+            'temp-1',
+            startedAt: dateTo.add(const Duration(days: 1)),
+          ),
+        ]);
+        await Future<void>.delayed(Duration.zero);
+
+        final state = cubit.state as MeusRegistrosLoaded;
+        expect(state.pendingWrites, hasLength(1));
+      });
+
+      test('round-2 review fix: an item already visible under "no active '
+          'filter" correctly drops out of view once applyFilters() makes it '
+          'no longer match — the reverse of every other case in this group, '
+          'which all apply the filter first', () async {
+        fakeRepository.queueList(
+          right(EntriesPage(items: [_entry('e1')], nextCursor: null)),
+        );
+        await cubit.loadFirstPage();
+        fakeTracker.emitConfirmed(
+          'temp-1',
+          _entry('new-1', source: EntrySource.manual),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          (cubit.state as MeusRegistrosLoaded).entries.map((e) => e.id),
+          containsAll(['e1', 'new-1']),
+        );
+
+        fakeRepository.queueList(
+          right(EntriesPage(items: [_entry('e1')], nextCursor: null)),
+        );
+        await cubit.applyFilters(source: EntrySource.audio);
+
+        // The fresh server-filtered page excludes 'new-1' entirely —
+        // _loadFiltered() fully replaces state rather than filtering
+        // the previous entries list incrementally, so there's no
+        // separate path that could leave a stale, now-non-matching
+        // entry behind.
+        expect((cubit.state as MeusRegistrosLoaded).entries.map((e) => e.id), [
+          'e1',
+        ]);
       });
 
       test('a confirmed entry that doesn\'t match a MeusRegistrosEmpty '

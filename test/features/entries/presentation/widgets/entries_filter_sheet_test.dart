@@ -5,20 +5,33 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 
 import 'package:cerne/core/failure/failure.dart';
+import 'package:cerne/features/entries/domain/entities/date_range_preset.dart';
 import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
+import 'package:cerne/features/entries/presentation/cubit/entries_search_cubit.dart';
 import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
 import 'package:cerne/features/entries/presentation/widgets/entries_filter_sheet.dart';
 
 /// A plain fake — this suite only ever needs `list()` to resolve so
-/// `MeusRegistrosCubit.applyFilters()`/`clearFilters()` don't hang; every
-/// other method is unreachable from this sheet's own behavior.
+/// `MeusRegistrosCubit.applyFilters()`/`clearFilters()` don't hang.
+///
+/// spec-5-3 — [search] is now exercised too, by the bridge tests below
+/// (`EntriesFilterSheet`'s "Aplicar" also calling `EntriesSearchCubit.
+/// updateFilters()`): every call's `query`/`source`/`dateFrom`/`dateTo` is
+/// recorded in [searchFilterCalls], and every call unconditionally resolves
+/// with an empty list — this suite's own tests only ever assert *what* was
+/// sent, never the rendered results.
 class _FakeEntriesRepository implements EntriesRepository {
   final List<({EntrySource? source, DateTime? dateFrom, DateTime? dateTo})>
   listFilterCalls = [];
+
+  final List<
+    ({String query, EntrySource? source, DateTime? dateFrom, DateTime? dateTo})
+  >
+  searchFilterCalls = [];
 
   @override
   Future<Either<Failure, Entry>> create({
@@ -44,8 +57,20 @@ class _FakeEntriesRepository implements EntriesRepository {
       throw UnimplementedError('not expected to be called');
 
   @override
-  Future<Either<Failure, List<Entry>>> search(String query) async =>
-      throw UnimplementedError('not expected to be called');
+  Future<Either<Failure, List<Entry>>> search(
+    String query, {
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async {
+    searchFilterCalls.add((
+      query: query,
+      source: source,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+    ));
+    return right(const []);
+  }
 }
 
 class _FakePendingEntryWriteTracker implements PendingEntryWriteTracker {
@@ -81,14 +106,17 @@ class _FakePendingEntryWriteTracker implements PendingEntryWriteTracker {
 /// .md's own UX note, cited directly in the widget's class doc).
 Future<void> _pumpSheet(
   WidgetTester tester,
-  MeusRegistrosCubit cubit, {
+  MeusRegistrosCubit cubit,
+  EntriesSearchCubit searchCubit, {
   TextScaler textScaler = TextScaler.noScaling,
 }) async {
   await tester.pumpWidget(
     MediaQuery(
       data: MediaQueryData(textScaler: textScaler),
       child: MaterialApp(
-        home: Scaffold(body: EntriesFilterSheet(cubit: cubit)),
+        home: Scaffold(
+          body: EntriesFilterSheet(cubit: cubit, searchCubit: searchCubit),
+        ),
       ),
     ),
   );
@@ -101,7 +129,8 @@ Future<void> _pumpSheet(
 /// `_openModal` helper/pattern exactly.
 Future<void> _openSheet(
   WidgetTester tester,
-  MeusRegistrosCubit cubit, {
+  MeusRegistrosCubit cubit,
+  EntriesSearchCubit searchCubit, {
   bool disableAnimations = false,
 }) async {
   await tester.pumpWidget(
@@ -113,7 +142,11 @@ Future<void> _openSheet(
           home: Scaffold(
             body: Builder(
               builder: (context) => ElevatedButton(
-                onPressed: () => EntriesFilterSheet.show(context, cubit: cubit),
+                onPressed: () => EntriesFilterSheet.show(
+                  context,
+                  cubit: cubit,
+                  searchCubit: searchCubit,
+                ),
                 child: const Text('open'),
               ),
             ),
@@ -128,21 +161,24 @@ Future<void> _openSheet(
 void main() {
   late _FakeEntriesRepository fakeRepository;
   late MeusRegistrosCubit cubit;
+  late EntriesSearchCubit searchCubit;
 
   setUp(() {
     fakeRepository = _FakeEntriesRepository();
     cubit = MeusRegistrosCubit(fakeRepository, _FakePendingEntryWriteTracker());
+    searchCubit = EntriesSearchCubit(fakeRepository);
   });
 
   tearDown(() async {
     await cubit.close();
+    await searchCubit.close();
   });
 
   testWidgets(
     'renders both groups ("INTERVALO DE DATA"/"TIPO DE ENTRADA") and no '
     '"CATEGORIA" group (Design Notes: the backend has no category filter)',
     (tester) async {
-      await _pumpSheet(tester, cubit);
+      await _pumpSheet(tester, cubit, searchCubit);
 
       expect(find.text('INTERVALO DE DATA'), findsOneWidget);
       expect(find.text('Todo o período'), findsOneWidget);
@@ -161,7 +197,7 @@ void main() {
 
   testWidgets('with no filter selected, tapping Aplicar commits an all-null '
       'selection (no source, no date range) to the cubit', (tester) async {
-    await _pumpSheet(tester, cubit);
+    await _pumpSheet(tester, cubit, searchCubit);
 
     await tester.tap(find.text('Aplicar'));
     await tester.pumpAndSettle();
@@ -175,7 +211,7 @@ void main() {
     'selecting a source chip then Aplicar commits exactly that source, '
     'with no date bounds',
     (tester) async {
-      await _pumpSheet(tester, cubit);
+      await _pumpSheet(tester, cubit, searchCubit);
 
       await tester.tap(find.text('Áudio'));
       await tester.tap(find.text('Aplicar'));
@@ -191,7 +227,7 @@ void main() {
       'deselects it back to "no source filter" instead of being a no-op', (
     tester,
   ) async {
-    await _pumpSheet(tester, cubit);
+    await _pumpSheet(tester, cubit, searchCubit);
 
     await tester.tap(find.text('Manual'));
     await tester.tap(find.text('Manual'));
@@ -205,7 +241,7 @@ void main() {
     'single choice: selecting a second source chip replaces the first, '
     'never both at once',
     (tester) async {
-      await _pumpSheet(tester, cubit);
+      await _pumpSheet(tester, cubit, searchCubit);
 
       await tester.tap(find.text('Manual'));
       await tester.tap(find.text('Foto'));
@@ -220,7 +256,7 @@ void main() {
       'week\'s own Monday local midnight and a dateTo of "now"', (
     tester,
   ) async {
-    await _pumpSheet(tester, cubit);
+    await _pumpSheet(tester, cubit, searchCubit);
 
     await tester.tap(find.text('Esta semana'));
     await tester.tap(find.text('Aplicar'));
@@ -237,7 +273,7 @@ void main() {
     'selecting "Este mês" then Aplicar commits a dateFrom at the 1st of '
     'this calendar month',
     (tester) async {
-      await _pumpSheet(tester, cubit);
+      await _pumpSheet(tester, cubit, searchCubit);
 
       await tester.tap(find.text('Este mês'));
       await tester.tap(find.text('Aplicar'));
@@ -252,7 +288,7 @@ void main() {
     'Acceptance Criteria: selecting a source and a date range together '
     'sends a single query carrying both (AND narrowing)',
     (tester) async {
-      await _pumpSheet(tester, cubit);
+      await _pumpSheet(tester, cubit, searchCubit);
 
       await tester.tap(find.text('Áudio'));
       await tester.tap(find.text('Este mês'));
@@ -271,7 +307,7 @@ void main() {
     '— it never calls applyFilters() on the cubit and never closes the '
     'sheet',
     (tester) async {
-      await _pumpSheet(tester, cubit);
+      await _pumpSheet(tester, cubit, searchCubit);
 
       await tester.tap(find.text('Áudio'));
       await tester.tap(find.text('Esta semana'));
@@ -296,65 +332,70 @@ void main() {
 
   testWidgets('reopening the sheet pre-selects whichever filters are already '
       'active on the cubit — applying immediately (no further taps) '
-      'commits that exact same selection back unchanged. The "already '
-      'active" state here is itself one of this sheet\'s own 3 date '
-      'presets ("Este mês") — the only kind of date range the real UI '
-      'could ever have produced in the first place, so pre-selection has '
-      'something to actually match against', (tester) async {
+      'commits that exact same selection back unchanged', (tester) async {
     final now = DateTime.now();
     final monthStart = DateTime(now.year, now.month);
     await cubit.applyFilters(
       source: EntrySource.chat,
       dateFrom: monthStart,
       dateTo: now,
+      dateRangePreset: DateRangePreset.thisMonth,
     );
     fakeRepository.listFilterCalls.clear();
 
-    await _pumpSheet(tester, cubit);
+    await _pumpSheet(tester, cubit, searchCubit);
     await tester.tap(find.text('Aplicar'));
     await tester.pumpAndSettle();
 
     expect(cubit.activeSource, EntrySource.chat);
     expect(cubit.activeDateFrom, monthStart);
     expect(cubit.activeDateTo, isNotNull);
+    expect(cubit.activeDateRangePreset, DateRangePreset.thisMonth);
   });
 
-  test('code-review fix: dateRangePresetMatching checks thisMonth before '
-      'thisWeek — when a month\'s 1st day is also this week\'s own Monday, '
-      'the two presets\' start boundaries collide, and the fix must resolve '
-      'the collision as "Este mês", not mislabel it "Esta semana"', () {
-    // Finds the next month-start that's also a Monday, starting from a
-    // fixed date — deterministic and calendar-fact-free (never depends
-    // on knowing a specific real date's weekday up front).
-    var now = DateTime(2026, 1, 1);
-    while (!(now.day == 1 && now.weekday == DateTime.monday)) {
-      now = now.add(const Duration(days: 1));
-    }
-    final monthStart = DateTime(now.year, now.month);
+  testWidgets(
+    'round-2 review fix: reopening the sheet after applying "Esta semana" '
+    'through the real "Aplicar" wiring (not a direct cubit call) '
+    'pre-selects "Esta semana" again, not "Todo o período" — this is the '
+    'end-to-end path the old dateFrom-equality derivation could get '
+    'wrong the moment a day/week/month boundary rolled over',
+    (tester) async {
+      // _openSheet (unlike _pumpSheet) mounts the sheet through a real
+      // `showModalBottomSheet` route pushed on top of a persistent base
+      // route, so it can be opened a second time in the same test without
+      // the bare single-route `MaterialApp(home: ...)` `_pumpSheet` itself
+      // uses — "Aplicar"'s own `Navigator.pop()` on that bare setup would
+      // empty the Navigator's only route on this test's second open.
+      await _openSheet(tester, cubit, searchCubit);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Esta semana'));
+      await tester.tap(find.text('Aplicar'));
+      await tester.pumpAndSettle();
 
-    expect(dateRangePresetMatching(monthStart, now), DateRangePreset.thisMonth);
-  });
+      expect(cubit.activeDateRangePreset, DateRangePreset.thisWeek);
 
-  test('dateRangePresetMatching still resolves a plain mid-week Monday (not '
-      'also a month start) as thisWeek — the ordering fix above must not '
-      'break the common, non-colliding case', () {
-    // A Monday that is deliberately *not* the 1st of its month.
-    var now = DateTime(2026, 1, 8);
-    while (!(now.weekday == DateTime.monday && now.day != 1)) {
-      now = now.add(const Duration(days: 1));
-    }
+      // Reopens the sheet against the same, still-live cubit —
+      // initState re-reads whichever preset is now active.
+      await _openSheet(tester, cubit, searchCubit);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Aplicar'));
+      await tester.pumpAndSettle();
 
-    expect(
-      dateRangePresetMatching(DateTime(now.year, now.month, now.day), now),
-      DateRangePreset.thisWeek,
-    );
-  });
+      expect(cubit.activeDateRangePreset, DateRangePreset.thisWeek);
+      expect(cubit.activeDateFrom, isNotNull);
+    },
+  );
 
   testWidgets('code-review fix: renders with no overflow exception at a large '
       'Dynamic Type scale — the SingleChildScrollView guard this widget\'s '
       'own class doc cites (epic-5-context.md\'s "tight-fit area for '
       'Dynamic Type" note) actually holds', (tester) async {
-    await _pumpSheet(tester, cubit, textScaler: const TextScaler.linear(3.0));
+    await _pumpSheet(
+      tester,
+      cubit,
+      searchCubit,
+      textScaler: const TextScaler.linear(3.0),
+    );
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
@@ -366,7 +407,7 @@ void main() {
       'entrance — the sheet is already fully in place after a single pump', (
     tester,
   ) async {
-    await _openSheet(tester, cubit, disableAnimations: true);
+    await _openSheet(tester, cubit, searchCubit, disableAnimations: true);
     // Exactly one pump (not pumpAndSettle) — if the entrance animation
     // weren't skipped, the sheet would still be mid-transition here,
     // same assertion rationale `insertion_modal_test.dart`'s own
@@ -375,5 +416,43 @@ void main() {
 
     expect(find.text('INTERVALO DE DATA'), findsOneWidget);
     expect(find.text('Aplicar'), findsOneWidget);
+  });
+
+  group('spec-5-3: combined search + filter bridge', () {
+    testWidgets(
+      'Aplicar while a search is active re-queries entries-search with '
+      'that same term plus the newly-applied filter — no debounce, no '
+      'query-box/screen disruption',
+      (tester) async {
+        await _pumpSheet(tester, cubit, searchCubit);
+        searchCubit.onQueryChanged('ansiedade');
+        await tester.pump(const Duration(milliseconds: 350));
+        expect(fakeRepository.searchFilterCalls, hasLength(1));
+        expect(fakeRepository.searchFilterCalls.single.query, 'ansiedade');
+
+        await tester.tap(find.text('Áudio'));
+        await tester.tap(find.text('Aplicar'));
+        await tester.pumpAndSettle();
+
+        expect(fakeRepository.searchFilterCalls, hasLength(2));
+        final call = fakeRepository.searchFilterCalls.last;
+        expect(call.query, 'ansiedade');
+        expect(call.source, EntrySource.audio);
+      },
+    );
+
+    testWidgets(
+      'Aplicar while idle (no active search) stores the filter silently '
+      'on EntriesSearchCubit — no entries-search call fires at all',
+      (tester) async {
+        await _pumpSheet(tester, cubit, searchCubit);
+
+        await tester.tap(find.text('Manual'));
+        await tester.tap(find.text('Aplicar'));
+        await tester.pumpAndSettle();
+
+        expect(fakeRepository.searchFilterCalls, isEmpty);
+      },
+    );
   });
 }

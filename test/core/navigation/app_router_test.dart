@@ -77,8 +77,12 @@ class _FakeEntriesRepository implements EntriesRepository {
   );
 
   @override
-  Future<Either<Failure, List<Entry>>> search(String query) async =>
-      throw UnimplementedError('not expected to be called');
+  Future<Either<Failure, List<Entry>>> search(
+    String query, {
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async => throw UnimplementedError('not expected to be called');
 }
 
 /// A trivial fake `PendingEntryWriteTracker` — this suite never exercises

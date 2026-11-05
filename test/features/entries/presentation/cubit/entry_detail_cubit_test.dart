@@ -62,8 +62,12 @@ class _FakeEntriesRepository implements EntriesRepository {
   }
 
   @override
-  Future<Either<Failure, List<Entry>>> search(String query) async =>
-      throw UnimplementedError('not expected to be called');
+  Future<Either<Failure, List<Entry>>> search(
+    String query, {
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async => throw UnimplementedError('not expected to be called');
 }
 
 /// A `Completer`-per-call fake, letting a test resolve `getById()` calls in
@@ -101,8 +105,12 @@ class _GatedEntriesRepository implements EntriesRepository {
   }
 
   @override
-  Future<Either<Failure, List<Entry>>> search(String query) async =>
-      throw UnimplementedError('not expected to be called');
+  Future<Either<Failure, List<Entry>>> search(
+    String query, {
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async => throw UnimplementedError('not expected to be called');
 }
 
 /// A controllable `PendingEntryWriteTracker` fake — lets a test drive

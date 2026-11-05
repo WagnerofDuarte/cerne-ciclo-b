@@ -87,6 +87,17 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
   void initState() {
     super.initState();
     widget.cubit.loadFirstPage();
+    // spec-5-3 — both `cubit`/`searchCubit` are `lazySingleton`s (Code
+    // Map): a fresh mount of this screen must reset both, not just
+    // `cubit`'s own filters above, or a re-entered screen would carry a
+    // stale filter selection from a previous visit into a still-active
+    // search (Boundaries: "Re-enter screen after a prior combined
+    // session").
+    widget.searchCubit.updateFilters(
+      source: null,
+      dateFrom: null,
+      dateTo: null,
+    );
     _skeletonTimer = Timer(_skeletonThreshold, () {
       if (mounted) {
         setState(() => _showSkeleton = true);
@@ -199,26 +210,25 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
               // spec-5-2: `hasActiveFilters`/`onFilterTap` need the real
               // `MeusRegistrosCubit` — this now rebuilds on its state too,
               // while `EntriesSearchBar` itself stays a dumb, stateless
-              // widget, same as before. Also rebuilds on `EntriesSearchCubit`
-              // (code-review fix): the funnel must only read as "filled"
-              // while the plain/filtered timeline is actually what's on
-              // screen — filters+search integration is 5.3's job, out of
-              // this story's scope, so "filled" next to search results
-              // that were never filtered would be misleading.
-              child: BlocBuilder<EntriesSearchCubit, Resource<List<Entry>>>(
-                builder: (context, searchState) =>
-                    BlocBuilder<MeusRegistrosCubit, MeusRegistrosState>(
-                      builder: (context, _) => EntriesSearchBar(
-                        onChanged: widget.searchCubit.onQueryChanged,
-                        onFilterTap: () => EntriesFilterSheet.show(
-                          context,
-                          cubit: widget.cubit,
-                        ),
-                        hasActiveFilters:
-                            searchState is ResourceIdle<List<Entry>> &&
-                            widget.cubit.hasActiveFilters,
-                      ),
-                    ),
+              // widget, same as before. spec-5-3 (Boundaries: "Funnel fill
+              // ... drops its ResourceIdle gate — becomes
+              // widget.cubit.hasActiveFilters unconditionally"): a filter
+              // now also narrows an active search (via `searchCubit.
+              // updateFilters()`), so the funnel reads as "filled"
+              // whenever a filter is active, regardless of which surface
+              // — plain timeline or search results — is currently on
+              // screen; no `EntriesSearchCubit` rebuild needed here
+              // anymore.
+              child: BlocBuilder<MeusRegistrosCubit, MeusRegistrosState>(
+                builder: (context, _) => EntriesSearchBar(
+                  onChanged: widget.searchCubit.onQueryChanged,
+                  onFilterTap: () => EntriesFilterSheet.show(
+                    context,
+                    cubit: widget.cubit,
+                    searchCubit: widget.searchCubit,
+                  ),
+                  hasActiveFilters: widget.cubit.hasActiveFilters,
+                ),
               ),
             ),
             Expanded(
@@ -257,27 +267,43 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
                             onCardTap: _openDetail,
                           ),
                         };
-                        // spec-5-2: the active-filter chip row only ever
-                        // renders here, inside the plain-timeline branch
-                        // (Boundaries/Never: no combined search+filter
-                        // query this story) — and only once a filter is
-                        // actually active.
+                        // spec-5-2/5-3: the active-filter chip row renders
+                        // here whenever a filter is active — this branch
+                        // (plain/filtered timeline) or the search-results
+                        // branch below, same condition either way (spec-5-3
+                        // Boundaries: "`_ActiveFiltersRow` renders above
+                        // `_SearchResults` too, same condition").
                         if (!widget.cubit.hasActiveFilters) {
                           return timeline;
                         }
                         return Column(
                           children: [
-                            _ActiveFiltersRow(cubit: widget.cubit),
+                            _ActiveFiltersRow(
+                              cubit: widget.cubit,
+                              searchCubit: widget.searchCubit,
+                            ),
                             Expanded(child: timeline),
                           ],
                         );
                       },
                     );
                   }
-                  return _SearchResults(
+                  final searchResults = _SearchResults(
                     state: searchState,
                     showSkeleton: _showSearchSkeleton,
                     onCardTap: _openDetail,
+                  );
+                  if (!widget.cubit.hasActiveFilters) {
+                    return searchResults;
+                  }
+                  return Column(
+                    children: [
+                      _ActiveFiltersRow(
+                        cubit: widget.cubit,
+                        searchCubit: widget.searchCubit,
+                      ),
+                      Expanded(child: searchResults),
+                    ],
                   );
                 },
               ),
@@ -654,15 +680,23 @@ class _LoadMoreFooter extends StatelessWidget {
 /// re-emits a new state via `applyFilters()`/`clearFilters()`, so this
 /// widget's own `BlocBuilder` ancestor already rebuilds it in lockstep).
 class _ActiveFiltersRow extends StatelessWidget {
-  const _ActiveFiltersRow({required this.cubit});
+  const _ActiveFiltersRow({required this.cubit, required this.searchCubit});
 
   final MeusRegistrosCubit cubit;
+
+  /// spec-5-3 — `MeusRegistrosScreen`'s own bridge to
+  /// `EntriesSearchCubit` (Design Notes): every filter-mutating call site
+  /// below also calls this cubit's own `updateFilters()`, right alongside
+  /// [cubit]'s `applyFilters()`/`clearFilters()`, so a filter change
+  /// during an active search is reflected there too.
+  final EntriesSearchCubit searchCubit;
 
   @override
   Widget build(BuildContext context) {
     final source = cubit.activeSource;
     final dateFrom = cubit.activeDateFrom;
     final dateTo = cubit.activeDateTo;
+    final dateRangePreset = cubit.activeDateRangePreset;
     final hasDateRange = dateFrom != null && dateTo != null;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
@@ -681,21 +715,35 @@ class _ActiveFiltersRow extends StatelessWidget {
               label: entrySourceLabel(source),
               // I/O matrix: "Remove one of two active chips" — re-applies
               // every *other* active filter exactly as it stood, dropping
-              // only this one.
-              onRemove: () =>
-                  cubit.applyFilters(dateFrom: dateFrom, dateTo: dateTo),
+              // only this one. Round-2 review fix: passes `dateRangePreset`
+              // back in too — otherwise the still-active date range would
+              // revert to the cubit's default "Todo o período" preset.
+              onRemove: () {
+                cubit.applyFilters(
+                  dateFrom: dateFrom,
+                  dateTo: dateTo,
+                  dateRangePreset: dateRangePreset,
+                );
+                searchCubit.updateFilters(dateFrom: dateFrom, dateTo: dateTo);
+              },
             ),
           if (hasDateRange)
             _ActiveFilterChip(
-              label: dateRangePresetMatching(dateFrom, DateTime.now()).label,
-              onRemove: () => cubit.applyFilters(source: source),
+              label: dateRangePresetLabel(dateRangePreset),
+              onRemove: () {
+                cubit.applyFilters(source: source);
+                searchCubit.updateFilters(source: source);
+              },
             ),
           AppButton(
             variant: AppButtonVariant.textGhost,
             label: 'Limpar filtros',
             // I/O matrix: "Clear all filters" — restores the full
             // unfiltered list in place, no reload/re-mount (Boundaries).
-            onPressed: cubit.clearFilters,
+            onPressed: () {
+              cubit.clearFilters();
+              searchCubit.updateFilters();
+            },
           ),
         ],
       ),

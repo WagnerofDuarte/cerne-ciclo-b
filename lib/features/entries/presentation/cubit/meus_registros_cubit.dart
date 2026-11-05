@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/utils/deduped_by_id.dart';
+import '../../domain/entities/date_range_preset.dart';
 import '../../domain/entities/entry.dart';
 import '../../domain/entities/pending_entry_write.dart';
 import '../../domain/repositories/entries_repository.dart';
@@ -68,6 +69,18 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
   DateTime? _activeDateFrom;
   DateTime? _activeDateTo;
 
+  /// Round-2 review fix: the [DateRangePreset] the active date range was
+  /// actually selected from (if any), stored verbatim rather than
+  /// re-derived from [_activeDateFrom] — a derivation-by-equality-match
+  /// against a freshly recomputed "today" boundary goes stale the moment
+  /// a day/week/month boundary rolls over while the filter stays active,
+  /// mis-pre-selecting `EntriesFilterSheet`'s reopen state and mislabeling
+  /// the active-filter chip. Defaults to [DateRangePreset.allTime] — same
+  /// "no filter of that kind" convention [_activeDateFrom]/[_activeDateTo]
+  /// already use, just non-nullable since [DateRangePreset] already has
+  /// its own explicit "none" value.
+  DateRangePreset _activeDateRangePreset = DateRangePreset.allTime;
+
   /// `MeusRegistrosScreen`'s own read of the current filter selection —
   /// deliberately not part of [MeusRegistrosState] itself: [applyFilters]/
   /// [clearFilters] already re-emit a new state on every change, so
@@ -76,6 +89,7 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
   EntrySource? get activeSource => _activeSource;
   DateTime? get activeDateFrom => _activeDateFrom;
   DateTime? get activeDateTo => _activeDateTo;
+  DateRangePreset get activeDateRangePreset => _activeDateRangePreset;
 
   /// `EntriesSearchBar.hasActiveFilters`/the active-filter chip row's own
   /// "is any filter active at all" check.
@@ -90,6 +104,17 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
   /// view (Review finding: "a newly-created entry bypasses the active
   /// filter" — e.g. saving a manual-text entry while `source: audio` is
   /// active must never visibly violate that filter).
+  ///
+  /// Round-2 review fix: deliberately does not check [_activeDateTo] —
+  /// unlike [_activeSource]/[_activeDateFrom], `dateTo` only narrows the
+  /// server-side `list()` query in [_loadFiltered] (`_activeDateTo` is
+  /// passed straight through there); [occurredAt] here is always a
+  /// brand-new local entry/pending-write whose timestamp is effectively
+  /// "now", so enforcing a `dateTo` frozen at the moment the filter was
+  /// applied would permanently hide every entry created afterward for as
+  /// long as "Esta semana"/"Este mês" stayed active — silently breaking
+  /// the "new entries always show immediately" guarantee every other
+  /// filter path here already upholds.
   bool _matchesActiveFilters({
     required EntrySource source,
     required DateTime occurredAt,
@@ -98,9 +123,6 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
       return false;
     }
     if (_activeDateFrom != null && occurredAt.isBefore(_activeDateFrom!)) {
-      return false;
-    }
-    if (_activeDateTo != null && occurredAt.isAfter(_activeDateTo!)) {
       return false;
     }
     return true;
@@ -225,6 +247,7 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
     _activeSource = null;
     _activeDateFrom = null;
     _activeDateTo = null;
+    _activeDateRangePreset = DateRangePreset.allTime;
     return _loadFiltered();
   }
 
@@ -248,14 +271,24 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
   /// [clearFilters]. A separate method from [loadFirstPage] by design —
   /// see Design Notes — though both ultimately share [_loadFiltered]'s own
   /// "bump generation, replace state via list()" body.
+  ///
+  /// [dateRangePreset] (round-2 review fix) — the caller's own record of
+  /// which [DateRangePreset] (if any) [dateFrom]/[dateTo] came from;
+  /// defaults to [DateRangePreset.allTime], same "omitting clears it"
+  /// convention as [dateFrom]/[dateTo] themselves. A caller re-applying an
+  /// already-active date range verbatim (e.g. the chip row's own "remove
+  /// just the source chip") must pass [activeDateRangePreset] back in
+  /// explicitly to keep it from reverting to "Todo o período".
   Future<void> applyFilters({
     EntrySource? source,
     DateTime? dateFrom,
     DateTime? dateTo,
+    DateRangePreset dateRangePreset = DateRangePreset.allTime,
   }) {
     _activeSource = source;
     _activeDateFrom = dateFrom;
     _activeDateTo = dateTo;
+    _activeDateRangePreset = dateRangePreset;
     return _loadFiltered();
   }
 
@@ -266,6 +299,7 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
     _activeSource = null;
     _activeDateFrom = null;
     _activeDateTo = null;
+    _activeDateRangePreset = DateRangePreset.allTime;
     return _loadFiltered();
   }
 

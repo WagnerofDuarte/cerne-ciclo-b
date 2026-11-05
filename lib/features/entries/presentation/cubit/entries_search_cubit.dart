@@ -38,6 +38,26 @@ class EntriesSearchCubit extends Cubit<Resource<List<Entry>>> {
   /// superseded it).
   int _generation = 0;
 
+  /// spec-5-3 — this cubit's own copy of the active filter selection
+  /// (Design Notes: filter state is duplicated, never shared —
+  /// `MeusRegistrosCubit` importing/being imported by this cubit would
+  /// violate RNF06; `MeusRegistrosScreen` is the only legitimate bridge,
+  /// via [updateFilters]). `null` for each field means "no filter of that
+  /// kind", same convention `MeusRegistrosCubit`'s own
+  /// `_activeSource`/`_activeDateFrom`/`_activeDateTo` already use.
+  EntrySource? _activeSource;
+  DateTime? _activeDateFrom;
+  DateTime? _activeDateTo;
+
+  /// The current (trimmed) query text, kept in lockstep with every
+  /// [onQueryChanged] call — empty exactly when idle (Boundaries:
+  /// "While idle: silent storage, no call"), non-empty for as long as the
+  /// search box holds a non-empty term, regardless of whether the
+  /// debounced [_search] for it has actually fired yet. [updateFilters]
+  /// reads this to decide whether a filter change needs to re-run a
+  /// search at all.
+  String _lastQuery = '';
+
   /// `EntriesSearchBar.onChanged`'s one call site — [raw] is the text
   /// field's current (untrimmed) value on every keystroke. Cancels any
   /// pending debounce `Timer` first, regardless of outcome below (Code
@@ -46,6 +66,7 @@ class EntriesSearchCubit extends Cubit<Resource<List<Entry>>> {
   void onQueryChanged(String raw) {
     _debounceTimer?.cancel();
     final query = raw.trim();
+    _lastQuery = query;
     if (query.isEmpty) {
       // I/O matrix: "Query cleared" — no request, pending work discarded,
       // timeline shown. Bumping the generation here (not only inside
@@ -65,6 +86,51 @@ class EntriesSearchCubit extends Cubit<Resource<List<Entry>>> {
     _debounceTimer = Timer(_debounceDuration, () => _search(query));
   }
 
+  /// spec-5-3 — `EntriesFilterSheet`'s "Aplicar", `_ActiveFiltersRow`'s
+  /// chip-remove ×2, and "Limpar filtros", all via `MeusRegistrosScreen`'s
+  /// own bridge (Design Notes) — called right alongside the existing
+  /// `MeusRegistrosCubit.applyFilters()`/`clearFilters()` call, never in
+  /// place of it. Also called unconditionally from `MeusRegistrosScreen.
+  /// initState()` on every mount (Boundaries: "no stale filter carried
+  /// forward"). Always stores [source]/[dateFrom]/[dateTo] regardless of
+  /// whether a search is active (Boundaries: "always stores the fields").
+  ///
+  /// Only when [_lastQuery] is non-empty — a search is actually active —
+  /// *and* at least one of [source]/[dateFrom]/[dateTo] actually differs
+  /// from what was already stored (review finding: skips a wasted
+  /// `entries-search` network call when `initState()`'s own unconditional
+  /// reset finds nothing to actually reset) — does this cancel any pending
+  /// debounce and immediately re-run [_search] with that same term and the
+  /// just-stored filters (Boundaries: "no debounce on the filter-triggered
+  /// re-search"); while idle, the new selection is simply kept for
+  /// whenever the next query starts.
+  void updateFilters({
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) {
+    final filtersChanged =
+        source != _activeSource ||
+        dateFrom != _activeDateFrom ||
+        dateTo != _activeDateTo;
+    _activeSource = source;
+    _activeDateFrom = dateFrom;
+    _activeDateTo = dateTo;
+    if (_lastQuery.isEmpty || !filtersChanged) {
+      return;
+    }
+    // Review finding: `close()` can race this call too (e.g. `initState()`
+    // now calls this unconditionally on every mount) — same `isClosed`
+    // rationale `onQueryChanged`'s own guard above documents; `_search()`'s
+    // first line is `emit(ResourceLoading())`, which would otherwise throw
+    // after `close()`.
+    if (isClosed) {
+      return;
+    }
+    _debounceTimer?.cancel();
+    _search(_lastQuery);
+  }
+
   Future<void> _search(String query) async {
     final generation = ++_generation;
     // Review finding: deliberately *not* `const` — `ResourceLoading<T>`
@@ -79,7 +145,12 @@ class EntriesSearchCubit extends Cubit<Resource<List<Entry>>> {
     // fresh (non-const) instance is identity-distinct from the prior one
     // even though both are `ResourceLoading`, so `emit` always proceeds.
     emit(ResourceLoading());
-    final result = await _repository.search(query);
+    final result = await _repository.search(
+      query,
+      source: _activeSource,
+      dateFrom: _activeDateFrom,
+      dateTo: _activeDateTo,
+    );
     // Mirrors `MeusRegistrosCubit.loadFirstPage`'s own guard: `close()` can
     // race this awaited call, and a newer query (or a clear back to idle)
     // can have superseded this one while it was in flight.

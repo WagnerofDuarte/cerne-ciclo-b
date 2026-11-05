@@ -62,8 +62,12 @@ class _FakeEntriesRepository implements EntriesRepository {
       throw UnimplementedError('not expected to be called');
 
   @override
-  Future<Either<Failure, List<Entry>>> search(String query) async =>
-      throw UnimplementedError('not expected to be called');
+  Future<Either<Failure, List<Entry>>> search(
+    String query, {
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async => throw UnimplementedError('not expected to be called');
 }
 
 void main() {
