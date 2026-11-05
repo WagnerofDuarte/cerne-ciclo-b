@@ -417,4 +417,170 @@ void main() {
       },
     );
   });
+
+  // spec-4-4 (RF07) — `EntriesRepository`'s third and last method.
+  group('getById() — success', () {
+    test('writes EntryDto.toJson() to the Hive box keyed by id, then '
+        'returns Right(Entry) mapped from the dto', () async {
+      when(() => mockRemoteDataSource.get('e1')).thenAnswer(
+        (_) async => right(_dto),
+      );
+
+      final result = await repository.getById('e1');
+
+      verify(() => mockBox.put('e1', _dto.toJson())).called(1);
+      expect(result.isRight(), isTrue);
+      result.match((_) => fail('expected Right'), (entry) {
+        expect(entry.id, 'e1');
+        expect(entry.content, 'Hoje foi um bom dia.');
+      });
+    });
+
+    test('a Hive write failure maps to Left(malformedResponse), never '
+        'throws (RNF09)', () async {
+      when(() => mockRemoteDataSource.get('e1')).thenAnswer(
+        (_) async => right(_dto),
+      );
+      when(() => mockBox.put(any(), any())).thenThrow(Exception('disk full'));
+
+      final result = await repository.getById('e1');
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
+  });
+
+  group('getById() — notFound (RNF04)', () {
+    test(
+      'Failure.notFound passes straight through as Left, unmapped — the '
+      'Hive box is never read (no cache fallback for notFound)',
+      () async {
+        when(() => mockRemoteDataSource.get('unknown-id')).thenAnswer(
+          (_) async =>
+              left(const Failure.notFound(message: 'Não encontrado')),
+        );
+
+        final result = await repository.getById('unknown-id');
+
+        expect(result.isLeft(), isTrue);
+        result.match(
+          (failure) => expect(failure, isA<NotFound>()),
+          (_) => fail('expected Left'),
+        );
+        verifyNever(() => mockBox.get(any()));
+      },
+    );
+
+    test(
+      'a synthetic pending tempId that 404s at the backend resolves the '
+      'exact same way as any other unknown id — no special-casing',
+      () async {
+        when(() => mockRemoteDataSource.get('pending-123-0')).thenAnswer(
+          (_) async =>
+              left(const Failure.notFound(message: 'Não encontrado')),
+        );
+
+        final result = await repository.getById('pending-123-0');
+
+        result.match(
+          (failure) => expect(failure, isA<NotFound>()),
+          (_) => fail('expected Left'),
+        );
+      },
+    );
+  });
+
+  group('getById() — offline/timeout cache fallback (Boundaries)', () {
+    test('networkOffline + a cache hit returns Right from the cached '
+        'EntryDto, never propagated as Left', () async {
+      when(() => mockRemoteDataSource.get('e1')).thenAnswer(
+        (_) async => left(const Failure.networkOffline(message: 'Offline')),
+      );
+      when(() => mockBox.get('e1')).thenReturn(_dto.toJson());
+
+      final result = await repository.getById('e1');
+
+      expect(result.isRight(), isTrue);
+      result.match((_) => fail('expected Right'), (entry) {
+        expect(entry.id, 'e1');
+      });
+    });
+
+    test('networkTimeout + a cache hit triggers the exact same fallback',
+        () async {
+      when(() => mockRemoteDataSource.get('e1')).thenAnswer(
+        (_) async => left(const Failure.networkTimeout(message: 'Timed out')),
+      );
+      when(() => mockBox.get('e1')).thenReturn(_dto.toJson());
+
+      final result = await repository.getById('e1');
+
+      result.match((_) => fail('expected Right'), (entry) {
+        expect(entry.id, 'e1');
+      });
+    });
+
+    test(
+      'networkOffline + a cache miss propagates the original failure '
+      'unchanged — no synthesized not-found',
+      () async {
+        when(() => mockRemoteDataSource.get('e1')).thenAnswer(
+          (_) async =>
+              left(const Failure.networkOffline(message: 'Offline')),
+        );
+        when(() => mockBox.get('e1')).thenReturn(null);
+
+        final result = await repository.getById('e1');
+
+        expect(result.isLeft(), isTrue);
+        result.match(
+          (failure) {
+            expect(failure, isA<NetworkOffline>());
+            expect(failure.message, 'Offline');
+          },
+          (_) => fail('expected Left'),
+        );
+      },
+    );
+
+    test(
+      'a corrupt cached entry (malformed JSON shape) maps to '
+      'Left(malformedResponse) rather than throwing',
+      () async {
+        when(() => mockRemoteDataSource.get('e1')).thenAnswer(
+          (_) async =>
+              left(const Failure.networkOffline(message: 'Offline')),
+        );
+        when(() => mockBox.get('e1')).thenReturn({'not': 'an entry'});
+
+        final result = await repository.getById('e1');
+
+        expect(result.isLeft(), isTrue);
+        result.match(
+          (failure) => expect(failure, isA<MalformedResponse>()),
+          (_) => fail('expected Left'),
+        );
+      },
+    );
+
+    test('every other Failure (e.g. authExpired) propagates as Left, '
+        'unmapped — the Hive box is never read', () async {
+      when(() => mockRemoteDataSource.get('e1')).thenAnswer(
+        (_) async =>
+            left(const Failure.authExpired(message: 'Sessão expirada')),
+      );
+
+      final result = await repository.getById('e1');
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<AuthExpired>()),
+        (_) => fail('expected Left'),
+      );
+      verifyNever(() => mockBox.get(any()));
+    });
+  });
 }

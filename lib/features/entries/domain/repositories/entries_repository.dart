@@ -36,4 +36,22 @@ abstract class EntriesRepository {
   /// *before* returning `Right` — same "persist then return" ordering
   /// [create] already uses.
   Future<Either<Failure, EntriesPage>> list({String? cursor, int limit = 20});
+
+  /// spec-4-4 (RF07) — this repository's third and last method (Boundaries:
+  /// "create+read only, forever"). Calls `entries-get` (`ApiClient.get`,
+  /// via `EntriesRemoteDataSource`) with [id] as the one path parameter,
+  /// then persists the fetched entry to the `entries` Hive box (`put`)
+  /// *before* returning `Right` — same "persist then return" ordering
+  /// [create]/[list] already use.
+  ///
+  /// On [Failure.networkOffline]/[Failure.networkTimeout] specifically,
+  /// falls back to `entriesBox.get(id)` if present; a cache miss propagates
+  /// the original failure unchanged (no synthesized not-found — that
+  /// distinction belongs to whichever `Failure` the backend/network
+  /// actually produced). Every *other* [Failure] — including
+  /// [Failure.notFound] for an id that never existed or belongs to another
+  /// user — is returned as `Left`, unmapped (RNF09); RNF04 (identical
+  /// treatment for both causes) is the caller's own rendering job, never
+  /// this repository's.
+  Future<Either<Failure, Entry>> getById(String id);
 }

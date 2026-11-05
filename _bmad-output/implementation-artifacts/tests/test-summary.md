@@ -2,73 +2,65 @@
 
 ## Scope
 
-Story 4.2 (per-entry sync badge) had thorough widget-level coverage
-(`pending_entry_write_tracker_test.dart`, `meus_registros_cubit_test.dart`,
-`meus_registros_screen_test.dart`, including round-2's new screen-level
-retry-wiring test) but no real-pipeline E2E test for the pending-write
-lifecycle itself — `entries_list_flow_e2e_test.dart` (the prior run's E2E
-suite) explicitly scoped itself to spec-4-1's `list()` path only. This run
-fills that gap: `create()`/`retry()` through the real
-`PendingEntryWriteTracker` -> `EntriesRepositoryImpl` ->
-`EntriesRemoteDataSource` -> real `Dio`/interceptors -> real `entries` Hive
-box, with `MeusRegistrosCubit` sharing the same tracker singleton the way
-the running app does.
+Story 4.3 (empty-state handling) is presentation-only (spec-4-3's own
+Intent/Boundaries): it rebuilds `_EmptyState`'s markup and wires its new
+CTA to `InsertionModal.show()` — the identical call shape
+`placeholder_screens.dart`'s Home/Chat FAB already uses — with no
+`MeusRegistrosCubit`/`MeusRegistrosState`/repository change.
 
-No separate "API tests" section applies here — the backend contract is
-frozen and consumed only through `ApiClient`/`EntriesRemoteDataSource`,
-which this E2E suite already drives end-to-end. No device/simulator exists
-(AGENTS.md), so there's no screen-tap E2E either — the existing
-`meus_registros_screen_test.dart` widget suite already covers that ground
-with fakes.
+That means this story introduces no new real-pipeline (network/disk)
+surface to cover:
+
+- The CTA's own behavior (icon/copy/button render; tap opens the
+  Insertion Modal; the malformed-`occurredAt` fallback still renders the
+  same empty state) is pure widget/UI behavior, already covered against
+  fakes in `meus_registros_screen_test.dart` (`zero entries renders the
+  dedicated empty state...`, `tapping the empty-state CTA opens the
+  Insertion Modal...`, `entries with every occurredAt malformed render the
+  same dedicated empty state...`). No device/simulator exists yet
+  (AGENTS.md), so there's no screen-tap E2E tier above this one — same
+  policy the spec-4-2 run documented.
+- The one behavior this story depends on that *is* real-pipeline —
+  capturing from the empty-state-opened modal driving
+  `MeusRegistrosEmpty` -> `MeusRegistrosLoaded` through the real
+  `PendingEntryWriteTracker` -> `EntriesRepositoryImpl` -> real
+  `Dio`/interceptors -> real `entries` Hive box — is already proven by
+  `pending_write_sync_e2e_test.dart`'s happy-path test (spec-4-2's run),
+  which starts from a genuine `MeusRegistrosEmpty` state and asserts the
+  transition to `MeusRegistrosLoaded` via `tracker.create()`. Spec-4-3's
+  CTA reaches that exact tracker call through the exact same modal/cubit
+  wiring the FAB does — nothing about *how* the write reaches the tracker
+  changed, so re-deriving that pipeline proof under a different entry
+  point would duplicate existing coverage, not extend it.
+
+Conclusion: no new E2E (or API) test file for this run. Verified the
+existing suite still holds the line instead.
 
 ## Generated Tests
 
-### E2E Tests
-
-- [x] `test/features/entries/pending_write_sync_e2e_test.dart` — drives the
-  real DI-resolved `PendingEntryWriteTracker` and `MeusRegistrosCubit`
-  (sharing one real `EntriesRepositoryImpl` instance) through real
-  `Dio`/interceptors and a real `entries` Hive box:
-  - Happy path: `tracker.create()` fires one real POST to `entries-create`
-    with the right URL/headers/body, resolves `Right`, persists to the real
-    Hive box, and the confirmed entry is prepended into the real
-    `MeusRegistrosCubit`'s loaded state via `confirmedWrites`.
-  - Retryable failure then manual retry: a `NETWORK_TIMEOUT` response is
-    genuinely retried `RetryInterceptor.maxRetries` times over the real
-    retry pipeline before surfacing as the tracker's own
-    `PendingEntryWriteFailed(retryable: true)`, visible on
-    `MeusRegistrosCubit`'s `pendingWrites`; a later `tracker.retry()` fires
-    one brand-new real POST replaying the exact same payload, which
-    succeeds and confirms through to the cubit and the Hive box.
-  - Non-retryable failure blocks retry: a `VALIDATION_ERROR` response never
-    triggers `RetryInterceptor` (one request only) and leaves
-    `retryable: false`; a following `tracker.retry()` call is a genuine
-    no-op — confirmed by request count staying unchanged and the failed
-    record staying byte-for-byte identical.
+None — see Scope. No gap in real-pipeline coverage exists for this story.
 
 ## Verification
 
 - `fvm flutter analyze` — zero issues.
-- `fvm flutter test` — 677/677 passed, including the 3 new E2E tests.
+- `fvm flutter test` — 679/679 passed (unchanged from the spec-4-2 run's
+  count — confirms no coverage drift).
 
 ## Coverage
 
-- `entries.create`/retry (spec-4-2): optimistic-create success, retryable
-  failure -> manual retry -> success, and the non-retryable retry guard —
-  all three real-pipeline paths now covered end-to-end, including the
-  round-2 review fix that moved the `retryable` guard into
-  `PendingEntryWriteTrackerImpl.retry()` itself.
-- Widget-level behavior (badge rendering, tap-to-retry UI wiring, placeholder
-  ordering/overlay onto Loaded/Empty/Error states) was already covered
-  pre-existing in the widget-test suite — untouched by this run.
-- `entries.list` (spec-4-1) real-pipeline coverage remains in
-  `entries_list_flow_e2e_test.dart` from the prior run — not duplicated here.
+- `entries.list`/`entries.create`/retry real-pipeline coverage remains in
+  `entries_list_flow_e2e_test.dart` and `pending_write_sync_e2e_test.dart`
+  (prior runs) — untouched and still green.
+- Spec-4-3's own UI surface (empty-state render, CTA-opens-modal,
+  malformed-fallback) is covered in `meus_registros_screen_test.dart`
+  against fakes, per this project's no-device-E2E-for-UI-taps convention.
 
 ## Next Steps
 
+- Story 4.4 (entry detail view) is next in delivery order (backlog) — once
+  implemented, re-run this workflow to check whether it opens a new
+  real-pipeline surface (e.g. a dedicated fetch-by-id call) worth an E2E
+  test, the way 4.1/4.2 did and 4.3 did not.
 - If a device/simulator or CI step is introduced (AGENTS.md notes none
-  exists yet), consider promoting these into `integration_test/` driver
-  tests against a real target.
-- The deferred, lineage-unscoped `create()` drop-any-failed-record behavior
-  (`deferred-work.md`, round 2) is a spec-renegotiation question, not a test
-  gap — left untouched.
+  exists yet), consider promoting the existing real-pipeline `test()`
+  suites into `integration_test/` driver tests against a real target.

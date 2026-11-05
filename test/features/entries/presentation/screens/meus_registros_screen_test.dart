@@ -104,6 +104,10 @@ class _FakeEntriesRepository implements EntriesRepository {
     }
     return _listResults.removeAt(0);
   }
+
+  @override
+  Future<Either<Failure, Entry>> getById(String id) async =>
+      throw UnimplementedError('not expected to be called');
 }
 
 /// A trivial `PendingEntryWriteTracker` fake — this file's own tests cover
@@ -696,6 +700,53 @@ void main() {
         expect(tester.takeException(), isNull);
         expect(find.text('Sessão expirada'), findsOneWidget);
         expect(controller.offset, scrollOffsetBeforeExpiry);
+      },
+    );
+  });
+
+  group('spec-4-4: card tap navigates to entry detail', () {
+    testWidgets(
+      'tapping a card\'s body pushes /meus-registros/:id with that '
+      'entry\'s own id',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(
+            right(
+              EntriesPage(
+                items: [_entry('e1', '2026-01-01T10:00:00')],
+                nextCursor: null,
+              ),
+            ),
+          );
+        final cubit = MeusRegistrosCubit(
+          fakeRepository,
+          _FakePendingEntryWriteTracker(),
+        );
+        addTearDown(cubit.close);
+        final router = GoRouter(
+          initialLocation: '/meus-registros',
+          routes: [
+            GoRoute(
+              path: '/meus-registros',
+              builder: (context, state) =>
+                  MeusRegistrosScreen(cubit: cubit),
+            ),
+            GoRoute(
+              path: '/meus-registros/:id',
+              builder: (context, state) =>
+                  Text('Detail: ${state.pathParameters['id']}'),
+            ),
+          ],
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.textContaining('content-e1'));
+        await tester.pumpAndSettle();
+
+        expect(router.state.uri.toString(), '/meus-registros/e1');
+        expect(find.text('Detail: e1'), findsOneWidget);
       },
     );
   });

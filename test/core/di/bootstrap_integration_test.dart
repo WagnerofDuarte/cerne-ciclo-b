@@ -20,6 +20,7 @@ import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
+import 'package:cerne/features/entries/presentation/cubit/entry_detail_cubit.dart';
 import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 
@@ -194,6 +195,13 @@ void main() {
       // rationale as `AccountSettingsCubit` above), not a factory.
       expect(sl.isRegistered<MeusRegistrosCubit>(), isTrue);
       expect(() => sl<MeusRegistrosCubit>(), returnsNormally);
+
+      // spec-4-4 — `EntryDetailCubit` is a `factory` (reaches into
+      // `SessionRepository` too, registered by the `auth` feature) — a
+      // broken registration must surface here, not only at real app
+      // launch navigating to `/meus-registros/:id` (review finding).
+      expect(sl.isRegistered<EntryDetailCubit>(), isTrue);
+      expect(() => sl<EntryDetailCubit>(), returnsNormally);
 
       // `TextEntryCubit` is a factory (Boundaries: "Modal open resets"),
       // not a singleton — resolving it twice must return two distinct,

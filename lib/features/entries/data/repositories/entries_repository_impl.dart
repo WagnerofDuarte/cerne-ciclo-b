@@ -93,6 +93,58 @@ class EntriesRepositoryImpl implements EntriesRepository {
     );
   }
 
+  @override
+  Future<Either<Failure, Entry>> getById(String id) async {
+    final result = await _remoteDataSource.get(id);
+    return result.match(
+      (failure) async {
+        // Boundaries: scoped to networkOffline/networkTimeout specifically
+        // — every other Failure (notFound included) propagates as Left,
+        // unmapped, same convention `list()`'s own cursor-scoped fallback
+        // above uses.
+        if (failure is NetworkOffline || failure is NetworkTimeout) {
+          return _cachedEntryOrOriginalFailure(id, failure);
+        }
+        return left(failure);
+      },
+      (dto) async {
+        // Same RNF09 rationale as `create()`/`list()`'s own Hive-write
+        // guards — a thrown Hive/disk exception must never escape
+        // unmapped.
+        try {
+          await _entriesBox.put(dto.id, dto.toJson());
+        } catch (error) {
+          return left(Failure.malformedResponse(message: error.toString()));
+        }
+        return right(_toEntry(dto));
+      },
+    );
+  }
+
+  /// [getById]'s own offline/timeout fallback (Boundaries): a cache hit
+  /// returns `Right` from the cached `EntryDto`; a cache miss propagates
+  /// [originalFailure] unchanged — "no synthesized not-found" — rather than
+  /// inventing a [Failure.notFound] this repository never actually
+  /// received from the backend. A corrupt cached entry (should never
+  /// happen — every entry here was written by [create]/[list]/[getById]
+  /// themselves) maps to `Left(malformedResponse)` rather than throwing
+  /// (RNF09), same guard `_offlineFallback()`'s own malformed-cache check
+  /// uses.
+  Either<Failure, Entry> _cachedEntryOrOriginalFailure(
+    String id,
+    Failure originalFailure,
+  ) {
+    try {
+      final cached = _entriesBox.get(id);
+      if (cached == null) {
+        return left(originalFailure);
+      }
+      return right(_toEntry(EntryDto.fromJson(Map<String, dynamic>.from(cached))));
+    } catch (error) {
+      return left(Failure.malformedResponse(message: error.toString()));
+    }
+  }
+
   /// The offline/timeout fallback (Boundaries): a full `entries` Hive box
   /// dump, sorted `occurredAt` desc, always `nextCursor: null` — a cached
   /// dump has no further page to request. A corrupt cached entry (should

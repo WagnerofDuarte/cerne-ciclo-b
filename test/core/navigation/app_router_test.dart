@@ -23,7 +23,9 @@ import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
+import 'package:cerne/features/entries/presentation/cubit/entry_detail_cubit.dart';
 import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
+import 'package:cerne/features/entries/presentation/screens/entry_detail_screen.dart';
 import 'package:cerne/features/entries/presentation/screens/meus_registros_screen.dart';
 import 'package:cerne/features/vault/domain/entities/vault_status.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
@@ -34,11 +36,14 @@ class MockAuthRepository extends Mock implements AuthRepository {}
 class MockSessionRepository extends Mock implements SessionRepository {}
 
 /// A trivial fake — this router-focused suite only needs
-/// `MeusRegistrosScreen`'s `GoRoute.builder` to resolve `sl<
-/// MeusRegistrosCubit>()` without throwing; `meus_registros_cubit_test.dart`
-/// already covers the cubit's own behavior against a more capable fake.
-/// `list()` always resolves to an empty page so the screen settles on its
-/// plain "no entries yet" state instead of hanging.
+/// `MeusRegistrosScreen`'s/`EntryDetailScreen`'s own `GoRoute.builder`s to
+/// resolve `sl<MeusRegistrosCubit>()`/`sl<EntryDetailCubit>()` without
+/// throwing; `meus_registros_cubit_test.dart`/`entry_detail_cubit_test.dart`
+/// already cover each cubit's own behavior against a more capable fake.
+/// `list()` always resolves to an empty page so `MeusRegistrosScreen`
+/// settles on its plain "no entries yet" state instead of hanging;
+/// `getById()` always resolves to a trivial [Entry] with the requested
+/// [id] so `EntryDetailScreen` settles on its own `EntryDetailData` state.
 class _FakeEntriesRepository implements EntriesRepository {
   @override
   Future<Either<Failure, Entry>> create({
@@ -52,6 +57,20 @@ class _FakeEntriesRepository implements EntriesRepository {
     String? cursor,
     int limit = 20,
   }) async => right(const EntriesPage(items: [], nextCursor: null));
+
+  @override
+  Future<Either<Failure, Entry>> getById(String id) async => right(
+    Entry(
+      id: id,
+      content: 'content-$id',
+      source: EntrySource.manual,
+      chatMessageId: null,
+      occurredAt: '2026-01-01T10:00:00Z',
+      serverRevision: 1,
+      createdAt: '2026-01-01T10:00:00Z',
+      updatedAt: '2026-01-01T10:00:00Z',
+    ),
+  );
 }
 
 /// A trivial fake `PendingEntryWriteTracker` — this suite never exercises
@@ -227,6 +246,19 @@ void main() {
       () => MeusRegistrosCubit(
         _FakeEntriesRepository(),
         _UnusedPendingEntryWriteTracker(),
+      ),
+    );
+    // `/meus-registros/:id`'s `GoRoute.builder` resolves `sl<
+    // EntryDetailCubit>()` (spec-4-4) — same rationale as `MeusRegistros
+    // Cubit` above; reuses the suite's own `fakeSessionRepository` so the
+    // router's single `SessionRepository` and this cubit's own composed
+    // one are the exact same instance, same convention every other
+    // `GoRoute.builder` in this suite already follows.
+    sl.registerFactory<EntryDetailCubit>(
+      () => EntryDetailCubit(
+        _FakeEntriesRepository(),
+        _UnusedPendingEntryWriteTracker(),
+        fakeSessionRepository,
       ),
     );
   });
@@ -471,4 +503,28 @@ void main() {
       },
     );
   });
+
+  group(
+    'spec-4-4 — /meus-registros/:id resolves to the real EntryDetailScreen',
+    () {
+      testWidgets(
+        'navigating to /meus-registros/e1 builds EntryDetailScreen, nested '
+        'under the same meusRegistros GoRoute, reusing the epic\'s one '
+        'redirect/ExpiryOverlayHost (Boundaries: "no second competing '
+        'redirect")',
+        (tester) async {
+          final router = await pumpRouter(tester);
+          fakeSessionRepository.setStatus(SessionStatus.authenticated);
+          await tester.pumpAndSettle();
+
+          router.go('${AppRoutePaths.meusRegistros}/e1');
+          await tester.pumpAndSettle();
+
+          expect(tester.takeException(), isNull);
+          expect(find.byType(EntryDetailScreen), findsOneWidget);
+          expect(location(router), '${AppRoutePaths.meusRegistros}/e1');
+        },
+      );
+    },
+  );
 }

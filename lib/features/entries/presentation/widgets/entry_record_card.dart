@@ -44,13 +44,17 @@ const _sourceMeta = <EntrySource, _SourceMeta>{
 /// `placeholder_screens.dart`'s `_KanbanCard` structure (colored left
 /// spine over a `Stack`, Code Map) but for an [Entry]: spine colored by
 /// [Entry.source], a source icon, the local time, a content excerpt, and
-/// (spec-4-2) its own [SyncBadge]. Boundaries: still never tappable for
-/// navigation (4.4) — the only `InkWell` anywhere in this subtree lives
-/// inside [SyncBadge] itself, scoped to the badge's own tap target.
+/// (spec-4-2) its own [SyncBadge]. spec-4-4: [onTap] is this card's one
+/// navigation affordance — it opens `EntryDetailScreen`
+/// (`MeusRegistrosScreen`'s own wiring), scoped to the card's body; the
+/// only other `InkWell` anywhere in this subtree still lives inside
+/// [SyncBadge] itself, scoped to the badge's own tap target, so a tap
+/// landing on the badge triggers retry, never navigation.
 class EntryRecordCard extends StatelessWidget {
   const EntryRecordCard({
     required this.entry,
     required this.badgeState,
+    required this.onTap,
     this.onRetryTap,
     super.key,
   });
@@ -61,6 +65,14 @@ class EntryRecordCard extends StatelessWidget {
   /// — computed by the caller (`MeusRegistrosLoaded.badgeFor`), never
   /// recomputed here (Never: "any screen recomputing badge state inline").
   final SyncBadgeState badgeState;
+
+  /// spec-4-4 — opens this entry's detail view
+  /// (`MeusRegistrosScreen`'s `context.push('${AppRoutePaths.
+  /// meusRegistros}/${entry.id}')`). A pending/failed placeholder's own
+  /// synthetic `tempId` is a valid, un-special-cased target here too
+  /// (Boundaries) — this card never knows or cares which kind of id it
+  /// holds.
+  final VoidCallback onTap;
 
   /// Forwarded to [SyncBadge] verbatim — only ever invoked for a
   /// retryable [SyncBadgeError].
@@ -81,48 +93,60 @@ class EntryRecordCard extends StatelessWidget {
         borderRadius: const BorderRadius.all(
           Radius.circular(DesignTokens.radiusMd),
         ),
-        child: Stack(
-          children: [
-            Positioned(
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: DesignTokens.kanbanCardSpineWidth,
-              child: ColoredBox(color: meta.color),
-            ),
-            Padding(
-              padding: DesignTokens.kanbanCardPadding,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
+        // Review finding, round 1: the tappable area must cover the whole
+        // card — including the colored spine strip beside the content, not
+        // just the content `Padding` — so `Material`/`InkWell` now wraps
+        // the entire `Stack` rather than only its second child.
+        // `SyncBadge`'s own nested `InkWell` still wins the hit test for a
+        // tap landing on the badge itself.
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: onTap,
+            child: Stack(
+              children: [
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: DesignTokens.kanbanCardSpineWidth,
+                  child: ColoredBox(color: meta.color),
+                ),
+                Padding(
+                  padding: DesignTokens.kanbanCardPadding,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(meta.icon, color: meta.color),
-                      const SizedBox(width: DesignTokens.spacingSm),
+                      Row(
+                        children: [
+                          Icon(meta.icon, color: meta.color),
+                          const SizedBox(width: DesignTokens.spacingSm),
+                          Text(
+                            time,
+                            style: DesignTokens.textMonoCaption.copyWith(
+                              color: DesignTokens.colorTextSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: DesignTokens.spacingXs),
                       Text(
-                        time,
-                        style: DesignTokens.textMonoCaption.copyWith(
-                          color: DesignTokens.colorTextSecondary,
+                        entry.content,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: DesignTokens.textBodyMd.copyWith(
+                          color: DesignTokens.colorTextPrimary,
                         ),
                       ),
+                      const SizedBox(height: DesignTokens.spacingXs),
+                      SyncBadge(state: badgeState, onRetryTap: onRetryTap),
                     ],
                   ),
-                  const SizedBox(height: DesignTokens.spacingXs),
-                  Text(
-                    entry.content,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: DesignTokens.textBodyMd.copyWith(
-                      color: DesignTokens.colorTextPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: DesignTokens.spacingXs),
-                  SyncBadge(state: badgeState, onRetryTap: onRetryTap),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

@@ -2,10 +2,12 @@ import 'package:hive_ce/hive_ce.dart';
 
 import '../../core/di/injection_container.dart';
 import '../../core/network/api_client.dart';
+import '../auth/domain/repositories/session_repository.dart';
 import 'data/datasources/entries_remote_data_source.dart';
 import 'data/repositories/entries_repository_impl.dart';
 import 'domain/repositories/entries_repository.dart';
 import 'domain/services/pending_entry_write_tracker.dart';
+import 'presentation/cubit/entry_detail_cubit.dart';
 import 'presentation/cubit/meus_registros_cubit.dart';
 
 /// The `entries` Hive box's name — the first `hive_ce` box in the app
@@ -55,5 +57,18 @@ Future<void> registerEntriesFeature() async {
       sl<PendingEntryWriteTracker>(),
     ),
     dispose: (cubit) => cubit.close(),
+  );
+
+  // spec-4-4 — a `factory`, not a `lazySingleton` (Code Map): each visit to
+  // `/meus-registros/:id` gets its own throwaway instance
+  // (`EntryDetailScreen`'s own `dispose()` closes it), mirroring the
+  // capture cubits' own factory shape rather than `MeusRegistrosCubit`'s
+  // long-lived one.
+  sl.registerFactory<EntryDetailCubit>(
+    () => EntryDetailCubit(
+      sl<EntriesRepository>(),
+      sl<PendingEntryWriteTracker>(),
+      sl<SessionRepository>(),
+    ),
   );
 }

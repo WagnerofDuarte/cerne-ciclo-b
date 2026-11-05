@@ -53,6 +53,10 @@ class _FakeEntriesRepository implements EntriesRepository {
     String? cursor,
     int limit = 20,
   }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, Entry>> getById(String id) async =>
+      throw UnimplementedError('not expected to be called');
 }
 
 void main() {

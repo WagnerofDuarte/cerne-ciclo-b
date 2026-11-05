@@ -2,9 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../core/design_tokens.dart';
 import '../../../../core/di/injection_container.dart';
+import '../../../../core/navigation/app_router.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/back_arrow_header.dart';
 import '../../../capture/presentation/cubit/audio_entry_cubit.dart';
@@ -113,6 +115,10 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
                     scrollController: _scrollController,
                     onRetryLoadMore: widget.cubit.retryLoadMore,
                     onRetryTap: (entry) => widget.cubit.retry(entry.id),
+                    onCardTap: (entry) => context.push(
+                      '${AppRoutePaths.meusRegistros}/'
+                      '${Uri.encodeComponent(entry.id)}',
+                    ),
                   ),
                 },
               ),
@@ -154,7 +160,10 @@ class _EmptyState extends StatelessWidget {
     // dart`'s own call shape, mirrored verbatim) — spec-4-3.
     return Center(
       child: Padding(
-        padding: DesignTokens.screenPadding,
+        padding: const EdgeInsets.symmetric(
+          vertical: DesignTokens.entriesEmptyStateVerticalPadding,
+          horizontal: DesignTokens.spacingLg,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -231,12 +240,16 @@ class _EntryList extends StatelessWidget {
     required this.scrollController,
     required this.onRetryLoadMore,
     required this.onRetryTap,
+    required this.onCardTap,
   });
 
   final MeusRegistrosLoaded state;
   final ScrollController scrollController;
   final VoidCallback onRetryLoadMore;
   final void Function(Entry entry) onRetryTap;
+
+  /// spec-4-4 — opens `EntryDetailScreen` for the tapped card.
+  final void Function(Entry entry) onCardTap;
 
   @override
   Widget build(BuildContext context) {
@@ -265,6 +278,7 @@ class _EntryList extends StatelessWidget {
           group: groups[index],
           badgeFor: state.badgeFor,
           onRetryTap: onRetryTap,
+          onCardTap: onCardTap,
         );
       },
     );
@@ -276,6 +290,7 @@ class _DateGroupSection extends StatelessWidget {
     required this.group,
     required this.badgeFor,
     required this.onRetryTap,
+    required this.onCardTap,
   });
 
   final EntryDateGroup group;
@@ -289,6 +304,10 @@ class _DateGroupSection extends StatelessWidget {
   /// `EntryRecordCard`/`SyncBadge` only ever call this for a retryable
   /// error badge.
   final void Function(Entry entry) onRetryTap;
+
+  /// spec-4-4 — `EntryRecordCard`'s own `onTap`, pre-bound to this entry's
+  /// own id.
+  final void Function(Entry entry) onCardTap;
 
   @override
   Widget build(BuildContext context) {
@@ -309,6 +328,7 @@ class _DateGroupSection extends StatelessWidget {
               key: ValueKey(entry.id),
               entry: entry,
               badgeState: badgeFor(entry),
+              onTap: () => onCardTap(entry),
               onRetryTap: () => onRetryTap(entry),
             ),
             const SizedBox(height: DesignTokens.spacingSm),

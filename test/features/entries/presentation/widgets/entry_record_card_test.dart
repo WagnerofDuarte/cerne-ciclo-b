@@ -26,6 +26,7 @@ Future<void> _pump(WidgetTester tester, Entry entry) async {
         body: EntryRecordCard(
           entry: entry,
           badgeState: const SyncBadgeState.synchronized(),
+          onTap: () {},
         ),
       ),
     ),
@@ -115,6 +116,60 @@ void main() {
     },
   );
 
+  group('spec-4-4: onTap navigation', () {
+    testWidgets(
+      'tapping the card body (not the badge) calls onTap',
+      (tester) async {
+        var tapped = false;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: EntryRecordCard(
+                entry: _entry(EntrySource.manual),
+                badgeState: const SyncBadgeState.synchronized(),
+                onTap: () => tapped = true,
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.text('content'));
+        await tester.pump();
+
+        expect(tapped, isTrue);
+      },
+    );
+
+    testWidgets(
+      'tapping a retryable error SyncBadge calls onRetryTap, never onTap '
+      '(the badge\'s own InkWell wins the hit test)',
+      (tester) async {
+        var tapped = false;
+        var retried = false;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: EntryRecordCard(
+                entry: _entry(EntrySource.manual),
+                badgeState: const SyncBadgeState.error(
+                  Failure.networkTimeout(message: 'Timed out'),
+                ),
+                onTap: () => tapped = true,
+                onRetryTap: () => retried = true,
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.byType(SyncBadge));
+        await tester.pump();
+
+        expect(retried, isTrue);
+        expect(tapped, isFalse);
+      },
+    );
+  });
+
   group('spec-4-2: sync badge forwarding', () {
     testWidgets(
       'renders a SyncBadge with the given badgeState',
@@ -139,6 +194,7 @@ void main() {
                 badgeState: const SyncBadgeState.error(
                   Failure.networkTimeout(message: 'Timed out'),
                 ),
+                onTap: () {},
                 onRetryTap: () => retried = true,
               ),
             ),

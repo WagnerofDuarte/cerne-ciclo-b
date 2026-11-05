@@ -351,4 +351,106 @@ void main() {
       },
     );
   });
+
+  // spec-4-4 (RF07) — `EntriesRepository.getById`'s own data-source call,
+  // `entries-get` with [id] as its one trailing path segment.
+  group('EntriesRemoteDataSource.get', () {
+    test('calls GET entries-get with [id] as the one pathParams entry', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-get',
+          pathParams: any(named: 'pathParams'),
+        ),
+      ).thenAnswer((_) async => right(_entryBody()));
+
+      await dataSource.get('e1');
+
+      final captured = verify(
+        () => mockApiClient.get(
+          'entries-get',
+          pathParams: captureAny(named: 'pathParams'),
+        ),
+      ).captured;
+      expect(captured.single, ['e1']);
+    });
+
+    test('decodes the EntryDto from the response data object', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-get',
+          pathParams: any(named: 'pathParams'),
+        ),
+      ).thenAnswer((_) async => right(_entryBody()));
+
+      final result = await dataSource.get('e1');
+
+      expect(result.isRight(), isTrue);
+      result.match((_) => fail('expected Right'), (dto) {
+        expect(dto.id, 'e1');
+        expect(dto.content, 'Hoje foi um bom dia.');
+        expect(dto.source, EntrySource.manual);
+      });
+    });
+
+    test('a malformed 200 body maps to Left(malformedResponse), never '
+        'throws (RNF09)', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-get',
+          pathParams: any(named: 'pathParams'),
+        ),
+      ).thenAnswer((_) async => right({'unexpected': 'shape'}));
+
+      final result = await dataSource.get('e1');
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
+
+    test(
+      'a backend NOT_FOUND passes straight through as Left, unmapped',
+      () async {
+        when(
+          () => mockApiClient.get(
+            'entries-get',
+            pathParams: any(named: 'pathParams'),
+          ),
+        ).thenAnswer(
+          (_) async => left(const Failure.notFound(message: 'Não encontrado')),
+        );
+
+        final result = await dataSource.get('unknown-id');
+
+        expect(result.isLeft(), isTrue);
+        result.match(
+          (failure) => expect(failure, isA<NotFound>()),
+          (_) => fail('expected Left'),
+        );
+      },
+    );
+
+    test('networkOffline/networkTimeout from ApiClient pass straight '
+        'through as Left, unmapped — the Hive fallback is the repository\'s '
+        'own job, not this data source\'s', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-get',
+          pathParams: any(named: 'pathParams'),
+        ),
+      ).thenAnswer(
+        (_) async => left(const Failure.networkOffline(message: 'Offline')),
+      );
+
+      final result = await dataSource.get('e1');
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<NetworkOffline>()),
+        (_) => fail('expected Left'),
+      );
+    });
+  });
 }

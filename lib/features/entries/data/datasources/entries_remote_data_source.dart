@@ -74,4 +74,24 @@ class EntriesRemoteDataSource {
       }
     });
   }
+
+  /// Calls `entries-get` (`ApiClient.get`) with [id] appended as the one
+  /// trailing path segment (Conventions: "path parameters appended as
+  /// trailing segments") — decodes the response's own `data` object exactly
+  /// as [create]/[list] already do, a superset [EntryDto] already handles
+  /// (Boundaries: "its response is a superset, same as create/list's DTO
+  /// reuse").
+  Future<Either<Failure, EntryDto>> get(String id) async {
+    final result = await _apiClient.get('entries-get', pathParams: [id]);
+    return result.flatMap((json) {
+      try {
+        final data = json['data'] as Map<String, dynamic>;
+        return right(EntryDto.fromJson(data));
+      } catch (error) {
+        // Same client-side-parse-failure rationale as `create()`/`list()`
+        // above.
+        return left(Failure.malformedResponse(message: error.toString()));
+      }
+    });
+  }
 }

@@ -63,7 +63,13 @@ baseline_commit: '526b6bf0085b1ff5c0f70f9d567833633caf5248'
 - [x] Given zero Entries, when Meus Registros loads, then a dedicated empty state renders (icon, copy, CTA) — never a blank list or plain-text-only state.
 - [x] Given the empty state, when the user taps "Criar primeiro registro", then the Insertion Modal opens, identical to the Home/Chat "+" FAB's own modal.
 
-## Design Notes
+### Review Findings
+
+- [x] [Review][Patch] `_EmptyState`'s container uses uniform `DesignTokens.screenPadding` (24px all sides) instead of the prototype's exact `padding:64px 24px` for the Tela 4 — Vazio block, half the intended vertical breathing room above/below the icon+copy+CTA group — deviates from the Boundaries' "Exact prototype markup" commitment [meus_registros_screen.dart:157] — fixed: added `DesignTokens.entriesEmptyStateVerticalPadding = 64` and switched to `EdgeInsets.symmetric(vertical: entriesEmptyStateVerticalPadding, horizontal: spacingLg)`.
+- [x] [Review][Patch] `tests/test-summary.md`'s Verification section states `fvm flutter test — 677/677 passed`; running it against the actual committed tree gives `679/679 passed` — stale/wrong by 2 [`_bmad-output/implementation-artifacts/tests/test-summary.md:274`] — fixed: count corrected to `679/679`.
+- [x] [Review][Defer] Tapping "Criar primeiro registro" twice rapidly can open two stacked Insertion Modal instances — no debounce guard on the CTA's `onPressed` [meus_registros_screen.dart:176] — deferred, pre-existing: reproduces the identical, already-shipped, unguarded pattern on the Home/Chat FAB (`placeholder_screens.dart:97`); a fix belongs to both call sites together, not this story alone.
+
+
 
 The CTA deliberately calls `InsertionModal.show` directly from `_EmptyState` (a `StatelessWidget`, same as `HomeChatPlaceholderScreen`'s FAB) rather than threading a callback through `MeusRegistrosCubit`/`MeusRegistrosScreen` — opening the modal is pure navigation/DI wiring with no cubit-observable state of its own, and `placeholder_screens.dart` already establishes this exact call-directly-from-the-widget convention for the only other place this modal is opened.
 

@@ -276,6 +276,13 @@ class DesignTokens {
   /// [biometricIconSize].
   static const double entriesEmptyStateIconSize = 88;
 
+  /// Tela 4 — Vazio's own container padding (Story 4.3, round-2 review
+  /// fix) — `cerne-prototype.html`'s empty-state block is
+  /// `padding:64px 24px`, vertical-only off the existing 4dp scale, same
+  /// rationale as [dialogContentGap]. [spacingLg] already supplies the
+  /// matching 24px horizontal half.
+  static const double entriesEmptyStateVerticalPadding = 64;
+
   /// Confirmation-dialog card's internal gap between stacked elements
   /// (icon+title row, body text, button, caption) — the overlay's markup
   /// (prototype-extract.md's "Sessão expirada" block) uses 14px, which

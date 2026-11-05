@@ -54,6 +54,10 @@ class _FakeEntriesRepository implements EntriesRepository {
     }
     return _listResults.removeAt(0);
   }
+
+  @override
+  Future<Either<Failure, Entry>> getById(String id) async =>
+      throw UnimplementedError('not expected to be called');
 }
 
 /// A `Completer`-per-call fake, letting a test resolve `list()` calls in
@@ -83,6 +87,10 @@ class _GatedEntriesRepository implements EntriesRepository {
     _completers.add(completer);
     return completer.future;
   }
+
+  @override
+  Future<Either<Failure, Entry>> getById(String id) async =>
+      throw UnimplementedError('not expected to be called');
 }
 
 /// A controllable `PendingEntryWriteTracker` fake — lets a test drive

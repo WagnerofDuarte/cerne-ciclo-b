@@ -11,7 +11,9 @@ import '../../features/auth/domain/entities/session_status.dart';
 import '../../features/auth/domain/repositories/session_repository.dart';
 import '../../features/auth/presentation/cubit/auth_cubit.dart';
 import '../../features/auth/presentation/screens/auth_screen.dart';
+import '../../features/entries/presentation/cubit/entry_detail_cubit.dart';
 import '../../features/entries/presentation/cubit/meus_registros_cubit.dart';
+import '../../features/entries/presentation/screens/entry_detail_screen.dart';
 import '../../features/entries/presentation/screens/meus_registros_screen.dart';
 import '../../features/vault/domain/entities/vault_status.dart';
 import '../../features/vault/domain/repositories/vault_repository.dart';
@@ -120,6 +122,20 @@ GoRouter buildAppRouter({
         path: AppRoutePaths.meusRegistros,
         builder: (context, state) =>
             MeusRegistrosScreen(cubit: sl<MeusRegistrosCubit>()),
+        routes: [
+          // spec-4-4 (RF07) — `:id` is either a real server id or a
+          // still-pending/failed placeholder's synthetic `tempId`
+          // (Boundaries: "a valid, un-special-cased navigation target");
+          // `EntryDetailCubit` itself decides nothing about which kind it
+          // is, it just calls `getById` with it verbatim.
+          GoRoute(
+            path: ':id',
+            builder: (context, state) => EntryDetailScreen(
+              cubit: sl<EntryDetailCubit>()
+                ..load(state.pathParameters['id']!),
+            ),
+          ),
+        ],
       ),
       GoRoute(
         path: AppRoutePaths.planosDeAcao,
