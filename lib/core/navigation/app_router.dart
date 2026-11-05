@@ -11,6 +11,8 @@ import '../../features/auth/domain/entities/session_status.dart';
 import '../../features/auth/domain/repositories/session_repository.dart';
 import '../../features/auth/presentation/cubit/auth_cubit.dart';
 import '../../features/auth/presentation/screens/auth_screen.dart';
+import '../../features/entries/presentation/cubit/meus_registros_cubit.dart';
+import '../../features/entries/presentation/screens/meus_registros_screen.dart';
 import '../../features/vault/domain/entities/vault_status.dart';
 import '../../features/vault/domain/repositories/vault_repository.dart';
 import '../../features/vault/presentation/screens/vault_lock_screen.dart';
@@ -116,7 +118,8 @@ GoRouter buildAppRouter({
       ),
       GoRoute(
         path: AppRoutePaths.meusRegistros,
-        builder: (context, state) => const MeusRegistrosPlaceholderScreen(),
+        builder: (context, state) =>
+            MeusRegistrosScreen(cubit: sl<MeusRegistrosCubit>()),
       ),
       GoRoute(
         path: AppRoutePaths.planosDeAcao,
@@ -158,9 +161,7 @@ String? _redirect(
   // the default from construction (never `null`), so this never waits on
   // an async warm-up the way the `status == null` boot check below does.
   if (vaultRepository.currentStatus != VaultStatus.unlocked) {
-    return location == AppRoutePaths.vaultLock
-        ? null
-        : AppRoutePaths.vaultLock;
+    return location == AppRoutePaths.vaultLock ? null : AppRoutePaths.vaultLock;
   }
 
   final status = sessionRepository.currentStatus;

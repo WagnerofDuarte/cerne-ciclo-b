@@ -15,6 +15,7 @@ import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart
 import 'package:cerne/features/capture/presentation/cubit/photo_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/widgets/insertion_modal.dart';
+import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 
@@ -57,6 +58,14 @@ class _FakeEntriesRepository implements EntriesRepository {
     }
     return nextResult!();
   }
+
+  /// This file never exercises `/meus-registros` (spec-4-1) — not expected
+  /// to be called, same rationale as the other unused ports in this suite.
+  @override
+  Future<Either<Failure, EntriesPage>> list({
+    String? cursor,
+    int limit = 20,
+  }) async => throw UnimplementedError('not expected to be called');
 }
 
 /// A trivial fake — correction: switching to the Áudio tab no longer

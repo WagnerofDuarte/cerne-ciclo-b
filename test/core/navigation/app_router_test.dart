@@ -18,6 +18,11 @@ import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
 import 'package:cerne/features/auth/domain/repositories/session_repository.dart';
 import 'package:cerne/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:cerne/features/auth/presentation/screens/auth_screen.dart';
+import 'package:cerne/features/entries/domain/entities/entries_page.dart';
+import 'package:cerne/features/entries/domain/entities/entry.dart';
+import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
+import 'package:cerne/features/entries/presentation/screens/meus_registros_screen.dart';
 import 'package:cerne/features/vault/domain/entities/vault_status.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 import 'package:cerne/features/vault/presentation/screens/vault_lock_screen.dart';
@@ -25,6 +30,27 @@ import 'package:cerne/features/vault/presentation/screens/vault_lock_screen.dart
 class MockAuthRepository extends Mock implements AuthRepository {}
 
 class MockSessionRepository extends Mock implements SessionRepository {}
+
+/// A trivial fake — this router-focused suite only needs
+/// `MeusRegistrosScreen`'s `GoRoute.builder` to resolve `sl<
+/// MeusRegistrosCubit>()` without throwing; `meus_registros_cubit_test.dart`
+/// already covers the cubit's own behavior against a more capable fake.
+/// `list()` always resolves to an empty page so the screen settles on its
+/// plain "no entries yet" state instead of hanging.
+class _FakeEntriesRepository implements EntriesRepository {
+  @override
+  Future<Either<Failure, Entry>> create({
+    required String content,
+    required EntrySource source,
+    int? mediaDurationSeconds,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, EntriesPage>> list({
+    String? cursor,
+    int limit = 20,
+  }) async => right(const EntriesPage(items: [], nextCursor: null));
+}
 
 /// A plain (non-mocktail) fake — the redirect matrix needs [currentStatus]
 /// read synchronously right after [setStatus], and `statusStream` to
@@ -165,6 +191,12 @@ void main() {
     // test can also drive it through the cubit if ever needed.
     sl.registerLazySingleton<AccountSettingsCubit>(
       () => AccountSettingsCubit(fakeAccountSettingsRepository),
+    );
+    // `/meus-registros`'s `GoRoute.builder` resolves `sl<
+    // MeusRegistrosCubit>()` (spec-4-1) — same rationale as `AuthCubit`/
+    // `AccountSettingsCubit` above.
+    sl.registerLazySingleton<MeusRegistrosCubit>(
+      () => MeusRegistrosCubit(_FakeEntriesRepository()),
     );
   });
 
@@ -338,52 +370,73 @@ void main() {
     );
   });
 
-  group('Story 2.4 — AccountSettingsRepository feeds /vault and /configuracoes', () {
+  group(
+    'Story 2.4 — AccountSettingsRepository feeds /vault and /configuracoes',
+    () {
+      testWidgets(
+        '/configuracoes builds the real AccountSettingsScreen, not the old '
+        'placeholder',
+        (tester) async {
+          final router = await pumpRouter(tester);
+          fakeSessionRepository.setStatus(SessionStatus.authenticated);
+          await tester.pumpAndSettle();
+
+          router.go(AppRoutePaths.configuracoes);
+          await tester.pumpAndSettle();
+
+          expect(tester.takeException(), isNull);
+          expect(find.byType(AccountSettingsScreen), findsOneWidget);
+        },
+      );
+
+      testWidgets(
+        'default currentBiometricEnabled (true) is passed straight through '
+        'to VaultLockScreen.attemptBiometricFirst',
+        (tester) async {
+          fakeVaultRepository.setStatus(VaultStatus.locked);
+          await pumpRouter(tester);
+          await tester.pumpAndSettle();
+
+          final screen = tester.widget<VaultLockScreen>(
+            find.byType(VaultLockScreen),
+          );
+          expect(screen.attemptBiometricFirst, isTrue);
+        },
+      );
+
+      testWidgets(
+        'a false AccountSettingsRepository.currentBiometricEnabled, read at '
+        'the moment /vault builds, is passed through as attemptBiometricFirst: '
+        'false',
+        (tester) async {
+          fakeAccountSettingsRepository.setValue(false);
+          fakeVaultRepository.setStatus(VaultStatus.locked);
+          await pumpRouter(tester);
+          await tester.pumpAndSettle();
+
+          final screen = tester.widget<VaultLockScreen>(
+            find.byType(VaultLockScreen),
+          );
+          expect(screen.attemptBiometricFirst, isFalse);
+        },
+      );
+    },
+  );
+
+  group('spec-4-1 — /meus-registros builds the real MeusRegistrosScreen', () {
     testWidgets(
-      '/configuracoes builds the real AccountSettingsScreen, not the old '
+      '/meus-registros builds the real MeusRegistrosScreen, not the old '
       'placeholder',
       (tester) async {
         final router = await pumpRouter(tester);
         fakeSessionRepository.setStatus(SessionStatus.authenticated);
         await tester.pumpAndSettle();
 
-        router.go(AppRoutePaths.configuracoes);
+        router.go(AppRoutePaths.meusRegistros);
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
-        expect(find.byType(AccountSettingsScreen), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      'default currentBiometricEnabled (true) is passed straight through '
-      'to VaultLockScreen.attemptBiometricFirst',
-      (tester) async {
-        fakeVaultRepository.setStatus(VaultStatus.locked);
-        await pumpRouter(tester);
-        await tester.pumpAndSettle();
-
-        final screen = tester.widget<VaultLockScreen>(
-          find.byType(VaultLockScreen),
-        );
-        expect(screen.attemptBiometricFirst, isTrue);
-      },
-    );
-
-    testWidgets(
-      'a false AccountSettingsRepository.currentBiometricEnabled, read at '
-      'the moment /vault builds, is passed through as attemptBiometricFirst: '
-      'false',
-      (tester) async {
-        fakeAccountSettingsRepository.setValue(false);
-        fakeVaultRepository.setStatus(VaultStatus.locked);
-        await pumpRouter(tester);
-        await tester.pumpAndSettle();
-
-        final screen = tester.widget<VaultLockScreen>(
-          find.byType(VaultLockScreen),
-        );
-        expect(screen.attemptBiometricFirst, isFalse);
+        expect(find.byType(MeusRegistrosScreen), findsOneWidget);
       },
     );
   });

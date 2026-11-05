@@ -6,6 +6,7 @@ import 'package:fpdart/fpdart.dart';
 import 'package:hive_ce/hive_ce.dart';
 
 import '../../../../core/failure/failure.dart';
+import '../../domain/entities/entries_page.dart';
 import '../../domain/entities/entry.dart';
 import '../../domain/repositories/entries_repository.dart';
 import '../datasources/entries_remote_data_source.dart';
@@ -48,6 +49,75 @@ class EntriesRepositoryImpl implements EntriesRepository {
       }
       return right(_toEntry(dto));
     });
+  }
+
+  @override
+  Future<Either<Failure, EntriesPage>> list({
+    String? cursor,
+    int limit = 20,
+  }) async {
+    final result = await _remoteDataSource.list(cursor: cursor, limit: limit);
+    return result.match(
+      (failure) async {
+        // Boundaries/Design Notes: the Hive-cache fallback is scoped to
+        // `cursor == null` (the first/fresh page) only — a paginated
+        // continuation (`cursor != null`) that fails with
+        // `networkOffline`/`networkTimeout` propagates as `Left` like any
+        // other pagination failure instead, so `MeusRegistrosCubit`'s own
+        // `loadMoreFailed`/retry path handles it uniformly rather than a
+        // full unrelated cache dump silently replacing the in-progress
+        // paginated list (and breaking its newest-first ordering).
+        if (cursor == null &&
+            (failure is NetworkOffline || failure is NetworkTimeout)) {
+          return _offlineFallback();
+        }
+        return left(failure);
+      },
+      (page) async {
+        try {
+          await _entriesBox.putAll({
+            for (final dto in page.items) dto.id: dto.toJson(),
+          });
+        } catch (error) {
+          // Same RNF09 rationale as `create()`'s own Hive-write guard — a
+          // thrown Hive/disk exception must never escape unmapped.
+          return left(Failure.malformedResponse(message: error.toString()));
+        }
+        return right(
+          EntriesPage(
+            items: page.items.map(_toEntry).toList(),
+            nextCursor: page.nextCursor,
+          ),
+        );
+      },
+    );
+  }
+
+  /// The offline/timeout fallback (Boundaries): a full `entries` Hive box
+  /// dump, sorted `occurredAt` desc, always `nextCursor: null` — a cached
+  /// dump has no further page to request. A corrupt cached entry (should
+  /// never happen — every entry here was written by [create]/[list]
+  /// themselves) maps to `Left(malformedResponse)` rather than throwing
+  /// (RNF09), same guard `create()`'s own Hive write already has.
+  Either<Failure, EntriesPage> _offlineFallback() {
+    try {
+      final entries =
+          _entriesBox.values
+              .map(
+                (json) => _toEntry(
+                  EntryDto.fromJson(Map<String, dynamic>.from(json)),
+                ),
+              )
+              .toList()
+            ..sort(
+              (a, b) =>
+                  DateTime.parse(b.occurredAt)
+                      .compareTo(DateTime.parse(a.occurredAt)),
+            );
+      return right(EntriesPage(items: entries, nextCursor: null));
+    } catch (error) {
+      return left(Failure.malformedResponse(message: error.toString()));
+    }
   }
 
   Entry _toEntry(EntryDto dto) => Entry(

@@ -44,4 +44,34 @@ class EntriesRemoteDataSource {
       }
     });
   }
+
+  /// Calls `entries-list` (`ApiClient.get`) with `limit` always sent, and
+  /// `cursor` only when non-null (spec-4-1's own convention for an
+  /// optional-in-the-contract query parameter, mirroring [create]'s own
+  /// `mediaDurationSeconds` handling). Returns the raw page as a record —
+  /// no dedicated DTO wrapper type, since `EntriesRepositoryImpl.list()` is
+  /// this record's only reader.
+  Future<Either<Failure, ({List<EntryDto> items, String? nextCursor})>> list({
+    String? cursor,
+    int limit = 20,
+  }) async {
+    final result = await _apiClient.get(
+      'entries-list',
+      queryParameters: {'limit': limit, 'cursor': ?cursor},
+    );
+    return result.flatMap((json) {
+      try {
+        final data = json['data'] as List<dynamic>;
+        final items = data
+            .map((item) => EntryDto.fromJson(item as Map<String, dynamic>))
+            .toList();
+        final meta = json['meta'] as Map<String, dynamic>;
+        final nextCursor = meta['nextCursor'] as String?;
+        return right((items: items, nextCursor: nextCursor));
+      } catch (error) {
+        // Same client-side-parse-failure rationale as `create()` above.
+        return left(Failure.malformedResponse(message: error.toString()));
+      }
+    });
+  }
 }

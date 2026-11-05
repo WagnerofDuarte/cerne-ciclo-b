@@ -17,17 +17,24 @@ import 'package:cerne/features/capture/domain/services/photo_picker.dart';
 import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/photo_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
+import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 
 /// A trivial fake — the "+" tests below never exercise a real save, so
-/// `create()` is never expected to actually be called.
+/// `create()`/`list()` are never expected to actually be called.
 class _UnusedEntriesRepository implements EntriesRepository {
   @override
   Future<Either<Failure, Entry>> create({
     required String content,
     required EntrySource source,
     int? mediaDurationSeconds,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, EntriesPage>> list({
+    String? cursor,
+    int limit = 20,
   }) async => throw UnimplementedError('not expected to be called');
 }
 
@@ -186,43 +193,6 @@ void main() {
         expect(find.text('Áudio'), findsOneWidget);
         expect(find.text('Foto'), findsOneWidget);
         expect(find.byType(TextField), findsOneWidget);
-      },
-    );
-  });
-
-  group('MeusRegistrosPlaceholderScreen', () {
-    testWidgets(
-      'Meus Registros: shows a back-arrow header titled "Meus Registros", '
-      'never a broken/unfinished look',
-      (tester) async {
-        final router = _routerFrom(
-          '/meus-registros',
-          const MeusRegistrosPlaceholderScreen(),
-        );
-        addTearDown(router.dispose);
-        await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-
-        expect(find.text('Meus Registros'), findsOneWidget);
-        expect(find.byIcon(Icons.chevron_left), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      'Meus Registros: the back arrow navigates to / (Boundaries: "back '
-      'arrow always targets /")',
-      (tester) async {
-        final router = _routerFrom(
-          '/meus-registros',
-          const MeusRegistrosPlaceholderScreen(),
-        );
-        addTearDown(router.dispose);
-        await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-
-        await tester.tap(find.byIcon(Icons.chevron_left));
-        await tester.pumpAndSettle();
-
-        expect(router.state.uri.toString(), '/');
-        expect(find.text('Home'), findsOneWidget);
       },
     );
   });

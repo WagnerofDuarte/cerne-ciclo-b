@@ -19,6 +19,7 @@ import 'package:cerne/features/capture/domain/services/mic_recorder.dart';
 import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 
 import '../../support/fake_path_provider_platform.dart';
@@ -73,7 +74,10 @@ void main() {
 
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureStorageChannel, handleSecureStorageCall);
+        .setMockMethodCallHandler(
+          secureStorageChannel,
+          handleSecureStorageCall,
+        );
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(recordChannel, (_) async => null);
     // Story 3.1 — `setupCoreDependencies()` now also calls
@@ -105,77 +109,65 @@ void main() {
     await fakePathProvider.cleanUp();
   });
 
-  test(
-    'exactly one get_it instance resolves Dio + FlutterSecureStorage + ApiClient',
-    () {
-      expect(sl.isRegistered<Dio>(), isTrue);
-      expect(sl.isRegistered<FlutterSecureStorage>(), isTrue);
-      expect(sl.isRegistered<ApiClient>(), isTrue);
+  test('exactly one get_it instance resolves Dio + FlutterSecureStorage + ApiClient', () {
+    expect(sl.isRegistered<Dio>(), isTrue);
+    expect(sl.isRegistered<FlutterSecureStorage>(), isTrue);
+    expect(sl.isRegistered<ApiClient>(), isTrue);
 
-      // `dio` is configured through the container: both interceptors
-      // (header + retry, AD-4/AD-5) are attached to the resolved instance,
-      // alongside dio's own built-in default interceptor.
-      final dio = sl<Dio>();
-      expect(dio.interceptors.whereType<HeaderInterceptor>(), hasLength(1));
-      expect(dio.interceptors.whereType<RetryInterceptor>(), hasLength(1));
+    // `dio` is configured through the container: both interceptors
+    // (header + retry, AD-4/AD-5) are attached to the resolved instance,
+    // alongside dio's own built-in default interceptor.
+    final dio = sl<Dio>();
+    expect(dio.interceptors.whereType<HeaderInterceptor>(), hasLength(1));
+    expect(dio.interceptors.whereType<RetryInterceptor>(), hasLength(1));
 
-      // Resolving twice returns the same singleton — one container, one Dio.
-      expect(sl<Dio>(), same(dio));
-    },
-  );
+    // Resolving twice returns the same singleton — one container, one Dio.
+    expect(sl<Dio>(), same(dio));
+  });
 
-  test(
-    'setupCoreDependencies also wires the auth feature (Story 1.3) — a '
-    'broken registration/dependency cycle must surface here, not only at '
-    'real app launch (no device/CI exists yet to catch that otherwise)',
-    () {
-      expect(sl.isRegistered<AuthRemoteDataSource>(), isTrue);
-      expect(sl.isRegistered<AuthRepository>(), isTrue);
-      expect(sl.isRegistered<AuthCubit>(), isTrue);
+  test('setupCoreDependencies also wires the auth feature (Story 1.3) — a '
+      'broken registration/dependency cycle must surface here, not only at '
+      'real app launch (no device/CI exists yet to catch that otherwise)', () {
+    expect(sl.isRegistered<AuthRemoteDataSource>(), isTrue);
+    expect(sl.isRegistered<AuthRepository>(), isTrue);
+    expect(sl.isRegistered<AuthCubit>(), isTrue);
 
-      // Actually resolves the whole chain (AuthCubit -> AuthRepository ->
-      // AuthRemoteDataSource/AccessTokenProvider -> ApiClient/Dio) rather
-      // than just checking the registration exists — `get_it`'s
-      // `registerLazySingleton` only evaluates its factory on first
-      // resolution.
-      expect(() => sl<AuthCubit>(), returnsNormally);
-    },
-  );
+    // Actually resolves the whole chain (AuthCubit -> AuthRepository ->
+    // AuthRemoteDataSource/AccessTokenProvider -> ApiClient/Dio) rather
+    // than just checking the registration exists — `get_it`'s
+    // `registerLazySingleton` only evaluates its factory on first
+    // resolution.
+    expect(() => sl<AuthCubit>(), returnsNormally);
+  });
 
-  test(
-    'setupCoreDependencies also wires the vault feature (spec-2-1, AD-14) — '
-    'a broken registration (bad factory, missing LocalAuthentication '
-    "dependency, broken dispose:) must surface here, not only at real app "
-    'launch (no device/CI exists yet to catch that otherwise)',
-    () {
-      expect(sl.isRegistered<VaultRepository>(), isTrue);
+  test('setupCoreDependencies also wires the vault feature (spec-2-1, AD-14) — '
+      'a broken registration (bad factory, missing LocalAuthentication '
+      "dependency, broken dispose:) must surface here, not only at real app "
+      'launch (no device/CI exists yet to catch that otherwise)', () {
+    expect(sl.isRegistered<VaultRepository>(), isTrue);
 
-      // Actually resolves VaultRepository -> VaultRepositoryImpl(
-      // localAuthentication: sl<LocalAuthentication>()) rather than just
-      // checking the registration exists. This only constructs the
-      // LocalAuthentication() instance and stores it — it never calls any
-      // of its methods, so no platform-channel mock is needed here (same
-      // reasoning that already applies to AuthCubit's forced resolution
-      // above).
-      expect(() => sl<VaultRepository>(), returnsNormally);
-    },
-  );
+    // Actually resolves VaultRepository -> VaultRepositoryImpl(
+    // localAuthentication: sl<LocalAuthentication>()) rather than just
+    // checking the registration exists. This only constructs the
+    // LocalAuthentication() instance and stores it — it never calls any
+    // of its methods, so no platform-channel mock is needed here (same
+    // reasoning that already applies to AuthCubit's forced resolution
+    // above).
+    expect(() => sl<VaultRepository>(), returnsNormally);
+  });
 
-  test(
-    'setupCoreDependencies also wires the account feature (spec-2-4) — a '
-    'broken registration/dependency cycle must surface here, not only at '
-    'real app launch (no device/CI exists yet to catch that otherwise)',
-    () {
-      expect(sl.isRegistered<AccountSettingsRepository>(), isTrue);
-      expect(sl.isRegistered<AccountSettingsCubit>(), isTrue);
+  test('setupCoreDependencies also wires the account feature (spec-2-4) — a '
+      'broken registration/dependency cycle must surface here, not only at '
+      'real app launch (no device/CI exists yet to catch that otherwise)', () {
+    expect(sl.isRegistered<AccountSettingsRepository>(), isTrue);
+    expect(sl.isRegistered<AccountSettingsCubit>(), isTrue);
 
-      // Actually resolves the whole chain (AccountSettingsCubit ->
-      // AccountSettingsRepository -> AccountRemoteDataSource -> ApiClient/
-      // Dio) rather than just checking the registration exists — same
-      // rationale as `AuthCubit`'s own forced resolution above.
-      expect(() => sl<AccountSettingsCubit>(), returnsNormally);
-    },
-  );
+    // Actually resolves the whole chain (AccountSettingsCubit ->
+    // AccountSettingsRepository -> AccountRemoteDataSource -> ApiClient/
+    // Dio) rather than just checking the registration exists — same
+    // rationale as `AuthCubit`'s own forced resolution above.
+    expect(() => sl<AccountSettingsCubit>(), returnsNormally);
+  });
 
   test(
     'setupCoreDependencies also wires the entries + capture features '
@@ -189,6 +181,11 @@ void main() {
       // just checking the registration exists — same rationale as
       // `AuthCubit`'s own forced resolution above.
       expect(() => sl<EntriesRepository>(), returnsNormally);
+
+      // spec-4-1 — `MeusRegistrosCubit` is a `lazySingleton` (same
+      // rationale as `AccountSettingsCubit` above), not a factory.
+      expect(sl.isRegistered<MeusRegistrosCubit>(), isTrue);
+      expect(() => sl<MeusRegistrosCubit>(), returnsNormally);
 
       // `TextEntryCubit` is a factory (Boundaries: "Modal open resets"),
       // not a singleton — resolving it twice must return two distinct,

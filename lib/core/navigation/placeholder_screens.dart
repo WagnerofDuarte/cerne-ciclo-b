@@ -150,37 +150,6 @@ class HomeChatPlaceholderScreen extends StatelessWidget {
   }
 }
 
-/// Tela 4 — Meus Registros. RF05/RF06 aren't built yet — shares
-/// [BackArrowHeader]/[_FeaturePlaceholderBody] with
-/// [ActionPlansPlaceholderScreen]. Story 2.4 replaced the former
-/// `ConfiguracoesPlaceholderScreen` (which also shared this pair) with the
-/// real `AccountSettingsScreen` (`features/account/presentation/screens/
-/// account_settings_screen.dart`).
-class MeusRegistrosPlaceholderScreen extends StatelessWidget {
-  const MeusRegistrosPlaceholderScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: DesignTokens.colorSurfaceBg,
-      body: Column(
-        children: [
-          BackArrowHeader(title: 'Meus Registros'),
-          Expanded(
-            child: _FeaturePlaceholderBody(
-              icon: Icons.menu_book_outlined,
-              headline: 'Seus registros chegam em breve',
-              message:
-                  'Em breve seus registros de texto, áudio e foto vão '
-                  'aparecer aqui.',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Tela 5 — Planos de Ação **[ext]**. An explicit, never-implemented
 /// extension feature (AGENTS.md: "a menu entry may exist as a placeholder,
 /// nothing functional behind it") — the prototype's exact static 3-column

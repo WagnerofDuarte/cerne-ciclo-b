@@ -16,10 +16,11 @@ enum EntrySource { manual, audio, photo, chat }
 /// `source: audio` entries it produces.
 ///
 /// [occurredAt]/[createdAt]/[updatedAt] are kept as the backend's own ISO
-/// 8601 strings rather than parsed into `DateTime` — nothing in this story
-/// reads or formats them (Design Notes: the Hive box nothing reads from
-/// yet), so parsing would add risk (a malformed string throwing) with no
-/// behavior to justify it.
+/// 8601 strings rather than parsed into `DateTime` on this entity itself —
+/// spec-4-1's `groupEntriesByDate()`/`EntryRecordCard`'s own time label
+/// each parse [occurredAt] at their own call site instead, so a malformed
+/// string only ever risks throwing at the one place that actually needs
+/// the parsed value, never here.
 class Entry {
   const Entry({
     required this.id,

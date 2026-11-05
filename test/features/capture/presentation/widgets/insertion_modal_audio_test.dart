@@ -15,6 +15,7 @@ import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart
 import 'package:cerne/features/capture/presentation/cubit/photo_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/widgets/insertion_modal.dart';
+import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 
@@ -188,6 +189,14 @@ class _FakeEntriesRepository implements EntriesRepository {
     }
     return nextResult!();
   }
+
+  /// This file never exercises `/meus-registros` (spec-4-1) — not expected
+  /// to be called, same rationale as the other unused ports in this suite.
+  @override
+  Future<Either<Failure, EntriesPage>> list({
+    String? cursor,
+    int limit = 20,
+  }) async => throw UnimplementedError('not expected to be called');
 }
 
 Future<void> _openModal(
@@ -678,71 +687,70 @@ void main() {
     },
   );
 
-  testWidgets(
-    'Story 3.4: chained Áudio→Foto→Texto interruptions, then closing '
-    'without Salvar — POST /entries never fires at any point',
-    (tester) async {
-      fakePhotoPicker.cameraGate = Completer<void>();
-      await _openModal(
-        tester,
-        cubit: textCubit,
-        audioCubit: audioCubit,
-        photoCubit: photoCubit,
-      );
-      await tester.pumpAndSettle();
+  testWidgets('Story 3.4: chained Áudio→Foto→Texto interruptions, then closing '
+      'without Salvar — POST /entries never fires at any point', (
+    tester,
+  ) async {
+    fakePhotoPicker.cameraGate = Completer<void>();
+    await _openModal(
+      tester,
+      cubit: textCubit,
+      audioCubit: audioCubit,
+      photoCubit: photoCubit,
+    );
+    await tester.pumpAndSettle();
 
-      // Record audio.
-      await tester.tap(find.text('Áudio'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.mic));
-      await tester.pump();
-      expect(fakeMicRecorder.startCalls, 1);
-      expect(fakeRepository.createCallCount, 0);
+    // Record audio.
+    await tester.tap(find.text('Áudio'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.mic));
+    await tester.pump();
+    expect(fakeMicRecorder.startCalls, 1);
+    expect(fakeRepository.createCallCount, 0);
 
-      // Switch to Foto — cancels the still-recording audio.
-      await tester.tap(find.text('Foto'));
-      await tester.pumpAndSettle();
-      expect(fakeMicRecorder.cancelCalls, 1);
-      expect(fakeRepository.createCallCount, 0);
+    // Switch to Foto — cancels the still-recording audio.
+    await tester.tap(find.text('Foto'));
+    await tester.pumpAndSettle();
+    expect(fakeMicRecorder.cancelCalls, 1);
+    expect(fakeRepository.createCallCount, 0);
 
-      // Start a photo pick (held in flight by the gate).
-      await tester.tap(find.text('Câmera'));
-      await tester.pump();
-      // Confirms the pick actually started before the interrupting
-      // switch below.
-      expect(fakePhotoPicker.cameraCalls, 1);
-      expect(fakeRepository.createCallCount, 0);
+    // Start a photo pick (held in flight by the gate).
+    await tester.tap(find.text('Câmera'));
+    await tester.pump();
+    // Confirms the pick actually started before the interrupting
+    // switch below.
+    expect(fakePhotoPicker.cameraCalls, 1);
+    expect(fakeRepository.createCallCount, 0);
 
-      // Switch to Texto — cancels/discards the still-in-flight pick.
-      await tester.tap(find.text('Texto'));
-      await tester.pumpAndSettle();
-      expect(fakeRepository.createCallCount, 0);
+    // Switch to Texto — cancels/discards the still-in-flight pick.
+    await tester.tap(find.text('Texto'));
+    await tester.pumpAndSettle();
+    expect(fakeRepository.createCallCount, 0);
 
-      // Type text.
-      await tester.enterText(find.byType(TextField), 'texto digitado');
-      await tester.pump();
-      expect(find.text('texto digitado'), findsOneWidget);
-      expect(fakeRepository.createCallCount, 0);
+    // Type text.
+    await tester.enterText(find.byType(TextField), 'texto digitado');
+    await tester.pump();
+    expect(find.text('texto digitado'), findsOneWidget);
+    expect(fakeRepository.createCallCount, 0);
 
-      // Close the modal via the close control, never tapping Salvar.
-      await tester.tap(find.byIcon(Icons.close));
-      await tester.pumpAndSettle();
+    // Close the modal via the close control, never tapping Salvar.
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
 
-      expect(fakeRepository.createCallCount, 0);
+    expect(fakeRepository.createCallCount, 0);
 
-      // Releases the now-abandoned picker call so nothing is left
-      // dangling past this test — same hygiene
-      // `insertion_modal_photo_test.dart`'s own equivalent test uses.
-      // Flushed with a `pump()` (unlike a bare `complete()`) since this
-      // runs after the modal — and `PhotoEntryCubit` itself — has already
-      // closed; any exception from that completion must surface here,
-      // not leak into a later, unrelated test.
-      fakePhotoPicker.cameraGate!.complete();
-      await tester.pump();
+    // Releases the now-abandoned picker call so nothing is left
+    // dangling past this test — same hygiene
+    // `insertion_modal_photo_test.dart`'s own equivalent test uses.
+    // Flushed with a `pump()` (unlike a bare `complete()`) since this
+    // runs after the modal — and `PhotoEntryCubit` itself — has already
+    // closed; any exception from that completion must surface here,
+    // not leak into a later, unrelated test.
+    fakePhotoPicker.cameraGate!.complete();
+    await tester.pump();
 
-      expect(tester.takeException(), isNull);
-    },
-  );
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'Story 3.4: Áudio→Foto switch mid-transcription cancels the pending '
@@ -806,64 +814,61 @@ void main() {
     },
   );
 
-  testWidgets(
-    'Story 3.4: Foto→Áudio switch mid-OCR discards the pending OCR '
-    'result; Áudio is then ready to record (the cross-tab rule '
-    'exercised above only ever interrupted the picker call itself — '
-    'here the picker has already resolved into `PhotoProcessing` and OCR '
-    'is the pending async op left to cancel; same technique '
-    '`insertion_modal_photo_test.dart`\'s own "canceling mid-pick (tab '
-    'switch away while PhotoProcessing)" test already uses to reach that '
-    'state deterministically)',
-    (tester) async {
-      fakePhotoPicker.nextCameraResult = PickedPhoto(
-        path: photoFile.path,
-        mimeType: 'image/png',
-      );
-      // Never resolved in this test: the tab switch below cancels before
-      // OCR's result would matter, same as that mirrored test's own
-      // unconfigured `fakeMediaRepository`.
-      fakePhotoPicker.cameraGate = Completer<void>();
-      await _openModal(
-        tester,
-        cubit: textCubit,
-        audioCubit: audioCubit,
-        photoCubit: photoCubit,
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Foto'));
-      await tester.pumpAndSettle();
+  testWidgets('Story 3.4: Foto→Áudio switch mid-OCR discards the pending OCR '
+      'result; Áudio is then ready to record (the cross-tab rule '
+      'exercised above only ever interrupted the picker call itself — '
+      'here the picker has already resolved into `PhotoProcessing` and OCR '
+      'is the pending async op left to cancel; same technique '
+      '`insertion_modal_photo_test.dart`\'s own "canceling mid-pick (tab '
+      'switch away while PhotoProcessing)" test already uses to reach that '
+      'state deterministically)', (tester) async {
+    fakePhotoPicker.nextCameraResult = PickedPhoto(
+      path: photoFile.path,
+      mimeType: 'image/png',
+    );
+    // Never resolved in this test: the tab switch below cancels before
+    // OCR's result would matter, same as that mirrored test's own
+    // unconfigured `fakeMediaRepository`.
+    fakePhotoPicker.cameraGate = Completer<void>();
+    await _openModal(
+      tester,
+      cubit: textCubit,
+      audioCubit: audioCubit,
+      photoCubit: photoCubit,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Foto'));
+    await tester.pumpAndSettle();
 
-      unawaited(photoCubit.pickFromCamera());
-      await tester.pump();
-      fakePhotoPicker.cameraGate!.complete();
-      // Two pumps (not `pumpAndSettle()`, which would never settle while
-      // `PhotoProcessing`'s `CircularProgressIndicator` keeps rescheduling
-      // frames) — the first resolves the real `File.readAsBytes()` call,
-      // the second lets `PhotoProcessing`'s build land.
-      await tester.pump();
-      await tester.pump();
-      expect(find.text('Reconhecendo texto...'), findsOneWidget);
-      expect(fakeRepository.createCallCount, 0);
+    unawaited(photoCubit.pickFromCamera());
+    await tester.pump();
+    fakePhotoPicker.cameraGate!.complete();
+    // Two pumps (not `pumpAndSettle()`, which would never settle while
+    // `PhotoProcessing`'s `CircularProgressIndicator` keeps rescheduling
+    // frames) — the first resolves the real `File.readAsBytes()` call,
+    // the second lets `PhotoProcessing`'s build land.
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Reconhecendo texto...'), findsOneWidget);
+    expect(fakeRepository.createCallCount, 0);
 
-      await tester.tap(find.text('Áudio'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byIcon(Icons.mic));
-      await tester.pump();
+    await tester.tap(find.text('Áudio'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.mic));
+    await tester.pump();
 
-      // Recording starts despite the still-pending OCR.
-      expect(fakeMicRecorder.startCalls, 1);
-      expect(photoCubit.state, isA<PhotoIdle>());
-      expect(fakeRepository.createCallCount, 0);
+    // Recording starts despite the still-pending OCR.
+    expect(fakeMicRecorder.startCalls, 1);
+    expect(photoCubit.state, isA<PhotoIdle>());
+    expect(fakeRepository.createCallCount, 0);
 
-      // Ends mid-recording — see the happy path test's own comment on
-      // `AudioEntryCubit`'s 1-second elapsed-time ticker.
-      await audioCubit.cancel();
-      await tester.pump();
+    // Ends mid-recording — see the happy path test's own comment on
+    // `AudioEntryCubit`'s 1-second elapsed-time ticker.
+    await audioCubit.cancel();
+    await tester.pump();
 
-      expect(tester.takeException(), isNull);
-    },
-  );
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('the transcribed text is editable before Salvar', (tester) async {
     fakeMicRecorder.nextStopResult = const MicRecording(
