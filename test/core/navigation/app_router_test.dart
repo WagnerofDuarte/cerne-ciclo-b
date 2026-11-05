@@ -20,7 +20,9 @@ import 'package:cerne/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:cerne/features/auth/presentation/screens/auth_screen.dart';
 import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
+import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
 import 'package:cerne/features/entries/presentation/screens/meus_registros_screen.dart';
 import 'package:cerne/features/vault/domain/entities/vault_status.dart';
@@ -50,6 +52,32 @@ class _FakeEntriesRepository implements EntriesRepository {
     String? cursor,
     int limit = 20,
   }) async => right(const EntriesPage(items: [], nextCursor: null));
+}
+
+/// A trivial fake `PendingEntryWriteTracker` — this suite never exercises
+/// spec-4-2's pending/retry overlay, only that `MeusRegistrosCubit`'s
+/// `GoRoute.builder` resolution doesn't throw.
+class _UnusedPendingEntryWriteTracker implements PendingEntryWriteTracker {
+  @override
+  Future<Either<Failure, Entry>> create({
+    required String content,
+    required EntrySource source,
+    int? mediaDurationSeconds,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<void> retry(String tempId) async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<List<PendingEntryWrite>> get pendingWrites => const Stream.empty();
+
+  @override
+  Stream<({String tempId, Entry entry})> get confirmedWrites =>
+      const Stream.empty();
+
+  @override
+  Future<void> dispose() async {}
 }
 
 /// A plain (non-mocktail) fake — the redirect matrix needs [currentStatus]
@@ -196,7 +224,10 @@ void main() {
     // MeusRegistrosCubit>()` (spec-4-1) — same rationale as `AuthCubit`/
     // `AccountSettingsCubit` above.
     sl.registerLazySingleton<MeusRegistrosCubit>(
-      () => MeusRegistrosCubit(_FakeEntriesRepository()),
+      () => MeusRegistrosCubit(
+        _FakeEntriesRepository(),
+        _UnusedPendingEntryWriteTracker(),
+      ),
     );
   });
 

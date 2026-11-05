@@ -5,7 +5,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/design_tokens.dart';
 import '../../../../core/widgets/back_arrow_header.dart';
+import '../../domain/entities/entry.dart';
 import '../../domain/entities/entry_date_group.dart';
+import '../../domain/entities/sync_badge_state.dart';
 import '../cubit/meus_registros_cubit.dart';
 import '../cubit/meus_registros_state.dart';
 import '../widgets/entry_record_card.dart';
@@ -104,6 +106,7 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
                     state: state,
                     scrollController: _scrollController,
                     onRetryLoadMore: widget.cubit.retryLoadMore,
+                    onRetryTap: (entry) => widget.cubit.retry(entry.id),
                   ),
                 },
               ),
@@ -196,15 +199,24 @@ class _EntryList extends StatelessWidget {
     required this.state,
     required this.scrollController,
     required this.onRetryLoadMore,
+    required this.onRetryTap,
   });
 
   final MeusRegistrosLoaded state;
   final ScrollController scrollController;
   final VoidCallback onRetryLoadMore;
+  final void Function(Entry entry) onRetryTap;
 
   @override
   Widget build(BuildContext context) {
     final groups = state.groups;
+    // A non-empty `state.entries` can still yield zero groups if every one
+    // of its `occurredAt` values is malformed (`groupEntriesByDate()` skips
+    // rather than throws) — fall back to the same plain empty-state text
+    // rather than rendering a ListView with nothing visibly in it.
+    if (groups.isEmpty) {
+      return const _EmptyState();
+    }
     return ListView.builder(
       controller: scrollController,
       padding: DesignTokens.screenPadding,
@@ -218,16 +230,34 @@ class _EntryList extends StatelessWidget {
             onRetry: onRetryLoadMore,
           );
         }
-        return _DateGroupSection(group: groups[index]);
+        return _DateGroupSection(
+          group: groups[index],
+          badgeFor: state.badgeFor,
+          onRetryTap: onRetryTap,
+        );
       },
     );
   }
 }
 
 class _DateGroupSection extends StatelessWidget {
-  const _DateGroupSection({required this.group});
+  const _DateGroupSection({
+    required this.group,
+    required this.badgeFor,
+    required this.onRetryTap,
+  });
 
   final EntryDateGroup group;
+
+  /// `MeusRegistrosLoaded.badgeFor` — the one call site outside the
+  /// cubit/state itself (Never: "any screen recomputing badge state
+  /// inline").
+  final SyncBadgeState Function(Entry entry) badgeFor;
+
+  /// `MeusRegistrosCubit.retry`, pre-bound to this entry's own id —
+  /// `EntryRecordCard`/`SyncBadge` only ever call this for a retryable
+  /// error badge.
+  final void Function(Entry entry) onRetryTap;
 
   @override
   Widget build(BuildContext context) {
@@ -244,7 +274,11 @@ class _DateGroupSection extends StatelessWidget {
           ),
           const SizedBox(height: DesignTokens.spacingSm),
           for (final entry in group.entries) ...[
-            EntryRecordCard(entry: entry),
+            EntryRecordCard(
+              entry: entry,
+              badgeState: badgeFor(entry),
+              onRetryTap: () => onRetryTap(entry),
+            ),
             const SizedBox(height: DesignTokens.spacingSm),
           ],
         ],

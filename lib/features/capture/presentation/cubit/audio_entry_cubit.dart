@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../entries/domain/entities/entry.dart';
-import '../../../entries/domain/repositories/entries_repository.dart';
+import '../../../entries/domain/services/pending_entry_write_tracker.dart';
 import '../../domain/services/audio_transcriber.dart';
 import '../../domain/services/mic_recorder.dart';
 
@@ -117,12 +117,16 @@ class AudioError extends AudioCaptureState {
 /// (`capture_injection.dart`), shared across every modal open the way
 /// `EntriesRepository` already is for `TextEntryCubit`.
 class AudioEntryCubit extends Cubit<AudioCaptureState> {
-  AudioEntryCubit(this._micRecorder, this._audioTranscriber, this._repository)
+  AudioEntryCubit(this._micRecorder, this._audioTranscriber, this._tracker)
     : super(const AudioIdle());
 
   final MicRecorder _micRecorder;
   final AudioTranscriber _audioTranscriber;
-  final EntriesRepository _repository;
+
+  /// spec-4-2 — the shared [PendingEntryWriteTracker], swapped in for a
+  /// direct `EntriesRepository` dependency (identical `create()` contract,
+  /// Code Map: "no call-site logic change").
+  final PendingEntryWriteTracker _tracker;
 
   Timer? _elapsedTimer;
 
@@ -527,7 +531,7 @@ class AudioEntryCubit extends Cubit<AudioCaptureState> {
         saving: true,
       ),
     );
-    final result = await _repository.create(
+    final result = await _tracker.create(
       content: text,
       source: EntrySource.audio,
       mediaDurationSeconds: durationSeconds,

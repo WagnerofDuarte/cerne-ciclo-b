@@ -15,9 +15,9 @@ import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart
 import 'package:cerne/features/capture/presentation/cubit/photo_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/widgets/insertion_modal.dart';
-import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
-import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
+import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 
 import '../../../../support/intercept_announcements.dart';
 
@@ -32,11 +32,13 @@ const _savedEntry = Entry(
   updatedAt: '2026-01-01T00:00:00Z',
 );
 
-/// A plain (non-mocktail) fake — same convention
+/// A plain (non-mocktail) fake standing in for the shared
+/// `PendingEntryWriteTracker` (spec-4-2 swapped this in for a direct
+/// `EntriesRepository` dependency) — same convention
 /// `account_settings_cubit_test.dart` already uses — so a test can both
 /// script the next `create()` result and count how many times it was
 /// called (I/O matrix: "Cancel before save ... no `POST /entries` fires").
-class _FakeEntriesRepository implements EntriesRepository {
+class _FakeEntriesRepository implements PendingEntryWriteTracker {
   Either<Failure, Entry> Function()? nextResult;
   int createCallCount = 0;
 
@@ -59,13 +61,22 @@ class _FakeEntriesRepository implements EntriesRepository {
     return nextResult!();
   }
 
-  /// This file never exercises `/meus-registros` (spec-4-1) — not expected
-  /// to be called, same rationale as the other unused ports in this suite.
+  /// This file never exercises the pending/retry overlay (spec-4-2's own
+  /// `pending_entry_write_tracker_test.dart`/`meus_registros_cubit_test.
+  /// dart` do) — not expected to be called/observed here.
   @override
-  Future<Either<Failure, EntriesPage>> list({
-    String? cursor,
-    int limit = 20,
-  }) async => throw UnimplementedError('not expected to be called');
+  Future<void> retry(String tempId) async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<List<PendingEntryWrite>> get pendingWrites => const Stream.empty();
+
+  @override
+  Stream<({String tempId, Entry entry})> get confirmedWrites =>
+      const Stream.empty();
+
+  @override
+  Future<void> dispose() async {}
 }
 
 /// A trivial fake — correction: switching to the Áudio tab no longer

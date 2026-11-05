@@ -17,13 +17,13 @@ import 'package:cerne/features/capture/domain/services/photo_picker.dart';
 import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/photo_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
-import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
-import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
+import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 
 /// A trivial fake — the "+" tests below never exercise a real save, so
-/// `create()`/`list()` are never expected to actually be called.
-class _UnusedEntriesRepository implements EntriesRepository {
+/// `create()`/`retry()` are never expected to actually be called.
+class _UnusedPendingEntryWriteTracker implements PendingEntryWriteTracker {
   @override
   Future<Either<Failure, Entry>> create({
     required String content,
@@ -32,15 +32,23 @@ class _UnusedEntriesRepository implements EntriesRepository {
   }) async => throw UnimplementedError('not expected to be called');
 
   @override
-  Future<Either<Failure, EntriesPage>> list({
-    String? cursor,
-    int limit = 20,
-  }) async => throw UnimplementedError('not expected to be called');
+  Future<void> retry(String tempId) async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<List<PendingEntryWrite>> get pendingWrites => const Stream.empty();
+
+  @override
+  Stream<({String tempId, Entry entry})> get confirmedWrites =>
+      const Stream.empty();
+
+  @override
+  Future<void> dispose() async {}
 }
 
 /// Trivial fakes for `AudioEntryCubit`'s two ports — the "+" test below
 /// never switches to the Áudio tab, so neither is ever expected to be
-/// called (same rationale as [_UnusedEntriesRepository]).
+/// called (same rationale as [_UnusedPendingEntryWriteTracker]).
 class _UnusedMicRecorder implements MicRecorder {
   @override
   Future<bool> hasPermission() async =>
@@ -162,20 +170,20 @@ void main() {
       (tester) async {
         await resetCoreDependencies();
         sl.registerFactory<TextEntryCubit>(
-          () => TextEntryCubit(_UnusedEntriesRepository()),
+          () => TextEntryCubit(_UnusedPendingEntryWriteTracker()),
         );
         sl.registerFactory<AudioEntryCubit>(
           () => AudioEntryCubit(
             _UnusedMicRecorder(),
             _UnusedAudioTranscriber(),
-            _UnusedEntriesRepository(),
+            _UnusedPendingEntryWriteTracker(),
           ),
         );
         sl.registerFactory<PhotoEntryCubit>(
           () => PhotoEntryCubit(
             _UnusedPhotoPicker(),
             _UnusedMediaRepository(),
-            _UnusedEntriesRepository(),
+            _UnusedPendingEntryWriteTracker(),
           ),
         );
         addTearDown(resetCoreDependencies);

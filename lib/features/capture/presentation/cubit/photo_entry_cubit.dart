@@ -6,7 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/failure/failure.dart';
 import '../../../entries/domain/entities/entry.dart';
-import '../../../entries/domain/repositories/entries_repository.dart';
+import '../../../entries/domain/services/pending_entry_write_tracker.dart';
 import '../../domain/repositories/media_repository.dart';
 import '../../domain/services/photo_picker.dart';
 
@@ -124,12 +124,16 @@ class PhotoEntryCubit extends Cubit<PhotoCaptureState> {
   PhotoEntryCubit(
     this._photoPicker,
     this._mediaRepository,
-    this._entriesRepository,
+    this._tracker,
   ) : super(const PhotoIdle());
 
   final PhotoPicker _photoPicker;
   final MediaRepository _mediaRepository;
-  final EntriesRepository _entriesRepository;
+
+  /// spec-4-2 — the shared [PendingEntryWriteTracker], swapped in for a
+  /// direct `EntriesRepository` dependency (identical `create()` contract,
+  /// Code Map: "no call-site logic change").
+  final PendingEntryWriteTracker _tracker;
 
   static const _noTextPlaceholder =
       'Registro fotográfico (sem texto reconhecido)';
@@ -357,7 +361,7 @@ class PhotoEntryCubit extends Cubit<PhotoCaptureState> {
     emit(
       PhotoRecognized(path: path, mimeType: mimeType, text: text, saving: true),
     );
-    final result = await _entriesRepository.create(
+    final result = await _tracker.create(
       content: text,
       source: EntrySource.photo,
     );

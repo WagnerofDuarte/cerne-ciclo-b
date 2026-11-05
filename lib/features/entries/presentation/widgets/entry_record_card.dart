@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/design_tokens.dart';
 import '../../domain/entities/entry.dart';
+import '../../domain/entities/sync_badge_state.dart';
+import 'sync_badge.dart';
 
 /// One origin's icon + spine color — `cerne-prototype.html`'s own
 /// `sourceMeta` object (Boundaries: "exact hex match"): manual `#1F3D34`
@@ -41,13 +43,28 @@ const _sourceMeta = <EntrySource, _SourceMeta>{
 /// `MeusRegistrosScreen`'s one record card — mirrors
 /// `placeholder_screens.dart`'s `_KanbanCard` structure (colored left
 /// spine over a `Stack`, Code Map) but for an [Entry]: spine colored by
-/// [Entry.source], a source icon, the local time, and a content excerpt.
-/// Boundaries: no sync badge (4.2), never tappable (4.4) — no
-/// `GestureDetector`/`InkWell` anywhere in this widget.
+/// [Entry.source], a source icon, the local time, a content excerpt, and
+/// (spec-4-2) its own [SyncBadge]. Boundaries: still never tappable for
+/// navigation (4.4) — the only `InkWell` anywhere in this subtree lives
+/// inside [SyncBadge] itself, scoped to the badge's own tap target.
 class EntryRecordCard extends StatelessWidget {
-  const EntryRecordCard({required this.entry, super.key});
+  const EntryRecordCard({
+    required this.entry,
+    required this.badgeState,
+    this.onRetryTap,
+    super.key,
+  });
 
   final Entry entry;
+
+  /// This card's own badge (Code Map: `deriveSyncBadgeState()`'s result)
+  /// — computed by the caller (`MeusRegistrosLoaded.badgeFor`), never
+  /// recomputed here (Never: "any screen recomputing badge state inline").
+  final SyncBadgeState badgeState;
+
+  /// Forwarded to [SyncBadge] verbatim — only ever invoked for a
+  /// retryable [SyncBadgeError].
+  final VoidCallback? onRetryTap;
 
   @override
   Widget build(BuildContext context) {
@@ -100,6 +117,8 @@ class EntryRecordCard extends StatelessWidget {
                       color: DesignTokens.colorTextPrimary,
                     ),
                   ),
+                  const SizedBox(height: DesignTokens.spacingXs),
+                  SyncBadge(state: badgeState, onRetryTap: onRetryTap),
                 ],
               ),
             ),
@@ -118,12 +137,11 @@ class EntryRecordCard extends StatelessWidget {
 /// (RNF09), same defensive rationale `groupEntriesByDate()`'s own guard
 /// uses.
 String _formatTime(String occurredAt) {
-  try {
-    final local = DateTime.parse(occurredAt).toLocal();
-    final hour = local.hour.toString().padLeft(2, '0');
-    final minute = local.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
-  } catch (_) {
+  final local = DateTime.tryParse(occurredAt)?.toLocal();
+  if (local == null) {
     return '--:--';
   }
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
 }

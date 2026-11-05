@@ -19,6 +19,7 @@ import 'package:cerne/features/capture/domain/services/mic_recorder.dart';
 import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 
@@ -181,6 +182,13 @@ void main() {
       // just checking the registration exists — same rationale as
       // `AuthCubit`'s own forced resolution above.
       expect(() => sl<EntriesRepository>(), returnsNormally);
+
+      // spec-4-2 — the shared `PendingEntryWriteTracker`, resolved by
+      // both `MeusRegistrosCubit` below and `registerCaptureFeature()`'s
+      // own cubit factories; a broken registration order (it depends on
+      // `EntriesRepository`, registered just above) must surface here.
+      expect(sl.isRegistered<PendingEntryWriteTracker>(), isTrue);
+      expect(() => sl<PendingEntryWriteTracker>(), returnsNormally);
 
       // spec-4-1 — `MeusRegistrosCubit` is a `lazySingleton` (same
       // rationale as `AccountSettingsCubit` above), not a factory.

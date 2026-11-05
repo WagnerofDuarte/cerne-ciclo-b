@@ -15,9 +15,9 @@ import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart
 import 'package:cerne/features/capture/presentation/cubit/photo_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/widgets/insertion_modal.dart';
-import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
-import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
+import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 
 import '../../../../support/intercept_announcements.dart';
 
@@ -161,7 +161,7 @@ class _FakeMediaRepository implements MediaRepository {
   }
 }
 
-class _FakeEntriesRepository implements EntriesRepository {
+class _FakeEntriesRepository implements PendingEntryWriteTracker {
   Either<Failure, Entry> Function()? nextResult;
   int createCallCount = 0;
   EntrySource? lastSource;
@@ -190,13 +190,21 @@ class _FakeEntriesRepository implements EntriesRepository {
     return nextResult!();
   }
 
-  /// This file never exercises `/meus-registros` (spec-4-1) — not expected
-  /// to be called, same rationale as the other unused ports in this suite.
+  /// This file never exercises the pending/retry overlay (spec-4-2's own
+  /// suites do) — not expected to be called/observed here.
   @override
-  Future<Either<Failure, EntriesPage>> list({
-    String? cursor,
-    int limit = 20,
-  }) async => throw UnimplementedError('not expected to be called');
+  Future<void> retry(String tempId) async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<List<PendingEntryWrite>> get pendingWrites => const Stream.empty();
+
+  @override
+  Stream<({String tempId, Entry entry})> get confirmedWrites =>
+      const Stream.empty();
+
+  @override
+  Future<void> dispose() async {}
 }
 
 Future<void> _openModal(

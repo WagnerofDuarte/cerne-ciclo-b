@@ -317,6 +317,30 @@ void main() {
       });
     });
 
+    test('a corrupt cached entry (malformed occurredAt, unsortable) maps to '
+        'Left(malformedResponse) rather than throwing', () async {
+      when(
+        () => mockRemoteDataSource.list(
+          cursor: any(named: 'cursor'),
+          limit: any(named: 'limit'),
+        ),
+      ).thenAnswer(
+        (_) async => left(const Failure.networkOffline(message: 'Offline')),
+      );
+      when(() => mockBox.values).thenReturn([
+        _listDto('good', '2026-01-01T00:00:00Z').toJson(),
+        _listDto('bad', 'not-a-date').toJson(),
+      ]);
+
+      final result = await repository.list();
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
+
     test('every other Failure (e.g. authExpired) propagates as Left, '
         'unmapped — the Hive box is never read', () async {
       when(

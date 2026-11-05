@@ -2,18 +2,52 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fpdart/fpdart.dart';
+import 'package:fpdart/fpdart.dart' hide State;
 import 'package:go_router/go_router.dart';
 
 import 'package:cerne/core/failure/failure.dart';
+import 'package:cerne/core/navigation/expiry_overlay_host.dart';
 import 'package:cerne/core/widgets/back_arrow_header.dart';
+import 'package:cerne/core/widgets/confirmation_dialog.dart';
+import 'package:cerne/features/auth/domain/entities/session_status.dart';
+import 'package:cerne/features/auth/domain/repositories/session_repository.dart';
 import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
+import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
 import 'package:cerne/features/entries/presentation/screens/meus_registros_screen.dart';
 import 'package:cerne/features/entries/presentation/widgets/entry_record_card.dart';
 import 'package:cerne/features/entries/presentation/widgets/entry_skeleton_card.dart';
+
+/// Same tiny fake `expiry_overlay_host_test.dart` uses — gives synchronous
+/// control over the `SessionStatus` stream `ExpiryOverlayHost` subscribes
+/// to, needed to simulate a mid-visit session expiry over this screen.
+class _FakeSessionRepository implements SessionRepository {
+  SessionStatus? _status;
+  final _controller = StreamController<SessionStatus>.broadcast();
+
+  @override
+  SessionStatus? get currentStatus => _status;
+
+  @override
+  Stream<SessionStatus> get statusStream => _controller.stream;
+
+  @override
+  Future<Either<Failure, Unit>> restoreSession() async => right(unit);
+
+  @override
+  void markAuthenticated() => setStatus(SessionStatus.authenticated);
+
+  @override
+  Future<void> dispose() => _controller.close();
+
+  void setStatus(SessionStatus status) {
+    _status = status;
+    _controller.add(status);
+  }
+}
 
 Entry _entry(String id, String occurredAt) => Entry(
   id: id,
@@ -62,11 +96,40 @@ class _FakeEntriesRepository implements EntriesRepository {
   }
 }
 
+/// A trivial `PendingEntryWriteTracker` fake — this file's own tests cover
+/// spec-4-1's list/pagination/skeleton behavior, not spec-4-2's pending-
+/// write overlay (that's `meus_registros_cubit_test.dart`'s/
+/// `entry_record_card_test.dart`'s job), so neither stream here ever emits.
+class _FakePendingEntryWriteTracker implements PendingEntryWriteTracker {
+  @override
+  Stream<List<PendingEntryWrite>> get pendingWrites => const Stream.empty();
+
+  @override
+  Stream<({String tempId, Entry entry})> get confirmedWrites =>
+      const Stream.empty();
+
+  @override
+  Future<Either<Failure, Entry>> create({
+    required String content,
+    required EntrySource source,
+    int? mediaDurationSeconds,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<void> retry(String tempId) async {}
+
+  @override
+  Future<void> dispose() async {}
+}
+
 Future<MeusRegistrosCubit> _pumpScreen(
   WidgetTester tester,
   _FakeEntriesRepository fakeRepository,
 ) async {
-  final cubit = MeusRegistrosCubit(fakeRepository);
+  final cubit = MeusRegistrosCubit(
+    fakeRepository,
+    _FakePendingEntryWriteTracker(),
+  );
   addTearDown(cubit.close);
   await tester.pumpWidget(MaterialApp(home: MeusRegistrosScreen(cubit: cubit)));
   return cubit;
@@ -261,7 +324,10 @@ void main() {
       (tester) async {
         final fakeRepository = _FakeEntriesRepository()
           ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
-        final cubit = MeusRegistrosCubit(fakeRepository);
+        final cubit = MeusRegistrosCubit(
+          fakeRepository,
+          _FakePendingEntryWriteTracker(),
+        );
         addTearDown(cubit.close);
         final router = GoRouter(
           initialLocation: '/meus-registros',
@@ -370,6 +436,73 @@ void main() {
         expect(fakeRepository.listCallCount, 2);
         expect(find.byType(EntryRecordCard), findsWidgets);
         expect(find.text('Tentar novamente'), findsOneWidget);
+      },
+    );
+  });
+
+  group('AC3: session expiry preserves scroll position (spec Acceptance '
+      'Criteria, third bullet)', () {
+    testWidgets(
+      'the global ExpiryOverlayHost appearing over this screen while '
+      'scrolled does not throw and leaves the scroll position untouched',
+      (tester) async {
+        ConfirmationDialog.isOpen = false;
+        final firstPageItems = [
+          for (var i = 0; i < 20; i++)
+            _entry(
+              'e$i',
+              '2026-01-${(i + 1).toString().padLeft(2, '0')}T10:00:00',
+            ),
+        ];
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(
+            right(EntriesPage(items: firstPageItems, nextCursor: null)),
+          );
+        final cubit = MeusRegistrosCubit(
+          fakeRepository,
+          _FakePendingEntryWriteTracker(),
+        );
+        addTearDown(cubit.close);
+        final fakeSessionRepository = _FakeSessionRepository();
+        addTearDown(fakeSessionRepository.dispose);
+        final navigatorKey = GlobalKey<NavigatorState>();
+        final router = GoRouter(
+          routes: [
+            GoRoute(path: '/', builder: (context, state) => const SizedBox()),
+          ],
+        );
+        addTearDown(router.dispose);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: ExpiryOverlayHost(
+              sessionRepository: fakeSessionRepository,
+              router: router,
+              navigatorKey: navigatorKey,
+              child: Navigator(
+                key: navigatorKey,
+                onGenerateRoute: (settings) => MaterialPageRoute<void>(
+                  builder: (context) => MeusRegistrosScreen(cubit: cubit),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final listView = tester.widget<ListView>(find.byType(ListView));
+        final controller = listView.controller!;
+        expect(controller.position.maxScrollExtent, greaterThan(0));
+        controller.jumpTo(100);
+        await tester.pump();
+        final scrollOffsetBeforeExpiry = controller.offset;
+
+        fakeSessionRepository.setStatus(SessionStatus.expired);
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(find.text('Sessão expirada'), findsOneWidget);
+        expect(controller.offset, scrollOffsetBeforeExpiry);
       },
     );
   });

@@ -1,5 +1,7 @@
 import '../../domain/entities/entry.dart';
 import '../../domain/entities/entry_date_group.dart';
+import '../../domain/entities/pending_entry_write.dart';
+import '../../domain/entities/sync_badge_state.dart';
 
 /// `MeusRegistrosScreen`'s own sealed state — never the shared
 /// `Resource<T>` (Boundaries, mirrors `capture`'s `TextEntryState`
@@ -57,6 +59,7 @@ class MeusRegistrosLoaded extends MeusRegistrosState {
     required this.nextCursor,
     this.isLoadingMore = false,
     this.loadMoreFailed = false,
+    this.pendingWrites = const [],
   });
 
   final List<Entry> entries;
@@ -76,19 +79,59 @@ class MeusRegistrosLoaded extends MeusRegistrosState {
   /// only the footer switches to a retry affordance.
   final bool loadMoreFailed;
 
-  List<EntryDateGroup> get groups => groupEntriesByDate(entries);
+  /// spec-4-2 — every write `PendingEntryWriteTracker` currently holds
+  /// (in flight or failed), mirrored from its own `pendingWrites` stream
+  /// by `MeusRegistrosCubit`. Never contains a write that's already
+  /// confirmed — that one has already moved into [entries] instead
+  /// (`MeusRegistrosCubit._onEntryConfirmed`).
+  final List<PendingEntryWrite> pendingWrites;
+
+  /// [entries] with each [pendingWrites] member rendered as its own
+  /// placeholder [Entry] (content/source/[mediaDurationSeconds] from the
+  /// pending write itself; `occurredAt` = [PendingEntryWrite.startedAt]),
+  /// prepended ahead of [entries] — Boundaries: "Card appears top-of-
+  /// today... before server responds". Grouping this combined list by day
+  /// (via the same [groupEntriesByDate] every confirmed entry already
+  /// uses) naturally lands a pending write's own card at the top of
+  /// "Hoje", with no separate rendering path needed in the screen itself.
+  List<Entry> get _displayEntries => [
+    for (final pending in pendingWrites) _placeholderEntryFor(pending),
+    ...entries,
+  ];
+
+  List<EntryDateGroup> get groups => groupEntriesByDate(_displayEntries);
+
+  /// [entry]'s own badge (Code Map/Never: the one call site for
+  /// `deriveSyncBadgeState()` outside its own unit tests). [entry] is
+  /// looked up against [pendingWrites] by id — a placeholder [Entry]
+  /// built by [_displayEntries] always has [PendingEntryWrite.tempId] as
+  /// its [Entry.id], so this matches it back to its own pending write; a
+  /// genuinely confirmed [Entry] from [entries] never matches one (the
+  /// tracker's own `create()`/`retry()` already remove a pending record
+  /// before `MeusRegistrosCubit` ever prepends the matching confirmed
+  /// entry, so the two can never coexist here).
+  SyncBadgeState badgeFor(Entry entry) {
+    for (final pending in pendingWrites) {
+      if (pending.tempId == entry.id) {
+        return deriveSyncBadgeState(null, pending);
+      }
+    }
+    return deriveSyncBadgeState(entry, null);
+  }
 
   MeusRegistrosLoaded copyWith({
     List<Entry>? entries,
     String? nextCursor,
     bool? isLoadingMore,
     bool? loadMoreFailed,
+    List<PendingEntryWrite>? pendingWrites,
   }) {
     return MeusRegistrosLoaded(
       entries: entries ?? this.entries,
       nextCursor: nextCursor ?? this.nextCursor,
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       loadMoreFailed: loadMoreFailed ?? this.loadMoreFailed,
+      pendingWrites: pendingWrites ?? this.pendingWrites,
     );
   }
 
@@ -99,7 +142,8 @@ class MeusRegistrosLoaded extends MeusRegistrosState {
           other.nextCursor == nextCursor &&
           other.isLoadingMore == isLoadingMore &&
           other.loadMoreFailed == loadMoreFailed &&
-          _listEquals(other.entries, entries));
+          _listEquals(other.entries, entries) &&
+          _listEquals(other.pendingWrites, pendingWrites));
 
   @override
   int get hashCode => Object.hash(
@@ -107,16 +151,32 @@ class MeusRegistrosLoaded extends MeusRegistrosState {
     nextCursor,
     isLoadingMore,
     loadMoreFailed,
+    Object.hashAll(pendingWrites),
   );
 
   @override
   String toString() =>
       'MeusRegistrosLoaded(entries: ${entries.length}, nextCursor: '
       '$nextCursor, isLoadingMore: $isLoadingMore, loadMoreFailed: '
-      '$loadMoreFailed)';
+      '$loadMoreFailed, pendingWrites: ${pendingWrites.length})';
 }
 
-bool _listEquals(List<Entry> a, List<Entry> b) {
+Entry _placeholderEntryFor(PendingEntryWrite pending) {
+  final startedAtIso = pending.startedAt.toIso8601String();
+  return Entry(
+    id: pending.tempId,
+    content: pending.content,
+    source: pending.source,
+    chatMessageId: null,
+    occurredAt: startedAtIso,
+    serverRevision: 0,
+    createdAt: startedAtIso,
+    updatedAt: startedAtIso,
+    mediaDurationSeconds: pending.mediaDurationSeconds,
+  );
+}
+
+bool _listEquals<T>(List<T> a, List<T> b) {
   if (a.length != b.length) {
     return false;
   }

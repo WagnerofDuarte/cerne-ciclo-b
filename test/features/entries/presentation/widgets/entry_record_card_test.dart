@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:cerne/core/design_tokens.dart';
+import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
+import 'package:cerne/features/entries/domain/entities/sync_badge_state.dart';
 import 'package:cerne/features/entries/presentation/widgets/entry_record_card.dart';
+import 'package:cerne/features/entries/presentation/widgets/sync_badge.dart';
 
 Entry _entry(EntrySource source) => Entry(
   id: 'e1',
@@ -18,7 +21,14 @@ Entry _entry(EntrySource source) => Entry(
 
 Future<void> _pump(WidgetTester tester, Entry entry) async {
   await tester.pumpWidget(
-    MaterialApp(home: Scaffold(body: EntryRecordCard(entry: entry))),
+    MaterialApp(
+      home: Scaffold(
+        body: EntryRecordCard(
+          entry: entry,
+          badgeState: const SyncBadgeState.synchronized(),
+        ),
+      ),
+    ),
   );
 }
 
@@ -104,4 +114,42 @@ void main() {
       expect(find.text('--:--'), findsOneWidget);
     },
   );
+
+  group('spec-4-2: sync badge forwarding', () {
+    testWidgets(
+      'renders a SyncBadge with the given badgeState',
+      (tester) async {
+        await _pump(tester, _entry(EntrySource.manual));
+
+        expect(find.byType(SyncBadge), findsOneWidget);
+        final badge = tester.widget<SyncBadge>(find.byType(SyncBadge));
+        expect(badge.state, const SyncBadgeState.synchronized());
+      },
+    );
+
+    testWidgets(
+      'forwards onRetryTap through to the SyncBadge verbatim',
+      (tester) async {
+        var retried = false;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: EntryRecordCard(
+                entry: _entry(EntrySource.manual),
+                badgeState: const SyncBadgeState.error(
+                  Failure.networkTimeout(message: 'Timed out'),
+                ),
+                onRetryTap: () => retried = true,
+              ),
+            ),
+          ),
+        );
+
+        await tester.tap(find.byType(SyncBadge));
+        await tester.pump();
+
+        expect(retried, isTrue);
+      },
+    );
+  });
 }

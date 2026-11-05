@@ -10,7 +10,7 @@ import 'package:cerne/features/capture/domain/services/audio_transcriber.dart';
 import 'package:cerne/features/capture/domain/services/mic_recorder.dart';
 import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
-import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 
 /// `_deleteRecordingFile` is fire-and-forget (`unawaited`) by design — a
 /// single microtask tick (`Future<void>.delayed(Duration.zero)`) isn't a
@@ -28,7 +28,7 @@ class MockMicRecorder extends Mock implements MicRecorder {}
 
 class MockAudioTranscriber extends Mock implements AudioTranscriber {}
 
-class MockEntriesRepository extends Mock implements EntriesRepository {}
+class MockPendingEntryWriteTracker extends Mock implements PendingEntryWriteTracker {}
 
 const _savedEntry = Entry(
   id: 'e1',
@@ -44,13 +44,13 @@ const _savedEntry = Entry(
 
 /// Covers spec-3-2's I/O & Edge-Case Matrix at the cubit layer — both
 /// `MicRecorder`/`AudioTranscriber` are mocked (mocktail), same
-/// convention as `EntriesRepository` in `text_entry_cubit_test.dart`
+/// convention as `PendingEntryWriteTracker` in `text_entry_cubit_test.dart`
 /// (Never: no automated test exercises the real `record`/`whisper_ggml`
 /// native plugins).
 void main() {
   late MockMicRecorder mockMicRecorder;
   late MockAudioTranscriber mockAudioTranscriber;
-  late MockEntriesRepository mockRepository;
+  late MockPendingEntryWriteTracker mockTracker;
   late AudioEntryCubit cubit;
 
   setUpAll(() {
@@ -60,11 +60,11 @@ void main() {
   setUp(() {
     mockMicRecorder = MockMicRecorder();
     mockAudioTranscriber = MockAudioTranscriber();
-    mockRepository = MockEntriesRepository();
+    mockTracker = MockPendingEntryWriteTracker();
     cubit = AudioEntryCubit(
       mockMicRecorder,
       mockAudioTranscriber,
-      mockRepository,
+      mockTracker,
     );
   });
 
@@ -351,7 +351,7 @@ void main() {
         ).thenAnswer((_) async => 'texto');
         await cubit.stopRecording();
         when(
-          () => mockRepository.create(
+          () => mockTracker.create(
             content: any(named: 'content'),
             source: any(named: 'source'),
             mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
@@ -410,7 +410,7 @@ void main() {
       await transcribedState();
       final completer = Completer<Either<Failure, Entry>>();
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
           mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
@@ -779,7 +779,7 @@ void main() {
       () async {
         await reachTranscribed();
         when(
-          () => mockRepository.create(
+          () => mockTracker.create(
             content: 'Hoje foi um bom dia.',
             source: EntrySource.audio,
             mediaDurationSeconds: 7,
@@ -801,7 +801,7 @@ void main() {
           ],
         );
         verify(
-          () => mockRepository.create(
+          () => mockTracker.create(
             content: 'Hoje foi um bom dia.',
             source: EntrySource.audio,
             mediaDurationSeconds: 7,
@@ -816,7 +816,7 @@ void main() {
       () async {
         await reachTranscribed();
         when(
-          () => mockRepository.create(
+          () => mockTracker.create(
             content: any(named: 'content'),
             source: any(named: 'source'),
             mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
@@ -844,7 +844,7 @@ void main() {
       await cubit.save();
 
       verifyNever(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
           mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
@@ -856,7 +856,7 @@ void main() {
       await cubit.save();
 
       verifyNever(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
           mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
@@ -891,7 +891,7 @@ void main() {
         ).thenAnswer((_) async => 'Hoje foi um bom dia.');
         await cubit.stopRecording();
         when(
-          () => mockRepository.create(
+          () => mockTracker.create(
             content: any(named: 'content'),
             source: any(named: 'source'),
             mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
@@ -910,7 +910,7 @@ void main() {
       await reachTranscribed();
       final completer = Completer<Either<Failure, Entry>>();
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
           mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
@@ -921,7 +921,7 @@ void main() {
       await cubit.save();
 
       verify(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
           mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
@@ -948,7 +948,7 @@ void main() {
       await cubit.stopRecording();
       final completer = Completer<Either<Failure, Entry>>();
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
           mediaDurationSeconds: any(named: 'mediaDurationSeconds'),

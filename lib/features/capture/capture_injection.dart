@@ -4,7 +4,7 @@ import 'package:whisper_ggml/whisper_ggml.dart';
 
 import '../../core/di/injection_container.dart';
 import '../../core/network/api_client.dart';
-import '../entries/domain/repositories/entries_repository.dart';
+import '../entries/domain/services/pending_entry_write_tracker.dart';
 import 'data/datasources/media_remote_data_source.dart';
 import 'data/repositories/media_repository_impl.dart';
 import 'data/services/image_picker_photo_picker.dart';
@@ -27,12 +27,19 @@ import 'presentation/cubit/text_entry_cubit.dart';
 /// [AudioTranscriber] (and the raw `record`/`whisper_ggml` plugin
 /// instances underneath them) stay lazy singletons instead — one real
 /// recorder/transcriber for the app's lifetime, shared across every modal
-/// open, mirroring `EntriesRepository`'s own registration shape. Called
-/// from `setupCoreDependencies()` right after `registerEntriesFeature()`
-/// (Code Map).
+/// open, mirroring `PendingEntryWriteTracker`'s own registration shape.
+/// Called from `setupCoreDependencies()` right after
+/// `registerEntriesFeature()` (Code Map) — that call must run first, since
+/// [PendingEntryWriteTracker] is registered there.
+///
+/// spec-4-2 — all three cubit factories below depend on
+/// [PendingEntryWriteTracker] instead of `EntriesRepository` directly
+/// (Code Map: "swap `EntriesRepository` dep for tracker"); the tracker
+/// itself calls through to `EntriesRepository.create()` internally, so no
+/// call-site logic changes, only the dependency type.
 void registerCaptureFeature() {
   sl.registerFactory<TextEntryCubit>(
-    () => TextEntryCubit(sl<EntriesRepository>()),
+    () => TextEntryCubit(sl<PendingEntryWriteTracker>()),
   );
 
   sl.registerLazySingleton<record_pkg.AudioRecorder>(
@@ -51,7 +58,7 @@ void registerCaptureFeature() {
     () => AudioEntryCubit(
       sl<MicRecorder>(),
       sl<AudioTranscriber>(),
-      sl<EntriesRepository>(),
+      sl<PendingEntryWriteTracker>(),
     ),
   );
 
@@ -73,7 +80,7 @@ void registerCaptureFeature() {
     () => PhotoEntryCubit(
       sl<PhotoPicker>(),
       sl<MediaRepository>(),
-      sl<EntriesRepository>(),
+      sl<PendingEntryWriteTracker>(),
     ),
   );
 }

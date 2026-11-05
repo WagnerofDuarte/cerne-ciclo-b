@@ -93,5 +93,22 @@ void main() {
 
       expect(groups.single.date, DateTime(2026, 3, 10));
     });
+
+    test('a malformed occurredAt is skipped rather than thrown, while '
+        "well-formed entries in the same list still group correctly", () {
+      final entries = [
+        _entry(id: 'e1', occurredAt: '2026-03-10T10:00:00'),
+        _entry(id: 'bad', occurredAt: 'not-a-date'),
+        _entry(id: 'e2', occurredAt: '2026-03-11T10:00:00'),
+      ];
+
+      final groups = groupEntriesByDate(entries);
+
+      expect(groups, hasLength(2));
+      expect(
+        groups.expand((g) => g.entries).map((e) => e.id),
+        ['e1', 'e2'],
+      );
+    });
   });
 }

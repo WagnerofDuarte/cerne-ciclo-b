@@ -6,7 +6,10 @@ import 'package:fpdart/fpdart.dart';
 import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
+import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
+import 'package:cerne/features/entries/domain/entities/sync_badge_state.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
 import 'package:cerne/features/entries/presentation/cubit/meus_registros_state.dart';
 
@@ -82,16 +85,79 @@ class _GatedEntriesRepository implements EntriesRepository {
   }
 }
 
+/// A controllable `PendingEntryWriteTracker` fake — lets a test drive
+/// [pendingWrites]/[confirmedWrites] directly (simulating a capture cubit
+/// elsewhere, sharing the same tracker instance in production) and records
+/// every [retry] call so `MeusRegistrosCubit.retry()`'s own delegation can
+/// be asserted without a real `EntriesRepository` behind it.
+class _FakePendingEntryWriteTracker implements PendingEntryWriteTracker {
+  final _pendingController =
+      StreamController<List<PendingEntryWrite>>.broadcast();
+  final _confirmedController =
+      StreamController<({String tempId, Entry entry})>.broadcast();
+  final List<String> retryCalls = [];
+
+  void emitPendingWrites(List<PendingEntryWrite> writes) =>
+      _pendingController.add(writes);
+
+  void emitConfirmed(String tempId, Entry entry) =>
+      _confirmedController.add((tempId: tempId, entry: entry));
+
+  @override
+  Stream<List<PendingEntryWrite>> get pendingWrites =>
+      _pendingController.stream;
+
+  @override
+  Stream<({String tempId, Entry entry})> get confirmedWrites =>
+      _confirmedController.stream;
+
+  @override
+  Future<Either<Failure, Entry>> create({
+    required String content,
+    required EntrySource source,
+    int? mediaDurationSeconds,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<void> retry(String tempId) async {
+    retryCalls.add(tempId);
+  }
+
+  @override
+  Future<void> dispose() async {
+    await _pendingController.close();
+    await _confirmedController.close();
+  }
+}
+
+PendingEntryWrite _pendingWrite(
+  String tempId, {
+  PendingEntryWriteStatus status = const PendingEntryWriteInFlight(),
+  String content = 'pending content',
+}) => PendingEntryWrite(
+  tempId: tempId,
+  content: content,
+  source: EntrySource.manual,
+  mediaDurationSeconds: null,
+  startedAt: DateTime(2026, 1, 1),
+  status: status,
+);
+
 void main() {
   late _FakeEntriesRepository fakeRepository;
+  late _FakePendingEntryWriteTracker fakeTracker;
   late MeusRegistrosCubit cubit;
 
   setUp(() {
     fakeRepository = _FakeEntriesRepository();
-    cubit = MeusRegistrosCubit(fakeRepository);
+    fakeTracker = _FakePendingEntryWriteTracker();
+    cubit = MeusRegistrosCubit(fakeRepository, fakeTracker);
   });
 
-  tearDown(() => cubit.close());
+  tearDown(() async {
+    await cubit.close();
+    await fakeTracker.dispose();
+  });
 
   group('loadFirstPage()', () {
     test('starts as MeusRegistrosLoading before any load', () {
@@ -146,6 +212,23 @@ void main() {
       await cubit.loadFirstPage();
 
       expect(fakeRepository.listCalls.single.cursor, isNull);
+    });
+
+    test('review finding: no duplicate ids even within the very first page '
+        'itself', () async {
+      fakeRepository.queueList(
+        right(
+          EntriesPage(
+            items: [_entry('e1'), _entry('e2'), _entry('e1')],
+            nextCursor: null,
+          ),
+        ),
+      );
+
+      await cubit.loadFirstPage();
+
+      final state = cubit.state as MeusRegistrosLoaded;
+      expect(state.entries.map((e) => e.id), ['e1', 'e2']);
     });
   });
 
@@ -256,6 +339,24 @@ void main() {
       expect(state.entries.map((e) => e.id), ['e1', 'e2']);
     });
 
+    test('review finding: no duplicate ids even when the new page itself '
+        'repeats an id internally (not just against already-held ones)', () async {
+      await seedLoaded();
+      fakeRepository.queueList(
+        right(
+          EntriesPage(
+            items: [_entry('e2'), _entry('e3'), _entry('e2')],
+            nextCursor: null,
+          ),
+        ),
+      );
+
+      await cubit.loadMore();
+
+      final state = cubit.state as MeusRegistrosLoaded;
+      expect(state.entries.map((e) => e.id), ['e1', 'e2', 'e3']);
+    });
+
     test(
       'review finding: a page with zero genuinely-new entries (every '
       'returned item already present by id) forces nextCursor to null '
@@ -311,7 +412,9 @@ void main() {
       'emitted',
       () async {
         final gatedRepository = _GatedEntriesRepository();
-        final gatedCubit = MeusRegistrosCubit(gatedRepository);
+        final gatedTracker = _FakePendingEntryWriteTracker();
+        addTearDown(gatedTracker.dispose);
+        final gatedCubit = MeusRegistrosCubit(gatedRepository, gatedTracker);
         addTearDown(gatedCubit.close);
 
         final firstLoad = gatedCubit.loadFirstPage(); // call #0 (stale)
@@ -346,7 +449,9 @@ void main() {
       'than emitted',
       () async {
         final gatedRepository = _GatedEntriesRepository();
-        final gatedCubit = MeusRegistrosCubit(gatedRepository);
+        final gatedTracker = _FakePendingEntryWriteTracker();
+        addTearDown(gatedTracker.dispose);
+        final gatedCubit = MeusRegistrosCubit(gatedRepository, gatedTracker);
         addTearDown(gatedCubit.close);
 
         final firstLoad = gatedCubit.loadFirstPage(); // call #0
@@ -379,6 +484,235 @@ void main() {
 
         final state = gatedCubit.state as MeusRegistrosLoaded;
         expect(state.entries.map((e) => e.id), ['reloaded']);
+      },
+    );
+  });
+
+  group('spec-4-2: pending/confirmed write overlay', () {
+    test(
+      'a pending write arriving while MeusRegistrosLoaded overlays onto '
+      'pendingWrites, with its own placeholder card groups.badgeFor() '
+      'reporting synchronizing',
+      () async {
+        fakeRepository.queueList(
+          right(EntriesPage(items: [_entry('e1')], nextCursor: null)),
+        );
+        await cubit.loadFirstPage();
+
+        fakeTracker.emitPendingWrites([_pendingWrite('temp-1')]);
+        await Future<void>.delayed(Duration.zero);
+
+        final state = cubit.state as MeusRegistrosLoaded;
+        expect(state.pendingWrites.map((p) => p.tempId), ['temp-1']);
+        // The placeholder card is always first across every group
+        // (Boundaries: "Card appears top-of-today") — `groupEntriesByDate`
+        // orders groups by first-encountered entry, and the placeholder is
+        // always prepended ahead of every confirmed entry.
+        final allIds = state.groups.expand((g) => g.entries).map((e) => e.id);
+        expect(allIds.first, 'temp-1');
+        final placeholder = state.groups
+            .expand((g) => g.entries)
+            .firstWhere((e) => e.id == 'temp-1');
+        expect(
+          state.badgeFor(placeholder),
+          const SyncBadgeState.synchronizing(),
+        );
+      },
+    );
+
+    test(
+      'a pending write arriving while MeusRegistrosEmpty transitions to '
+      'MeusRegistrosLoaded showing just the placeholder card',
+      () async {
+        fakeRepository.queueList(
+          right(const EntriesPage(items: [], nextCursor: null)),
+        );
+        await cubit.loadFirstPage();
+        expect(cubit.state, isA<MeusRegistrosEmpty>());
+
+        fakeTracker.emitPendingWrites([_pendingWrite('temp-1')]);
+        await Future<void>.delayed(Duration.zero);
+
+        final state = cubit.state as MeusRegistrosLoaded;
+        expect(state.entries, isEmpty);
+        expect(state.pendingWrites, hasLength(1));
+      },
+    );
+
+    test(
+      'a confirmed write prepends the real Entry into entries, preserving '
+      'nextCursor/pagination, and dedupes against a later duplicate from '
+      'list()',
+      () async {
+        fakeRepository.queueList(
+          right(EntriesPage(items: [_entry('e1')], nextCursor: 'cursor-2')),
+        );
+        await cubit.loadFirstPage();
+
+        fakeTracker.emitConfirmed('temp-1', _entry('new-1'));
+        await Future<void>.delayed(Duration.zero);
+
+        var state = cubit.state as MeusRegistrosLoaded;
+        expect(state.entries.map((e) => e.id), ['new-1', 'e1']);
+        // Pagination state untouched by the prepend.
+        expect(state.nextCursor, 'cursor-2');
+
+        // A later loadMore() page happens to repeat the now-confirmed id
+        // (e.g. a cursor shifted by the insert) — absorbed by the existing
+        // dedup helper, same as any other cursor-boundary repeat.
+        fakeRepository.queueList(
+          right(
+            EntriesPage(items: [_entry('new-1'), _entry('e2')], nextCursor: null),
+          ),
+        );
+        await cubit.loadMore();
+
+        state = cubit.state as MeusRegistrosLoaded;
+        expect(state.entries.map((e) => e.id), ['new-1', 'e1', 'e2']);
+      },
+    );
+
+    test(
+      'a confirmed write arriving while MeusRegistrosEmpty transitions to '
+      'MeusRegistrosLoaded showing just that entry',
+      () async {
+        fakeRepository.queueList(
+          right(const EntriesPage(items: [], nextCursor: null)),
+        );
+        await cubit.loadFirstPage();
+
+        fakeTracker.emitConfirmed('temp-1', _entry('new-1'));
+        await Future<void>.delayed(Duration.zero);
+
+        final state = cubit.state as MeusRegistrosLoaded;
+        expect(state.entries.map((e) => e.id), ['new-1']);
+      },
+    );
+
+    test(
+      'a pending write already outstanding before the first page resolves '
+      'is folded into the very first MeusRegistrosLoaded emission',
+      () async {
+        fakeTracker.emitPendingWrites([_pendingWrite('temp-1')]);
+        await Future<void>.delayed(Duration.zero);
+
+        fakeRepository.queueList(
+          right(const EntriesPage(items: [], nextCursor: null)),
+        );
+        await cubit.loadFirstPage();
+
+        final state = cubit.state as MeusRegistrosLoaded;
+        expect(state.pendingWrites.map((p) => p.tempId), ['temp-1']);
+      },
+    );
+
+    test(
+      'retry(tempId) delegates to the shared tracker verbatim — no second '
+      'retry endpoint',
+      () async {
+        await cubit.retry('temp-1');
+
+        expect(fakeTracker.retryCalls, ['temp-1']);
+      },
+    );
+
+    test(
+      'code-review round 1 finding: a confirmed write drops its own '
+      'matching pending placeholder in the very same emission that '
+      'prepends the real entry — no transient frame where both the stale '
+      'placeholder and the real entry are visible at once',
+      () async {
+        fakeRepository.queueList(
+          right(const EntriesPage(items: [], nextCursor: null)),
+        );
+        await cubit.loadFirstPage();
+        fakeTracker.emitPendingWrites([_pendingWrite('temp-1')]);
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          (cubit.state as MeusRegistrosLoaded).pendingWrites,
+          hasLength(1),
+        );
+
+        final emitted = <MeusRegistrosState>[];
+        final subscription = cubit.stream.listen(emitted.add);
+
+        fakeTracker.emitConfirmed('temp-1', _entry('new-1'));
+        await Future<void>.delayed(Duration.zero);
+        await subscription.cancel();
+
+        // Exactly one emission for this confirmation — proving the
+        // pending-removal and the entry-prepend happen together, not as
+        // two separate emissions (one of which would otherwise render
+        // both the stale placeholder and the real entry simultaneously).
+        expect(emitted, hasLength(1));
+        final state = emitted.single as MeusRegistrosLoaded;
+        expect(state.entries.map((e) => e.id), ['new-1']);
+        expect(state.pendingWrites, isEmpty);
+
+        // A later, independent pendingWrites emission (the tracker's own,
+        // arriving after its `Stream.multi` hop) must not resurrect it.
+        fakeTracker.emitPendingWrites([]);
+        await Future<void>.delayed(Duration.zero);
+        expect((cubit.state as MeusRegistrosLoaded).pendingWrites, isEmpty);
+      },
+    );
+
+    test(
+      'code-review round 1 finding: a zero-item first page with a pending '
+      'write outstanding still forces nextCursor to null (the degenerate-'
+      'cursor guard applies unconditionally)',
+      () async {
+        fakeTracker.emitPendingWrites([_pendingWrite('temp-1')]);
+        await Future<void>.delayed(Duration.zero);
+
+        fakeRepository.queueList(
+          right(const EntriesPage(items: [], nextCursor: 'cursor-2')),
+        );
+        await cubit.loadFirstPage();
+
+        final state = cubit.state as MeusRegistrosLoaded;
+        expect(state.entries, isEmpty);
+        expect(state.pendingWrites, hasLength(1));
+        expect(state.nextCursor, isNull);
+      },
+    );
+
+    test(
+      'code-review round 1 finding: a pending write arriving while '
+      'MeusRegistrosError transitions to MeusRegistrosLoaded showing the '
+      'placeholder, same as the MeusRegistrosEmpty case',
+      () async {
+        fakeRepository.queueList(
+          left(const Failure.authExpired(message: 'Sessão expirada')),
+        );
+        await cubit.loadFirstPage();
+        expect(cubit.state, isA<MeusRegistrosError>());
+
+        fakeTracker.emitPendingWrites([_pendingWrite('temp-1')]);
+        await Future<void>.delayed(Duration.zero);
+
+        final state = cubit.state as MeusRegistrosLoaded;
+        expect(state.entries, isEmpty);
+        expect(state.pendingWrites, hasLength(1));
+      },
+    );
+
+    test(
+      'code-review round 1 finding: a confirmed write arriving while '
+      'MeusRegistrosError transitions to MeusRegistrosLoaded showing that '
+      'entry, same as the MeusRegistrosEmpty case',
+      () async {
+        fakeRepository.queueList(
+          left(const Failure.authExpired(message: 'Sessão expirada')),
+        );
+        await cubit.loadFirstPage();
+        expect(cubit.state, isA<MeusRegistrosError>());
+
+        fakeTracker.emitConfirmed('temp-1', _entry('new-1'));
+        await Future<void>.delayed(Duration.zero);
+
+        final state = cubit.state as MeusRegistrosLoaded;
+        expect(state.entries.map((e) => e.id), ['new-1']);
       },
     );
   });

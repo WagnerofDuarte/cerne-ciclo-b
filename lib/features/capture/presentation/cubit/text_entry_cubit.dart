@@ -1,7 +1,7 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../entries/domain/entities/entry.dart';
-import '../../../entries/domain/repositories/entries_repository.dart';
+import '../../../entries/domain/services/pending_entry_write_tracker.dart';
 
 /// The Insertion Modal's 3 tabs — Boundaries: "3 equal-width tabs (Texto/
 /// Áudio/Foto)". Only [texto] is functional this story; [audio]/[foto]
@@ -57,19 +57,25 @@ class TextEntryError extends TextEntryState {
   final String message;
 }
 
-/// Drives `InsertionModal`. Calls [EntriesRepository.create] directly on
-/// [save] — no use-case layer, matching this codebase's existing
-/// convention (Design Notes: `AccountSettingsCubit`/`AuthCubit`). A fresh,
-/// `get_it`-factory-scoped instance per "+" tap (Boundaries: "Modal open
-/// resets") — starting state is always [TextEntryIdle] on
+/// Drives `InsertionModal`. Calls [PendingEntryWriteTracker.create]
+/// directly on [save] — no use-case layer, matching this codebase's
+/// existing convention (Design Notes: `AccountSettingsCubit`/`AuthCubit`).
+/// A fresh, `get_it`-factory-scoped instance per "+" tap (Boundaries:
+/// "Modal open resets") — starting state is always [TextEntryIdle] on
 /// [CaptureTab.texto] with empty text, so no explicit reset method is
 /// needed the way `AccountSettingsCubit.clearStaleError()` needs one for
 /// its own long-lived singleton.
+///
+/// spec-4-2 — depends on the shared [PendingEntryWriteTracker] instead of
+/// `EntriesRepository` directly (identical `create()` contract, Code Map:
+/// "capture cubits swap the dependency, no call-site logic change") so
+/// `MeusRegistrosCubit` sees this save's own pending/confirmed lifecycle
+/// regardless of which screen is open when it resolves.
 class TextEntryCubit extends Cubit<TextEntryState> {
-  TextEntryCubit(this._repository)
+  TextEntryCubit(this._tracker)
     : super(const TextEntryIdle(activeTab: CaptureTab.texto, text: ''));
 
-  final EntriesRepository _repository;
+  final PendingEntryWriteTracker _tracker;
 
   /// Switches the active tab, preserving whatever Texto text was already
   /// typed. The cross-tab cancel-safety rule (FR-11) lives in
@@ -123,7 +129,7 @@ class TextEntryCubit extends Cubit<TextEntryState> {
     }
     final activeTab = state.activeTab;
     emit(TextEntrySaving(activeTab: activeTab, text: text));
-    final result = await _repository.create(
+    final result = await _tracker.create(
       content: text,
       source: EntrySource.manual,
     );

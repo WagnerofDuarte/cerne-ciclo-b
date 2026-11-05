@@ -53,10 +53,8 @@ List<EntryDateGroup> groupEntriesByDate(List<Entry> entries) {
   final dayOrder = <DateTime>[];
 
   for (final entry in entries) {
-    DateTime occurredAt;
-    try {
-      occurredAt = DateTime.parse(entry.occurredAt).toLocal();
-    } catch (_) {
+    final occurredAt = DateTime.tryParse(entry.occurredAt)?.toLocal();
+    if (occurredAt == null) {
       continue;
     }
     final day = DateTime(occurredAt.year, occurredAt.month, occurredAt.day);

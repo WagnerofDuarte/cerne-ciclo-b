@@ -5,6 +5,7 @@ import '../../core/network/api_client.dart';
 import 'data/datasources/entries_remote_data_source.dart';
 import 'data/repositories/entries_repository_impl.dart';
 import 'domain/repositories/entries_repository.dart';
+import 'domain/services/pending_entry_write_tracker.dart';
 import 'presentation/cubit/meus_registros_cubit.dart';
 
 /// The `entries` Hive box's name — the first `hive_ce` box in the app
@@ -35,12 +36,24 @@ Future<void> registerEntriesFeature() async {
     ),
   );
 
+  // spec-4-2 — one shared tracker for all three capture cubits
+  // (`capture_injection.dart`) *and* `MeusRegistrosCubit` below, so a
+  // pending write started from any capture cubit is visible to the other
+  // regardless of which "+" tap created it (Design Notes).
+  sl.registerLazySingleton<PendingEntryWriteTracker>(
+    () => PendingEntryWriteTrackerImpl(repository: sl<EntriesRepository>()),
+    dispose: (tracker) => tracker.dispose(),
+  );
+
   // spec-4-1 — `MeusRegistrosCubit` is a `lazySingleton`, not a factory
   // (Code Map/Boundaries), like `AccountSettingsCubit`: long-lived, so
   // `dispose:` wires its `close()` into `get_it`'s own reset lifecycle,
   // same convention `account_injection.dart` already uses.
   sl.registerLazySingleton<MeusRegistrosCubit>(
-    () => MeusRegistrosCubit(sl<EntriesRepository>()),
+    () => MeusRegistrosCubit(
+      sl<EntriesRepository>(),
+      sl<PendingEntryWriteTracker>(),
+    ),
     dispose: (cubit) => cubit.close(),
   );
 }

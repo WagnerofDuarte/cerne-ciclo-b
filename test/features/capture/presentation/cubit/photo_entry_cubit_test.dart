@@ -11,7 +11,7 @@ import 'package:cerne/features/capture/domain/repositories/media_repository.dart
 import 'package:cerne/features/capture/domain/services/photo_picker.dart';
 import 'package:cerne/features/capture/presentation/cubit/photo_entry_cubit.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
-import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 
 /// `_deletePickedFile`/`_pick`'s own replace-on-fresh-pick cleanup are
 /// both fire-and-forget (`unawaited`) by design — a single microtask
@@ -29,7 +29,7 @@ class MockPhotoPicker extends Mock implements PhotoPicker {}
 
 class MockMediaRepository extends Mock implements MediaRepository {}
 
-class MockEntriesRepository extends Mock implements EntriesRepository {}
+class MockPendingEntryWriteTracker extends Mock implements PendingEntryWriteTracker {}
 
 const _savedEntry = Entry(
   id: 'p1',
@@ -49,7 +49,7 @@ const _savedEntry = Entry(
 void main() {
   late MockPhotoPicker mockPhotoPicker;
   late MockMediaRepository mockMediaRepository;
-  late MockEntriesRepository mockRepository;
+  late MockPendingEntryWriteTracker mockTracker;
   late PhotoEntryCubit cubit;
   late Directory tempDir;
   late File photoFile;
@@ -64,11 +64,11 @@ void main() {
     photoFile = File('${tempDir.path}/foto.jpg')..writeAsBytesSync([1, 2, 3]);
     mockPhotoPicker = MockPhotoPicker();
     mockMediaRepository = MockMediaRepository();
-    mockRepository = MockEntriesRepository();
+    mockTracker = MockPendingEntryWriteTracker();
     cubit = PhotoEntryCubit(
       mockPhotoPicker,
       mockMediaRepository,
-      mockRepository,
+      mockTracker,
     );
   });
 
@@ -351,7 +351,7 @@ void main() {
         'retry, is that case\'s own recovery path', () async {
       await reachError(const Failure.ocrNoText(message: 'Nenhum texto.'));
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
@@ -390,7 +390,7 @@ void main() {
       );
       await cubit.pickFromCamera();
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
@@ -400,7 +400,7 @@ void main() {
 
       expect(cubit.state, isA<PhotoSaved>());
       verify(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: 'Registro fotográfico (sem texto reconhecido)',
           source: EntrySource.photo,
         ),
@@ -412,7 +412,7 @@ void main() {
 
       expect(cubit.state, isA<PhotoIdle>());
       verifyNever(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
@@ -438,7 +438,7 @@ void main() {
       await cubit.saveWithoutText();
 
       verifyNever(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
@@ -485,7 +485,7 @@ void main() {
       await recognizedState();
       final completer = Completer<Either<Failure, Entry>>();
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
@@ -525,7 +525,7 @@ void main() {
     test('happy path -> saving then PhotoSaved, source always photo', () async {
       await reachRecognized();
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: 'Hoje foi um bom dia.',
           source: EntrySource.photo,
         ),
@@ -543,7 +543,7 @@ void main() {
         isA<PhotoSaved>(),
       ]);
       verify(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: 'Hoje foi um bom dia.',
           source: EntrySource.photo,
         ),
@@ -554,7 +554,7 @@ void main() {
         'Salvar re-enabled, no auto-retry', () async {
       await reachRecognized();
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
@@ -578,7 +578,7 @@ void main() {
         'the (possibly edited) text', () async {
       await reachRecognized();
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
@@ -588,7 +588,7 @@ void main() {
       await cubit.save();
       cubit.updateText('texto corrigido');
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
@@ -598,7 +598,7 @@ void main() {
 
       expect(cubit.state, isA<PhotoSaved>());
       verify(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: 'texto corrigido',
           source: EntrySource.photo,
         ),
@@ -612,7 +612,7 @@ void main() {
       await cubit.save();
 
       verifyNever(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
@@ -623,7 +623,7 @@ void main() {
       await cubit.save();
 
       verifyNever(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
@@ -635,7 +635,7 @@ void main() {
       await reachRecognized();
       final completer = Completer<Either<Failure, Entry>>();
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
@@ -645,7 +645,7 @@ void main() {
       await cubit.save();
 
       verify(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
@@ -661,7 +661,7 @@ void main() {
       await reachRecognized();
       expect(photoFile.existsSync(), isTrue);
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
@@ -1056,7 +1056,7 @@ void main() {
       await cubit.pickFromCamera();
       final completer = Completer<Either<Failure, Entry>>();
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),

@@ -7,9 +7,9 @@ import 'package:mocktail/mocktail.dart';
 import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
-import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 
-class MockEntriesRepository extends Mock implements EntriesRepository {}
+class MockPendingEntryWriteTracker extends Mock implements PendingEntryWriteTracker {}
 
 const _savedEntry = Entry(
   id: 'e1',
@@ -33,7 +33,7 @@ const _savedEntry = Entry(
 ///   (`insertion_modal_test.dart`), since this cubit never calls `create`
 ///   except from `save()`.
 void main() {
-  late MockEntriesRepository mockRepository;
+  late MockPendingEntryWriteTracker mockTracker;
   late TextEntryCubit cubit;
 
   setUpAll(() {
@@ -41,8 +41,8 @@ void main() {
   });
 
   setUp(() {
-    mockRepository = MockEntriesRepository();
-    cubit = TextEntryCubit(mockRepository);
+    mockTracker = MockPendingEntryWriteTracker();
+    cubit = TextEntryCubit(mockTracker);
   });
 
   tearDown(() => cubit.close());
@@ -96,7 +96,7 @@ void main() {
     test('ignored while a save is already in flight', () async {
       final completer = Completer<Either<Failure, Entry>>();
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
@@ -122,7 +122,7 @@ void main() {
         await cubit.save();
 
         verifyNever(
-          () => mockRepository.create(
+          () => mockTracker.create(
             content: any(named: 'content'),
             source: any(named: 'source'),
           ),
@@ -136,7 +136,7 @@ void main() {
       'always manual (Boundaries)',
       () async {
         when(
-          () => mockRepository.create(
+          () => mockTracker.create(
             content: 'Hoje foi um bom dia.',
             source: EntrySource.manual,
           ),
@@ -157,7 +157,7 @@ void main() {
 
         expect(emitted, [isA<TextEntrySaving>(), isA<TextEntrySaved>()]);
         verify(
-          () => mockRepository.create(
+          () => mockTracker.create(
             content: 'Hoje foi um bom dia.',
             source: EntrySource.manual,
           ),
@@ -172,7 +172,7 @@ void main() {
       'verbatim — modal stays open, no auto-retry',
       () async {
         when(
-          () => mockRepository.create(
+          () => mockTracker.create(
             content: any(named: 'content'),
             source: any(named: 'source'),
           ),
@@ -203,7 +203,7 @@ void main() {
     () async {
       final completer = Completer<Either<Failure, Entry>>();
       when(
-        () => mockRepository.create(
+        () => mockTracker.create(
           content: any(named: 'content'),
           source: any(named: 'source'),
         ),
