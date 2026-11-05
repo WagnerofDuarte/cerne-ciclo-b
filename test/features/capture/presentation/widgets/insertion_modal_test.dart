@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 
+import 'package:cerne/core/design_tokens.dart';
 import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/features/capture/domain/repositories/media_repository.dart';
 import 'package:cerne/features/capture/domain/services/audio_transcriber.dart';
@@ -58,18 +59,17 @@ class _FakeEntriesRepository implements EntriesRepository {
   }
 }
 
-/// A trivial fake — this file's own tests never switch to the Áudio tab,
-/// so neither `MicRecorder` port method below is ever expected to be
-/// called (same rationale as `_FakeEntriesRepository`'s own doc, applied
-/// to spec-3-2's two new ports).
+/// A trivial fake — correction: switching to the Áudio tab no longer
+/// starts recording on its own (it shows the idle mic button first), so
+/// only this file's one test that explicitly taps that button ever
+/// reaches `hasPermission()` — every other `MicRecorder` port method
+/// below stays unreachable (same rationale as `_FakeEntriesRepository`'s
+/// own doc, applied to spec-3-2's two new ports).
 class _FakeMicRecorder implements MicRecorder {
-  // This file's generic tab-switch tests (`_openModal`'s own default)
-  // *do* switch into the Áudio tab (Code Map: tab-switch starts
-  // recording), so `hasPermission()` must return something rather than
-  // throw — `false` keeps the flow harmless (an `AudioError` state,
-  // never touching `start`/`stop`/`cancel` below) for every test that
-  // doesn't care about the audio pipeline's own details
-  // (`audio_entry_cubit_test.dart` covers those with scriptable mocks).
+  // `false` keeps that one test's flow harmless (an `AudioError` state,
+  // never touching `start`/`stop`/`cancel` below) — the audio pipeline's
+  // own details are `audio_entry_cubit_test.dart`'s job, with scriptable
+  // mocks.
   @override
   Future<bool> hasPermission() async => false;
 
@@ -143,19 +143,28 @@ Future<void> _openModal(
     _FakeEntriesRepository(),
   );
   await tester.pumpWidget(
-    MediaQuery(
-      data: MediaQueryData(disableAnimations: disableAnimations),
-      child: MaterialApp(
-        home: Scaffold(
-          body: Builder(
-            builder: (context) => ElevatedButton(
-              onPressed: () => InsertionModal.show(
-                context,
-                cubit: cubit,
-                audioCubit: audioCubit,
-                photoCubit: photoCubit,
+    // Review finding: a bare `MediaQueryData(disableAnimations: ...)`
+    // (rather than `.copyWith` over the ambient one) defaults every
+    // other field to zero — `viewInsets` included — permanently
+    // shadowing the real one from `tester.view`, so a test that sets
+    // `tester.view.viewInsets` to simulate an open keyboard never
+    // actually sees it reach the widget under test.
+    Builder(
+      builder: (outerContext) => MediaQuery(
+        data: MediaQuery.of(outerContext)
+            .copyWith(disableAnimations: disableAnimations),
+        child: MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => InsertionModal.show(
+                  context,
+                  cubit: cubit,
+                  audioCubit: audioCubit,
+                  photoCubit: photoCubit,
+                ),
+                child: const Text('open'),
               ),
-              child: const Text('open'),
             ),
           ),
         ),
@@ -204,11 +213,20 @@ void main() {
     await tester.tap(find.text('Áudio'));
     await tester.pumpAndSettle();
 
-    // This file's own `_FakeMicRecorder.hasPermission()` always denies
-    // — `audio_entry_cubit_test.dart` covers the full pipeline with
-    // scriptable mocks; this just proves the tab is real UI now, not
-    // Story 3.1's old idle placeholder.
+    // Correction: entering the tab now shows the idle mic button first
+    // (`cerne-prototype.html`'s own `isAudioIdle` block) rather than
+    // starting recording automatically — proves the tab is real UI now,
+    // not Story 3.1's old idle placeholder.
     expect(find.text('Áudio chega em breve'), findsNothing);
+    expect(find.text('Toque para gravar'), findsOneWidget);
+
+    // This file's own `_FakeMicRecorder.hasPermission()` always denies —
+    // `audio_entry_cubit_test.dart` covers the full pipeline with
+    // scriptable mocks; tapping the mic button just proves the recording
+    // flow itself is wired up.
+    await tester.tap(find.byIcon(Icons.mic));
+    await tester.pumpAndSettle();
+
     expect(find.text('Tentar novamente'), findsOneWidget);
 
     await tester.tap(find.text('Foto'));
@@ -288,6 +306,204 @@ void main() {
 
     expect(fakeRepository.createCallCount, 0);
     expect(find.byType(TextField), findsNothing);
+  });
+
+  group('regression: header mismatched the frozen prototype (close button on '
+      'the wrong side, tabs not in a pill track)', () {
+    testWidgets(
+      'the "x" close button sits to the left of the tab track, not the '
+      'right',
+      (tester) async {
+        await _openModal(tester, TextEntryCubit(fakeRepository));
+        await tester.pumpAndSettle();
+
+        final closeX = tester.getCenter(find.byIcon(Icons.close)).dx;
+        final textoTabX = tester.getCenter(find.text('Texto')).dx;
+
+        expect(closeX, lessThan(textoTabX));
+      },
+    );
+
+    testWidgets(
+      'the 3 tabs sit inside a light-gray pill-shaped track, each tab '
+      'itself pill-shaped too',
+      (tester) async {
+        await _openModal(tester, TextEntryCubit(fakeRepository));
+        await tester.pumpAndSettle();
+
+        // The track: a `colorSurfaceBg` container, fully rounded,
+        // wrapping all 3 tab labels.
+        final track = find.byWidgetPredicate(
+          (widget) =>
+              widget is Container &&
+              widget.decoration is BoxDecoration &&
+              (widget.decoration! as BoxDecoration).color ==
+                  DesignTokens.colorSurfaceBg,
+        );
+        expect(track, findsOneWidget);
+        for (final label in ['Texto', 'Áudio', 'Foto']) {
+          expect(
+            find.descendant(of: track, matching: find.text(label)),
+            findsOneWidget,
+          );
+        }
+
+        // Each tab itself: a fully-rounded `Material`, not the previous
+        // [DesignTokens.radiusSm] rounded rectangle.
+        final activeTabMaterial = tester.widget<Material>(
+          find
+              .ancestor(of: find.text('Texto'), matching: find.byType(Material))
+              .first,
+        );
+        expect(
+          activeTabMaterial.borderRadius,
+          const BorderRadius.all(
+            Radius.circular(DesignTokens.insertionModalTabTrackRadius),
+          ),
+        );
+      },
+    );
+  });
+
+  group('regression: keyboard-open layout bugs (overflow, status-bar clip, '
+      'keyboard left open after close)', () {
+    testWidgets(
+      'Texto tab scrolls instead of overflowing when the keyboard eats '
+      'most of the available height, and Salvar stays reachable '
+      '(regression: "BOTTOM OVERFLOWED BY 194 PIXELS")',
+      (tester) async {
+        await _openModal(tester, TextEntryCubit(fakeRepository));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField), 'Hoje foi um bom dia.');
+        // `FakeViewPadding` is in physical pixels (divide by
+        // `tester.view.devicePixelRatio` — 3.0 by default — for the
+        // logical value `MediaQuery.viewInsets` reports). This leaves a
+        // positive but too-small remainder of the test window's 600
+        // logical-pixel height once the tab bar/TextField/Salvar's own
+        // combined height is subtracted — a real (if roomy) on-screen
+        // keyboard's proportions, not a degenerate all-consumed one —
+        // reliably reproducing the overflow this bug report describes.
+        tester.view.viewInsets = const FakeViewPadding(bottom: 1200);
+        addTearDown(tester.view.resetViewInsets);
+        // A single `pump` is deliberate, not `pumpAndSettle` — the
+        // overflow is a layout/paint-time `FlutterError` surfaced on the
+        // very next frame; it needs to be caught (`takeException`) before
+        // any later pump's own frames bury it.
+        await tester.pump();
+
+        // flutter_test fails the test on its own over any uncaught
+        // FlutterError (e.g. a RenderFlex overflow) unless it's consumed
+        // here — asserting it's null is how a test proves none occurred.
+        expect(tester.takeException(), isNull);
+
+        await tester.ensureVisible(
+          find.widgetWithText(ElevatedButton, 'Salvar'),
+        );
+        await tester.pumpAndSettle();
+        final salvarButton = tester.widget<ElevatedButton>(
+          find.widgetWithText(ElevatedButton, 'Salvar'),
+        );
+        expect(salvarButton.onPressed, isNotNull);
+      },
+    );
+
+    testWidgets('the sheet is wrapped in a SafeArea so it never draws over the '
+        'status bar/notch when it grows tall (regression: "the sheet grows '
+        'up under the status bar")', (tester) async {
+      await _openModal(tester, TextEntryCubit(fakeRepository));
+      await tester.pumpAndSettle();
+
+      // Material's `showModalBottomSheet` only wraps its content in a
+      // `SafeArea(bottom: false, ...)` when `useSafeArea: true` is
+      // passed — without it, the content is wrapped in
+      // `MediaQuery.removePadding(removeTop: true, ...)` instead, which
+      // is how the sheet was able to grow up under the status bar.
+      expect(
+        find.ancestor(
+          of: find.text('Texto'),
+          matching: find.byWidgetPredicate(
+            (widget) => widget is SafeArea && !widget.bottom,
+          ),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets(
+      'a successful save hides the keyboard instead of leaving it open '
+      'over the screen behind the now-closed modal',
+      (tester) async {
+        fakeRepository.nextResult = () => right(_savedEntry);
+        await _openModal(tester, TextEntryCubit(fakeRepository));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField), 'Hoje foi um bom dia.');
+        await tester.pump();
+        expect(tester.testTextInput.isVisible, isTrue);
+
+        await tester.tap(find.widgetWithText(ElevatedButton, 'Salvar'));
+        await tester.pumpAndSettle();
+
+        expect(tester.testTextInput.isVisible, isFalse);
+      },
+    );
+
+    testWidgets(
+      'tapping "x" after typing also hides the keyboard, not just the '
+      'sheet',
+      (tester) async {
+        await _openModal(tester, TextEntryCubit(fakeRepository));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField), 'texto não salvo');
+        await tester.pump();
+        expect(tester.testTextInput.isVisible, isTrue);
+
+        await tester.tap(find.byIcon(Icons.close));
+        await tester.pumpAndSettle();
+
+        expect(tester.testTextInput.isVisible, isFalse);
+      },
+    );
+
+    testWidgets(
+      'tapping an empty area of the sheet dismisses the keyboard without '
+      'closing the modal (previously the only way to dismiss the keyboard '
+      'while the modal stayed open at all)',
+      (tester) async {
+        await _openModal(tester, TextEntryCubit(fakeRepository));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(find.byType(TextField), 'ainda editando');
+        await tester.pump();
+        expect(tester.testTextInput.isVisible, isTrue);
+
+        // A point inside the sheet's own top `screenPadding` margin,
+        // above the "x"/tab row and away from the sheet's rounded top
+        // corners (`showModalBottomSheet`'s own `Material` clips hit
+        // testing to that rounded shape — a point too close to a corner
+        // falls just outside it and reaches the barrier behind the sheet
+        // instead, which would dismiss the whole modal rather than just
+        // the keyboard).
+        final sheet = find.byWidgetPredicate(
+          (widget) =>
+              widget is Container &&
+              widget.decoration is BoxDecoration &&
+              (widget.decoration! as BoxDecoration).color ==
+                  DesignTokens.colorSurfaceElevated,
+        );
+        expect(sheet, findsOneWidget);
+        await tester.tapAt(tester.getTopLeft(sheet) + const Offset(300, 10));
+        await tester.pumpAndSettle();
+
+        expect(tester.testTextInput.isVisible, isFalse);
+        // Still open — unlike every other dismissal path, this one must
+        // not pop the sheet.
+        expect(find.byType(TextField), findsOneWidget);
+        expect(find.text('ainda editando'), findsOneWidget);
+      },
+    );
   });
 
   testWidgets('Reduce Motion (MediaQuery.disableAnimations) skips the sheetUp '

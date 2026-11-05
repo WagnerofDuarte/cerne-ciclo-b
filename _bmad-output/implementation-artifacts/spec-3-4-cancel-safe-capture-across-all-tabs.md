@@ -3,7 +3,7 @@ title: 'Story 3.4: Cancel-Safe Capture Across All Tabs'
 type: 'feature'
 created: '2026-11-04'
 status: 'done'
-review_loop_iteration: 0
+review_loop_iteration: 1
 context: []
 baseline_commit: '5bf09cae75e081b1b6ead57d3952d5bb02b4c83e'
 ---
@@ -65,7 +65,20 @@ baseline_commit: '5bf09cae75e081b1b6ead57d3952d5bb02b4c83e'
 - Given a chain of Áudio→Foto→Texto interruptions followed by closing the modal without tapping Salvar, when the modal closes, then `POST /entries` never fired at any point in the chain.
 - Given `fvm flutter analyze` and `fvm flutter test`, then both report zero issues / all green.
 
+### Review Findings
+
+- [x] [Review][Decision] Undisclosed scope deviation — an `amplitudeStream` error-handling test (plus the new `_FakeMicRecorder.amplitudeController` fixture field) was added in this diff but is not named anywhere in this story's Tasks & Acceptance, Code Map, or Suggested Review Order, and is unrelated to FR-11/cancel-safety — it strains the frozen Boundaries' "no new cancel logic, this story only verifies/documents 3.1–3.3" framing in spirit. **Resolved:** accepted as a disclosed deviation (real coverage value, same precedent as spec-3-3's bundled additions) — logged below in Spec Change Log. [test/features/capture/presentation/widgets/insertion_modal_audio_test.dart:45,276-313]
+- [x] [Review][Patch] `deferred-work.md`'s new entry misattributes the `amplitudeStream` test's provenance — it claims the test is "pre-existing (spec-3-3-round-2)" and "predates [story 3.4]," but `git show 58107bb:test/.../insertion_modal_audio_test.dart` proves neither the test nor its `amplitudeController` field existed before this commit (1e52ae5) — both were authored fresh here. — fixed: attribution corrected in place. [_bmad-output/implementation-artifacts/deferred-work.md:223-224]
+- [x] [Review][Patch] This spec file had no `### Review Findings` section and its own frontmatter `review_loop_iteration` was still `0`, even though its "Suggested Review Order" already named a "Review-added hardening (patch findings)" subsection presupposing a completed review round — same inconsistency this codebase's own history (spec-2-3, spec-2-4) already caught and fixed by bumping the iteration and populating this section. — fixed: `review_loop_iteration` bumped to `1`; this section populated. [spec-3-4-cancel-safe-capture-across-all-tabs.md frontmatter]
+- [x] [Review][Patch] "Suggested Review Order"'s "Review-added hardening" bullet cites `insertion_modal_audio_test.dart:521` for the `tester.takeException()` assertions, but line 521 is `fakePhotoPicker.cameraGate!.complete();` — the real three `takeException()` calls are at lines 488, 534, and 595. — fixed: citation corrected. [insertion_modal_audio_test.dart:521]
+- [x] [Review][Patch] `_FakePhotoPicker.cameraCalls`, added "for parity" with `_FakeMicRecorder`, is never asserted anywhere — including in the two new tests whose entire premise is that a pick is genuinely in flight when the tab switch interrupts it ("mid-pick" currently rests only on the gate `Completer`'s existence, not an observed call). — fixed: `expect(fakePhotoPicker.cameraCalls, 1);` added right after tapping "Câmera" in both the "Foto→Áudio mid-pick switch" and chained tests. [insertion_modal_audio_test.dart:507,564]
+- [x] [Review][Patch] The `main()` doc comment claims Story-3.4's cross-tab tests "configure `_FakePhotoPicker.nextCameraResult`/`cameraGate`," but the first new test ("Áudio→Foto mid-recording switch") never touches Foto's picker fields at all — it switches to an idle Foto tab. — fixed: comment tightened to name only the two tests that actually configure the gate. [insertion_modal_audio_test.dart:242-247]
+- [x] [Review][Patch] The amplitude-error test's own description says "the waveform just stays frozen on its last sample," but its only assertion (`find.text('00:00')`) checks the elapsed-timer label, not the waveform/amplitude state — the test doesn't verify the behavior it claims to prove. (`_Waveform`'s `onError: (_) {}` also has no `cancelOnError`, so whether the stream resumes delivering samples after the error is untested either way.) — fixed: assertion strengthened to compare the waveform's last `AnimatedContainer` height before/after the error, proving it's actually frozen. [insertion_modal_audio_test.dart:276-313]
+- [x] [Review][Patch] `_FakePhotoPicker.pickFromCamera()` now returns `null` silently by default instead of throwing `UnimplementedError`, for any test that never configures `nextCameraResult`/`cameraGate` — a future regression causing an unintended camera-pick call in an unrelated test would now go unnoticed instead of failing loudly. — fixed: restored the loud-failure default (`throw UnimplementedError`) unless a test explicitly configures `cameraGate` or `nextCameraResult`. [insertion_modal_audio_test.dart:81-99]
+
 ## Spec Change Log
+
+- **Accepted deviation (code review, 2026-11-04):** an `amplitudeStream` error-handling test (`insertion_modal_audio_test.dart:280`) plus its supporting `_FakeMicRecorder.amplitudeController` fixture field were bundled into this commit alongside the three named cross-tab tests. Neither was listed in this spec's original Tasks & Acceptance/Code Map — they verify `_Waveform`'s `onError` guard against a native amplitude-stream error, unrelated to FR-11/cancel-safety. Accepted as valuable coverage rather than reverted or split out, same precedent as spec-3-3's own bundled additions.
 
 ## Verification
 
@@ -89,7 +102,7 @@ baseline_commit: '5bf09cae75e081b1b6ead57d3952d5bb02b4c83e'
 **Review-added hardening (patch findings)**
 
 - `tester.takeException()` assertions closing each of the 3 tests above — catches a regression that throws inside a cancelled cubit's async continuation instead of letting it pass silently.
-  [`insertion_modal_audio_test.dart:521`](../../test/features/capture/presentation/widgets/insertion_modal_audio_test.dart#L521)
+  [`insertion_modal_audio_test.dart:488,534,595`](../../test/features/capture/presentation/widgets/insertion_modal_audio_test.dart#L488)
 
 - The chained test's final gate-completion now `pump()`s before asserting — the modal/`PhotoEntryCubit` is already closed at that point, so any exception from the completion must surface here, not leak into a later test.
   [`insertion_modal_audio_test.dart:592`](../../test/features/capture/presentation/widgets/insertion_modal_audio_test.dart#L592)

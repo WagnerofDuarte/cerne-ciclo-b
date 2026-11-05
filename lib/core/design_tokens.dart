@@ -276,12 +276,88 @@ class DesignTokens {
   /// isn't on the existing 4dp spacing scale.
   static const double dialogContentGap = 14;
 
-  /// Insertion Modal's "x" close button, each tab button, and (spec-3-2)
-  /// the circular stop-recording control's minimum tap target (Story 3.1
-  /// review finding) — UX-DR23's 44pt floor, same rationale
-  /// [pinKeypadButtonSize] already cites, named here instead of
+  /// Insertion Modal's "x" close button and each tab button's minimum tap
+  /// target (Story 3.1 review finding) — UX-DR23's 44pt floor, same
+  /// rationale [pinKeypadButtonSize] already cites, named here instead of
   /// hardcoded in `insertion_modal.dart` (RNF08).
   static const double insertionModalTapTargetMin = 44;
+
+  /// Insertion Modal header's "x"-to-tab-track gap (correction — the
+  /// prototype's own header markup is `margin-left:12px` between the "x"
+  /// icon and the tab track that follows it; not on the 4dp spacing
+  /// scale, same rationale [dialogContentGap]/[kanbanColumnGap] already
+  /// use for an off-scale gap).
+  static const double insertionModalHeaderGap = 12;
+
+  /// Insertion Modal header's tab track (correction — the prototype's
+  /// header wraps the 3 tabs in a light-gray pill-shaped track
+  /// (`background:#F2EFE7` — already [colorSurfaceBg] — `border-
+  /// radius:999px;padding:4px;gap:4px`), not loose labels; a previous
+  /// pass rendered the tabs directly in the header row with no track.
+  /// [radiusFull] is the track's own radius; [spacingXs] its padding and
+  /// inter-tab gap (both already 4dp).
+  static const double insertionModalTabTrackRadius = radiusFull;
+
+  /// Áudio tab's circular idle/recording control (correction — the
+  /// prototype's own `isAudioIdle`/`isAudioRecording` blocks share one
+  /// `width:72px;height:72px;border-radius:999px` circle; a previous pass
+  /// skipped the idle state entirely and sized the stop button to
+  /// [insertionModalTapTargetMin] instead).
+  static const double audioRecordButtonSize = 72;
+
+  /// Idle button's `ph-microphone` icon — `font-size:30px`.
+  static const double audioRecordButtonMicIconSize = 30;
+
+  /// Recording button's `ph-stop` icon — `font-size:26px`.
+  static const double audioRecordButtonStopIconSize = 26;
+
+  /// Áudio tab's waveform (correction) — each bar's width (`width:3px`)
+  /// and corner radius (`border-radius:2px`), the gap between bars
+  /// (`gap:2px`), and the row's own height (`height:28px`). A previous
+  /// pass used [spacingXs]-wide, fully-rounded ([radiusFull]) bars, which
+  /// at low amplitude read as a row of dots instead of the prototype's
+  /// rectangular bars.
+  static const double audioWaveformBarWidth = 3;
+
+  static const double audioWaveformBarGap = 2;
+
+  static const double audioWaveformBarRadius = 2;
+
+  static const double audioWaveformHeight = 28;
+
+  // ---------------------------------------------------------------------
+  // Foto tab (Story 3.3 correction) — `cerne-prototype.html`'s own
+  // `isPhotoIdle`/`isPhotoProcessing`/`isPhotoRecognized`/`isPhotoError`
+  // blocks; a previous pass approximated the capture step with `AppButton`s
+  // under one icon and gave every state the same single thumbnail size.
+  // ---------------------------------------------------------------------
+
+  /// Gap between the Câmera/Galeria capture cards — `gap:12px`, not on the
+  /// existing 4dp spacing scale.
+  static const double photoCaptureCardGap = 12;
+
+  /// Each capture card's own padding — `padding:20px 24px`; horizontal
+  /// matches [spacingLg], vertical (20) isn't on the existing scale.
+  static const EdgeInsets photoCaptureCardPadding = EdgeInsets.symmetric(
+    vertical: 20,
+    horizontal: spacingLg,
+  );
+
+  /// Capture card's `ph-camera`/`ph-image` icon — `font-size:26px`.
+  static const double photoCaptureCardIconSize = 26;
+
+  /// Processing/error states' photo placeholder — `width:96px;height:72px`.
+  static const double photoThumbnailLargeWidth = 96;
+
+  static const double photoThumbnailLargeHeight = 72;
+
+  /// Recognized state's photo thumbnail, shown beside the editable text
+  /// rather than above it — `width:56px;height:56px;flex-shrink:0`.
+  static const double photoThumbnailSmallSize = 56;
+
+  /// Recognized state's thumbnail-to-textarea gap — `gap:10px`, not on the
+  /// existing scale.
+  static const double photoRecognizedGap = 10;
 
   // ---------------------------------------------------------------------
   // Navigation shell (Story 1.6) — `cerne-prototype.html`'s

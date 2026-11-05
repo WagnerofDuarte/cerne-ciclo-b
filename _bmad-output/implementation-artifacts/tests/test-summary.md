@@ -800,3 +800,131 @@ Cerne's E2E-equivalent (no device/CI yet — AGENTS.md):
   E2E-equivalent pass once implemented, most likely extending the existing
   three `<feature>_flow_e2e_test.dart` files in place (the cancel/leave-tab
   behavior shares the same real-DI harness) rather than a new suite.
+
+---
+
+# QA Generate E2E Tests Pass (2026-11-04) — Story 3.4 Cancel-Safe Capture
+
+## Context
+
+Re-ran this skill scoped specifically to Story 3.4 (cancel-safe capture
+across all tabs, committed `1e52ae5`, plus an uncommitted code-review round
+already present in the working tree on
+`insertion_modal_audio_test.dart`). 3.4's own frozen spec
+(`spec-3-4-cancel-safe-capture-across-all-tabs.md`) already added direct
+Áudio↔Foto widget-level cross-tab tests and one chained
+interrupt-then-close test, all passing and reviewed. Rather than
+duplicate that work, audited it for a *real* remaining gap before writing
+anything:
+
+- Every cross-tab test added by 3.4 (and every pre-existing "leave tab"
+  test from 3.2/3.3) only ever interrupts the tab's **initial** async op —
+  `AudioRecording` (before `stop()`) or the picker call itself (before it
+  resolves into a photo). None interrupts the **secondary** async op each
+  cubit also guards in its own `cancel()` — `AudioProcessing` (after
+  `stop()`, while on-device transcription is running) or `PhotoProcessing`
+  (after the picker resolves, while OCR is running). Confirmed by reading
+  both cubits' `cancel()` methods (`audio_entry_cubit.dart:442-453`,
+  `photo_entry_cubit.dart:420-426`) — each has its own dedicated branch for
+  the Processing state, structurally distinct from the Recording/pick-call
+  branch, so "mid-pick interrupted" tests give it zero coverage.
+  `insertion_modal_photo_test.dart`'s own `_FakeMediaRepository.gate` field
+  (used for an *announcement* test, "canceling mid-pick... while
+  PhotoProcessing") already proves this state is reachable in a widget
+  test, but nothing in `insertion_modal_audio_test.dart` — the file 3.4's
+  own spec designates for all cross-tab coverage — exercised the real
+  tab-switch dispatcher (`insertion_modal.dart:290-317`) against either
+  cubit's Processing state, and `insertion_modal_audio_test.dart`'s own
+  `_FakeAudioTranscriber`/`_FakeMediaRepository` fakes had no gating
+  capability to reach it deterministically at all.
+
+This is a dispatcher-integration gap, not a cubit-logic gap: unit tests
+for both `cancel()` branches already exist in
+`audio_entry_cubit_test.dart`/`photo_entry_cubit_test.dart`. What was
+missing is proof that the *actual* `insertion_modal.dart` tab-switch
+dispatch — the mechanism 3.4 is about — correctly reaches `cancel()` when
+the cubit is in this second state, not only the first.
+
+## Generated Tests
+
+### Widget (`test/features/capture/presentation/widgets/insertion_modal_audio_test.dart`)
+
+- [x] **new**: "Story 3.4: Áudio→Foto switch mid-transcription cancels the
+  pending transcription, never auto-starts anything on Foto" — stops
+  recording (reaching `AudioProcessing`) with `_FakeAudioTranscriber`'s
+  new `transcribeGate` holding `transcribe()` open, switches to Foto, and
+  asserts the cubit resets to `AudioIdle`, Foto shows its idle capture
+  buttons, and `createCallCount` stays 0 both at the switch and after the
+  gate is flushed.
+- [x] **new**: "Story 3.4: Foto→Áudio switch mid-OCR discards the pending
+  OCR result and starts recording immediately" — reaches `PhotoProcessing`
+  via the same gate-the-picker-then-double-`pump()` technique
+  `insertion_modal_photo_test.dart`'s own "canceling mid-pick (tab switch
+  away while PhotoProcessing)" test already uses (confirmed by running
+  that file first: 14/14 passing, including that exact test, before
+  copying its technique), switches to Áudio mid-OCR, and asserts recording
+  starts immediately, the photo cubit resets to `PhotoIdle`, and
+  `createCallCount` stays 0.
+
+### Fixture changes (supporting, no new files/classes)
+
+- `_FakeAudioTranscriber` — added `transcribeGate` (a `Completer<void>`),
+  same gating convention `_FakePhotoPicker.cameraGate` already uses.
+- `_FakeMediaRepository` — made configurable (`nextResult`, loud-by-default
+  `UnimplementedError` otherwise), mirroring
+  `insertion_modal_photo_test.dart`'s own version instead of this file's
+  previous unconditional-throw stub; its instance is now captured
+  (`fakeMediaRepository`) and wired into `photoCubit` instead of being
+  constructed inline and discarded.
+- Added a temp-PNG fixture (`tempDir`/`photoFile`, cleaned up in
+  `tearDown`) — only the new mid-OCR test picks a real photo through to
+  `PhotoProcessing`, whose `_PhotoThumbnail` renders a real `Image.file` of
+  it (an arbitrary byte sequence can hang the decoder instead of erroring
+  quickly, stalling `pumpAndSettle()` — same reasoning
+  `insertion_modal_photo_test.dart`'s own fixture comment already states).
+
+No new test file and no new fake classes were added — consistent with
+spec-3-4's own frozen boundary ("New tests live in
+`insertion_modal_audio_test.dart` ... no new test file, no new fake
+classes"), even though that boundary technically scoped 3.4's own
+development, not this later QA pass.
+
+## Coverage
+
+- Cross-tab cancel-safety, initial-op interruption (Recording/picker-call):
+  all four pairs (Áudio↔Texto, Foto↔Texto, Áudio↔Foto, Foto↔Áudio) ✅
+  pre-existing (3.2/3.3/3.4).
+- Cross-tab cancel-safety, **secondary-op interruption (transcription/OCR)
+  via the real dispatcher: Áudio→Foto ✅, Foto→Áudio ✅ (both added this
+  pass)**.
+- Galeria-specific mid-pick cancellation was considered and deliberately
+  **not** added: `PhotoEntryCubit.pickFromCamera()`/`pickFromGallery()`
+  both route through the same private `_pick()` helper
+  (`photo_entry_cubit.dart:148-150`) with no method-specific branching, so
+  a Galeria variant would exercise the identical code path the existing
+  Câmera-based tests already cover — redundant coverage, not a gap.
+- Implemented feature scope (per `sprint-status.yaml`): epics 1–2 (all
+  stories) and all of epic 3 (3.1–3.4) — all covered at this layer.
+  Epic 4+ are still `backlog`, out of scope for this pass.
+
+## Verification
+
+- `fvm flutter test test/features/capture/presentation/widgets/insertion_modal_photo_test.dart`
+  → 14/14 passing (run first, to confirm the mid-OCR gating technique this
+  pass reuses is sound before copying it)
+- `fvm flutter test test/features/capture/presentation/widgets/insertion_modal_audio_test.dart`
+  → 23/23 passing (21 pre-existing + 2 new)
+- `fvm flutter test` (full suite) → 558/558 passing
+- `fvm flutter analyze` → 0 issues
+
+## Next Steps
+
+- Epic 4 (chronological entry list, sync badges, entry detail) is the next
+  `backlog` epic — it will be the first to need a composition-root/
+  pipeline E2E-equivalent pass of its own once implemented, following the
+  same `<feature>_flow_e2e_test.dart` convention this file's Story
+  3.1–3.3 sections established.
+- The uncommitted working-tree changes this pass built on top of (3.4's
+  own code-review round) and this pass's own new tests are both still
+  uncommitted as of this entry — commit them together so this section
+  stops needing re-verification on the next pass.

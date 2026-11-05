@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/design_tokens.dart';
@@ -10,6 +11,26 @@ import '../../../../core/widgets/app_button.dart';
 import '../cubit/audio_entry_cubit.dart';
 import '../cubit/photo_entry_cubit.dart';
 import '../cubit/text_entry_cubit.dart';
+
+/// Drops focus *before* popping the sheet's route, for every dismissal
+/// path this widget triggers programmatically ("x", Salvar success) —
+/// root cause of the keyboard staying open over the Home screen after
+/// close (physical-device bug report): the previous fix only unfocused
+/// *after* `showModalBottomSheet`'s own `Future` resolved
+/// (`InsertionModal.show`), i.e. after `Navigator.pop()` had already
+/// started tearing the sheet's `TextField` down — on a physical iOS
+/// device that race loses often enough for the native keyboard's "hide"
+/// message to never reach the platform side, even though the
+/// `FocusNode`/`TextInputConnection` state Flutter itself tracks (and
+/// what `tester.testTextInput.isVisible` reads in a widget test) still
+/// looks correctly unfocused, which is why unit tests alone passed
+/// without the bug actually being fixed. Unfocusing first, while the
+/// field is still fully mounted and focused, gives the hide message a
+/// clean runway before the pop/teardown begins.
+void _unfocusAndPop(BuildContext context) {
+  FocusManager.instance.primaryFocus?.unfocus();
+  Navigator.of(context).pop();
+}
 
 /// The Insertion Modal — a 3-tab bottom sheet (Texto/Áudio/Foto) opened
 /// from the Home/Chat "+" control (`placeholder_screens.dart`). Texto,
@@ -59,6 +80,11 @@ class InsertionModal extends StatelessWidget {
       await showModalBottomSheet<void>(
         context: context,
         isScrollControlled: true,
+        // Without this, the sheet's max-height constraint is the full
+        // screen height including the status bar — with `isScrollControlled`
+        // letting it grow to content height, a tall keyboard + content
+        // combination pushed it up under the status bar/notch.
+        useSafeArea: true,
         barrierColor: DesignTokens.colorScrimHeavy,
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -69,6 +95,28 @@ class InsertionModal extends StatelessWidget {
           photoCubit: photoCubit,
         ),
       );
+      // Every dismissal path (Salvar success, "x", swipe-down, barrier tap)
+      // routes back through this single `await`. Salvar/"x" already
+      // unfocus *before* popping (`_unfocusAndPop`); swipe-down and
+      // barrier-tap pop directly inside `showModalBottomSheet`'s own
+      // drag/tap handling (`BottomSheet`'s `onClosing`), with no hook
+      // this widget can run *before* that pop. By the time this `await`
+      // resolves for either of those two paths, the sheet's `TextField`
+      // may already be mid-teardown — root cause of the bug report this
+      // fixes: on a physical iOS device, `FocusNode.unfocus()` alone
+      // only reliably hides the keyboard if the field's
+      // `TextInputConnection` is still intact at the moment it's called;
+      // past that point it can lose the race and leave the native
+      // keyboard on screen (reproduced only on hardware — the
+      // `TestWidgetsFlutterBinding` used under `flutter test` has no
+      // such race, which is why the previous attempt at this same fix
+      // passed its unit tests without the bug actually being fixed).
+      // `SystemChannels.textInput`'s own `TextInput.hide` call sidesteps
+      // that race entirely — it tells the platform embedder to hide the
+      // on-screen keyboard directly, independent of whether a Dart-side
+      // `TextInputConnection` is still attached.
+      FocusManager.instance.primaryFocus?.unfocus();
+      await SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
     } finally {
       // `showModalBottomSheet`'s own Future completes as soon as the
       // route is popped — *before* the exit (`reverse()`) animation the
@@ -296,16 +344,15 @@ class _InsertionModalBodyState extends State<_InsertionModalBody> {
       final previousTab = _lastAnnouncedTab;
       _lastAnnouncedTab = state.activeTab;
       _announce('Aba ${_tabLabels[state.activeTab]} selecionada');
-      // spec-3-2's Code Map: tab-switch detection also drives
-      // `AudioEntryCubit.startRecording()`/`.cancel()` — entering Áudio
-      // starts recording immediately (Acceptance Criteria), leaving it
-      // stops/releases the recorder (I/O matrix: "Leave tab
+      // Correction: entering Áudio used to call
+      // `AudioEntryCubit.startRecording()` immediately — the raw
+      // prototype's own `isAudioIdle` block shows a round microphone
+      // button and "Toque para gravar" first; recording only starts once
+      // the user taps it (`_AudioIdleView`'s own `onTap`). Leaving the
+      // tab still stops/releases the recorder (I/O matrix: "Leave tab
       // mid-recording"), never the full Story 3.4 cancel choreography.
-      final audioCubit = context.read<AudioEntryCubit>();
-      if (state.activeTab == CaptureTab.audio) {
-        unawaited(audioCubit.startRecording());
-      } else if (previousTab == CaptureTab.audio) {
-        unawaited(audioCubit.cancel());
+      if (previousTab == CaptureTab.audio) {
+        unawaited(context.read<AudioEntryCubit>().cancel());
       }
       // spec-3-3's Code Map: leaving Foto mid-pick/mid-OCR discards the
       // in-flight picker/OCR call (I/O matrix: "Leave tab mid-pick/OCR")
@@ -325,7 +372,7 @@ class _InsertionModalBodyState extends State<_InsertionModalBody> {
         unawaited(
           _announce('Registro salvo').then((_) {
             if (context.mounted) {
-              Navigator.of(context).pop();
+              _unfocusAndPop(context);
             }
           }),
         );
@@ -365,7 +412,7 @@ class _InsertionModalBodyState extends State<_InsertionModalBody> {
         unawaited(
           _announce('Registro salvo').then((_) {
             if (context.mounted) {
-              Navigator.of(context).pop();
+              _unfocusAndPop(context);
             }
           }),
         );
@@ -404,7 +451,7 @@ class _InsertionModalBodyState extends State<_InsertionModalBody> {
         unawaited(
           _announce('Registro salvo').then((_) {
             if (context.mounted) {
-              Navigator.of(context).pop();
+              _unfocusAndPop(context);
             }
           }),
         );
@@ -447,57 +494,90 @@ class _InsertionModalBodyState extends State<_InsertionModalBody> {
                         state is TextEntrySaving ||
                         isAudioSaving ||
                         isPhotoSaving;
-                    return Container(
-                      padding: DesignTokens.screenPadding,
-                      decoration: const BoxDecoration(
-                        color: DesignTokens.colorSurfaceElevated,
-                        borderRadius: BorderRadius.vertical(
-                          top: Radius.circular(DesignTokens.radiusLg),
+                    // Root cause: the sheet had no way to drop focus on
+                    // its own — the keyboard could only ever be
+                    // dismissed by closing the whole modal (Salvar, "x",
+                    // swipe, or barrier tap). `behavior: opaque` makes
+                    // this fire for a tap anywhere on the sheet,
+                    // including empty space around the tab bar/content —
+                    // a tap that also lands on the active `TextField` or
+                    // a button still reaches that widget's own handler
+                    // first (standard "tap outside to dismiss" idiom;
+                    // `unfocus()` racing with a field's own
+                    // focus-grab on the same tap is harmless).
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => FocusScope.of(context).unfocus(),
+                      child: Container(
+                        padding: DesignTokens.screenPadding,
+                        decoration: const BoxDecoration(
+                          color: DesignTokens.colorSurfaceElevated,
+                          borderRadius: BorderRadius.vertical(
+                            top: Radius.circular(DesignTokens.radiusLg),
+                          ),
+                          boxShadow: DesignTokens.elevation2,
                         ),
-                        boxShadow: DesignTokens.elevation2,
-                      ),
-                      child: Padding(
-                        // Keeps the Texto field clear of the on-screen
-                        // keyboard — the sheet is
-                        // `isScrollControlled: true`, so it already
-                        // grows to fit; this is the standard companion
-                        // fix for the keyboard inset itself.
-                        padding: EdgeInsets.only(
-                          bottom: MediaQuery.of(context).viewInsets.bottom,
-                        ),
-                        child: SafeArea(
-                          top: false,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.center,
-                                children: [
-                                  Expanded(
-                                    child: _TabBar(
-                                      activeTab: state.activeTab,
-                                      isSaving: isSaving,
+                        child: Padding(
+                          // Keeps the Texto field clear of the on-screen
+                          // keyboard — the sheet is
+                          // `isScrollControlled: true`, so it already
+                          // grows to fit; this is the standard companion
+                          // fix for the keyboard inset itself.
+                          padding: EdgeInsets.only(
+                            bottom: MediaQuery.of(context).viewInsets.bottom,
+                          ),
+                          child: SafeArea(
+                            top: false,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    // Correction: the prototype's own header
+                                    // markup puts "x" first, before the tab
+                                    // track — a previous pass placed it last,
+                                    // on the right.
+                                    _CloseButton(isSaving: isSaving),
+                                    const SizedBox(
+                                      width:
+                                          DesignTokens.insertionModalHeaderGap,
                                     ),
+                                    Expanded(
+                                      child: _TabBar(
+                                        activeTab: state.activeTab,
+                                        isSaving: isSaving,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: DesignTokens.spacingMd),
+                                // The tab bar above stays fixed; only the
+                                // active tab's own content scrolls. Without
+                                // this, the keyboard's `viewInsets.bottom`
+                                // (added above) plus a growing `TextField`
+                                // (`maxLines: null`) had no way to shrink,
+                                // overflowing the `Column` at the bottom and
+                                // pushing Salvar out of reach.
+                                Flexible(
+                                  child: SingleChildScrollView(
+                                    child: switch (state.activeTab) {
+                                      CaptureTab.texto => _TextoTab(
+                                        controller: _textController,
+                                        state: state,
+                                      ),
+                                      CaptureTab.audio => _AudioTab(
+                                        controller: _audioTextController,
+                                      ),
+                                      CaptureTab.foto => _FotoTab(
+                                        controller: _photoTextController,
+                                      ),
+                                    },
                                   ),
-                                  const SizedBox(width: DesignTokens.spacingSm),
-                                  _CloseButton(isSaving: isSaving),
-                                ],
-                              ),
-                              const SizedBox(height: DesignTokens.spacingMd),
-                              switch (state.activeTab) {
-                                CaptureTab.texto => _TextoTab(
-                                  controller: _textController,
-                                  state: state,
                                 ),
-                                CaptureTab.audio => _AudioTab(
-                                  controller: _audioTextController,
-                                ),
-                                CaptureTab.foto => _FotoTab(
-                                  controller: _photoTextController,
-                                ),
-                              },
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -535,21 +615,33 @@ class _TabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        for (var i = 0; i < _tabs.length; i++) ...[
-          Expanded(
-            child: _TabButton(
-              tab: _tabs[i].$1,
-              label: _tabs[i].$2,
-              isActive: _tabs[i].$1 == activeTab,
-              isSaving: isSaving,
+    // Correction: the prototype's own header wraps the 3 tabs in a
+    // light-gray pill-shaped track, not loose labels — a previous pass
+    // rendered the tabs directly in the header row with no track.
+    return Container(
+      padding: const EdgeInsets.all(DesignTokens.spacingXs),
+      decoration: const BoxDecoration(
+        color: DesignTokens.colorSurfaceBg,
+        borderRadius: BorderRadius.all(
+          Radius.circular(DesignTokens.insertionModalTabTrackRadius),
+        ),
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < _tabs.length; i++) ...[
+            Expanded(
+              child: _TabButton(
+                tab: _tabs[i].$1,
+                label: _tabs[i].$2,
+                isActive: _tabs[i].$1 == activeTab,
+                isSaving: isSaving,
+              ),
             ),
-          ),
-          if (i < _tabs.length - 1)
-            const SizedBox(width: DesignTokens.spacingSm),
+            if (i < _tabs.length - 1)
+              const SizedBox(width: DesignTokens.spacingXs),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
@@ -579,12 +671,15 @@ class _TabButton extends StatelessWidget {
       excludeSemantics: true,
       child: Material(
         color: isActive ? DesignTokens.colorPrimary : Colors.transparent,
+        // Correction: the prototype's own tab track renders each tab as a
+        // pill (`border-radius:999px`) inside the outer pill track, not
+        // a rounded rectangle — a previous pass used [radiusSm] here.
         borderRadius: const BorderRadius.all(
-          Radius.circular(DesignTokens.radiusSm),
+          Radius.circular(DesignTokens.insertionModalTabTrackRadius),
         ),
         child: InkWell(
           borderRadius: const BorderRadius.all(
-            Radius.circular(DesignTokens.radiusSm),
+            Radius.circular(DesignTokens.insertionModalTabTrackRadius),
           ),
           // Review finding: `null` while a save is in flight, same
           // "disabled `onTap` can never start a second, overlapping call"
@@ -636,12 +731,17 @@ class _CloseButton extends StatelessWidget {
         ),
         // I/O matrix: "Cancel before save" — closes/resets, never calls
         // `create` (this handler never touches the cubit at all).
-        onTap: isSaving ? null : () => Navigator.of(context).pop(),
+        onTap: isSaving ? null : () => _unfocusAndPop(context),
         child: SizedBox(
           width: DesignTokens.insertionModalTapTargetMin,
           height: DesignTokens.insertionModalTapTargetMin,
           child: Icon(
             Icons.close,
+            // Prototype: `ph-x` is `font-size:20px` ([dialogIconSize] —
+            // same icon-size token [ConfirmationDialog]'s own lock icon
+            // uses) — a previous pass left this at Material's 24dp
+            // default.
+            size: DesignTokens.dialogIconSize,
             color: isSaving
                 ? DesignTokens.colorTextSecondary
                 : DesignTokens.colorTextPrimary,
@@ -753,15 +853,21 @@ class _AudioTab extends StatelessWidget {
     return BlocBuilder<AudioEntryCubit, AudioCaptureState>(
       builder: (context, state) {
         return switch (state) {
-          AudioIdle() => const _AudioLoading(),
+          AudioIdle() => const _AudioIdleView(),
           AudioRecording(elapsedSeconds: final elapsed) => _AudioRecordingView(
             elapsedSeconds: elapsed,
           ),
-          AudioProcessing() => const _AudioProcessingView(),
-          AudioTranscribed(saving: final saving) => _AudioTranscribedView(
-            controller: controller,
-            saving: saving,
-          ),
+          AudioProcessing(durationSeconds: final durationSeconds) =>
+            _AudioProcessingView(durationSeconds: durationSeconds),
+          AudioTranscribed(
+            durationSeconds: final durationSeconds,
+            saving: final saving,
+          ) =>
+            _AudioTranscribedView(
+              controller: controller,
+              saving: saving,
+              durationSeconds: durationSeconds,
+            ),
           AudioError(
             path: final path,
             message: final message,
@@ -808,95 +914,199 @@ class _AudioLoading extends StatelessWidget {
 
 /// A fixed count of amplitude bars — a layout choice, not a visual value
 /// (color/font/spacing/radius) under RNF08, so it isn't a
-/// `design_tokens.dart` constant.
-const _waveformBarCount = 24;
+/// `design_tokens.dart` constant. 12 — `cerne-prototype.html`'s own
+/// `isAudioRecording` block: "animated 12-bar waveform" (correction; a
+/// previous pass used 24).
+const _waveformBarCount = 12;
+
+/// Formats a duration in whole seconds as a monospace `mm:ss` label —
+/// shared by the running recording timer ([_AudioRecordingView]) and the
+/// frozen "_ de áudio"/"áudio original · _" captions ([_AudioProcessingView],
+/// [_AudioTranscribedView]), all of which render the same shape of value.
+String _formatAudioDuration(int seconds) {
+  final minutes = (seconds ~/ 60).toString().padLeft(2, '0');
+  final remainingSeconds = (seconds % 60).toString().padLeft(2, '0');
+  return '$minutes:$remainingSeconds';
+}
+
+/// The Áudio tab's initial state (correction — previously skipped
+/// entirely in favor of auto-starting the recording on tab-select):
+/// `cerne-prototype.html`'s own `isAudioIdle` block, a round microphone
+/// button over "Toque para gravar"; tapping it is the only way
+/// recording starts.
+class _AudioIdleView extends StatelessWidget {
+  const _AudioIdleView();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingXl),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Semantics(
+            button: true,
+            label: 'Gravar áudio',
+            excludeSemantics: true,
+            child: InkWell(
+              borderRadius: const BorderRadius.all(
+                Radius.circular(DesignTokens.radiusFull),
+              ),
+              onTap: () => context.read<AudioEntryCubit>().startRecording(),
+              child: Container(
+                width: DesignTokens.audioRecordButtonSize,
+                height: DesignTokens.audioRecordButtonSize,
+                decoration: const BoxDecoration(
+                  color: DesignTokens.colorPrimary,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: const Icon(
+                  Icons.mic,
+                  size: DesignTokens.audioRecordButtonMicIconSize,
+                  color: DesignTokens.colorOnPrimary,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: DesignTokens.spacingMd),
+          Text(
+            'Toque para gravar',
+            style: DesignTokens.textBodyMd.copyWith(
+              color: DesignTokens.colorTextSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _AudioRecordingView extends StatelessWidget {
   const _AudioRecordingView({required this.elapsedSeconds});
 
   final int elapsedSeconds;
 
-  String get _formattedElapsed {
-    final minutes = (elapsedSeconds ~/ 60).toString().padLeft(2, '0');
-    final seconds = (elapsedSeconds % 60).toString().padLeft(2, '0');
-    return '$minutes:$seconds';
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _Waveform(
-          amplitudeStream: context.read<AudioEntryCubit>().amplitudeStream,
-          opacity: 1,
-        ),
-        const SizedBox(height: DesignTokens.spacingSm),
-        Text(
-          _formattedElapsed,
-          style: DesignTokens.textMonoCaption.copyWith(
-            color: DesignTokens.colorTextSecondary,
-          ),
-        ),
-        const SizedBox(height: DesignTokens.spacingMd),
-        Semantics(
-          button: true,
-          label: 'Parar gravação',
-          excludeSemantics: true,
-          child: InkWell(
-            borderRadius: const BorderRadius.all(
-              Radius.circular(DesignTokens.radiusFull),
-            ),
-            onTap: () => context.read<AudioEntryCubit>().stopRecording(),
-            child: Container(
-              width: DesignTokens.insertionModalTapTargetMin,
-              height: DesignTokens.insertionModalTapTargetMin,
-              decoration: const BoxDecoration(
-                color: DesignTokens.colorError,
-                shape: BoxShape.circle,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingXl),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Order matches `cerne-prototype.html`'s own `isAudioRecording`
+          // block: stop button, then waveform, then timer (correction; a
+          // previous pass rendered the button last).
+          Semantics(
+            button: true,
+            label: 'Parar gravação',
+            excludeSemantics: true,
+            child: InkWell(
+              borderRadius: const BorderRadius.all(
+                Radius.circular(DesignTokens.radiusFull),
               ),
-              alignment: Alignment.center,
-              child: const Icon(Icons.stop, color: DesignTokens.colorOnPrimary),
+              onTap: () => context.read<AudioEntryCubit>().stopRecording(),
+              child: Container(
+                width: DesignTokens.audioRecordButtonSize,
+                height: DesignTokens.audioRecordButtonSize,
+                decoration: const BoxDecoration(
+                  color: DesignTokens.colorError,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: const Icon(
+                  Icons.stop,
+                  size: DesignTokens.audioRecordButtonStopIconSize,
+                  color: DesignTokens.colorOnPrimary,
+                ),
+              ),
             ),
           ),
-        ),
-      ],
+          const SizedBox(height: DesignTokens.spacingMd),
+          _Waveform(
+            amplitudeStream: context.read<AudioEntryCubit>().amplitudeStream,
+            opacity: 1,
+          ),
+          const SizedBox(height: DesignTokens.spacingMd),
+          Text(
+            _formatAudioDuration(elapsedSeconds),
+            // Prototype: the running timer is `colorError` (the same red
+            // as the stop button), not the plain secondary-text color a
+            // previous pass used.
+            style: DesignTokens.textMonoCaption.copyWith(
+              color: DesignTokens.colorError,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _AudioProcessingView extends StatelessWidget {
-  const _AudioProcessingView();
+  const _AudioProcessingView({required this.durationSeconds});
+
+  final int durationSeconds;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Acceptance Criteria: "the waveform freezes at 35% opacity
-        // during processing" — no live `amplitudeStream` while stopped,
-        // so this renders a static bar pattern rather than the live
-        // recording's actual last shape (no audio-capture mock exists in
-        // prototype-extract.md to match pixel-for-pixel; Design Notes:
-        // decide and proceed).
-        const _Waveform(amplitudeStream: null, opacity: 0.35),
-        const SizedBox(height: DesignTokens.spacingSm),
-        Text(
-          'Transcrevendo áudio...',
-          style: DesignTokens.textBodyMd.copyWith(
-            color: DesignTokens.colorTextSecondary,
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingXl),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Order and content match `cerne-prototype.html`'s own
+          // `isAudioProcessing` block: spinner, "Transcrevendo...", the
+          // frozen/faded waveform, then the audio-duration caption — a
+          // previous pass dropped the spinner and the duration caption
+          // entirely.
+          const SizedBox(
+            width: DesignTokens.accountSettingsSavingIndicatorSize,
+            height: DesignTokens.accountSettingsSavingIndicatorSize,
+            child: CircularProgressIndicator(
+              color: DesignTokens.colorPrimary,
+              strokeWidth:
+                  DesignTokens.accountSettingsSavingIndicatorStrokeWidth,
+            ),
           ),
-        ),
-      ],
+          const SizedBox(height: DesignTokens.spacingSm),
+          Text(
+            'Transcrevendo áudio...',
+            style: DesignTokens.textBodyMd.copyWith(
+              color: DesignTokens.colorTextSecondary,
+            ),
+          ),
+          const SizedBox(height: DesignTokens.spacingMd),
+          // Acceptance Criteria: "the waveform freezes at 35% opacity
+          // during processing" — no live `amplitudeStream` while stopped,
+          // so this renders a static bar pattern rather than the live
+          // recording's actual last shape (no audio-capture mock exists in
+          // prototype-extract.md to match pixel-for-pixel; Design Notes:
+          // decide and proceed).
+          const _Waveform(amplitudeStream: null, opacity: 0.35),
+          const SizedBox(height: DesignTokens.spacingSm),
+          Text(
+            '${_formatAudioDuration(durationSeconds)} de áudio',
+            style: DesignTokens.textMonoCaption.copyWith(
+              color: DesignTokens.colorTextSecondary,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 class _AudioTranscribedView extends StatelessWidget {
-  const _AudioTranscribedView({required this.controller, required this.saving});
+  const _AudioTranscribedView({
+    required this.controller,
+    required this.saving,
+    required this.durationSeconds,
+  });
 
   final TextEditingController controller;
   final bool saving;
+  final int durationSeconds;
 
   @override
   Widget build(BuildContext context) {
@@ -937,6 +1147,16 @@ class _AudioTranscribedView extends StatelessWidget {
                 width: DesignTokens.borderWidthEmphasis,
               ),
             ),
+          ),
+        ),
+        const SizedBox(height: DesignTokens.spacingSm),
+        // Correction: the prototype's own `isAudioTranscribed` block shows
+        // the original audio duration ("áudio original · {{ duration }}")
+        // above Salvar — previously dropped entirely.
+        Text(
+          'áudio original · ${_formatAudioDuration(durationSeconds)}',
+          style: DesignTokens.textMonoCaption.copyWith(
+            color: DesignTokens.colorTextSecondary,
           ),
         ),
         const SizedBox(height: DesignTokens.spacingMd),
@@ -1100,7 +1320,7 @@ class _WaveformState extends State<_Waveform> {
     return Opacity(
       opacity: widget.opacity,
       child: SizedBox(
-        height: DesignTokens.spacing2xl,
+        height: DesignTokens.audioWaveformHeight,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -1108,17 +1328,23 @@ class _WaveformState extends State<_Waveform> {
             for (var i = 0; i < _samples.length; i++) ...[
               AnimatedContainer(
                 duration: DesignTokens.durationSheetUp,
-                width: DesignTokens.spacingXs,
-                height: DesignTokens.spacing2xl * _samples[i],
+                width: DesignTokens.audioWaveformBarWidth,
+                height: DesignTokens.audioWaveformHeight * _samples[i],
                 decoration: const BoxDecoration(
-                  color: DesignTokens.colorError,
+                  // Prototype: the bars themselves are `colorSecondary`
+                  // (olive green) — only the recording timer text is
+                  // `colorError` (correction; a previous pass swapped the
+                  // two). A small, fixed corner radius (not [radiusFull])
+                  // keeps every bar reading as a bar rather than a dot at
+                  // low amplitude.
+                  color: DesignTokens.colorSecondary,
                   borderRadius: BorderRadius.all(
-                    Radius.circular(DesignTokens.radiusFull),
+                    Radius.circular(DesignTokens.audioWaveformBarRadius),
                   ),
                 ),
               ),
               if (i < _samples.length - 1)
-                const SizedBox(width: DesignTokens.spacingXs),
+                const SizedBox(width: DesignTokens.audioWaveformBarGap),
             ],
           ],
         ),
@@ -1163,9 +1389,12 @@ class _FotoTab extends StatelessWidget {
   }
 }
 
-/// Câmera/Galeria capture buttons — [PhotoIdle]'s own rendering, and also
+/// Câmera/Galeria capture cards — [PhotoIdle]'s own rendering, and also
 /// reused by [_PhotoErrorView]'s `payloadTooLarge` branch (I/O matrix:
-/// "no action besides picking a different photo").
+/// "no action besides picking a different photo"). Correction:
+/// `cerne-prototype.html`'s own `isPhotoIdle` block renders two
+/// icon-over-label cards side by side, not the single icon above two
+/// text-only `AppButton`s a previous pass rendered.
 class _PhotoCaptureButtons extends StatelessWidget {
   const _PhotoCaptureButtons();
 
@@ -1173,34 +1402,19 @@ class _PhotoCaptureButtons extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: DesignTokens.spacingXl),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(
-            Icons.photo_camera_outlined,
-            size: DesignTokens.spacing2xl,
-            color: DesignTokens.colorTextSecondary,
+          _PhotoCaptureCard(
+            icon: Icons.photo_camera_outlined,
+            label: 'Câmera',
+            onTap: () => context.read<PhotoEntryCubit>().pickFromCamera(),
           ),
-          const SizedBox(height: DesignTokens.spacingMd),
-          Row(
-            children: [
-              Expanded(
-                child: AppButton(
-                  label: 'Câmera',
-                  onPressed: () =>
-                      context.read<PhotoEntryCubit>().pickFromCamera(),
-                ),
-              ),
-              const SizedBox(width: DesignTokens.spacingSm),
-              Expanded(
-                child: AppButton(
-                  label: 'Galeria',
-                  variant: AppButtonVariant.secondaryOutline,
-                  onPressed: () =>
-                      context.read<PhotoEntryCubit>().pickFromGallery(),
-                ),
-              ),
-            ],
+          const SizedBox(width: DesignTokens.photoCaptureCardGap),
+          _PhotoCaptureCard(
+            icon: Icons.image_outlined,
+            label: 'Galeria',
+            onTap: () => context.read<PhotoEntryCubit>().pickFromGallery(),
           ),
         ],
       ),
@@ -1208,20 +1422,75 @@ class _PhotoCaptureButtons extends StatelessWidget {
   }
 }
 
-/// A fixed thumbnail size — a layout choice, not a visual value (color/
-/// font/spacing/radius) under RNF08, so it isn't a `design_tokens.dart`
-/// constant (same rationale as `_waveformBarCount`).
-const _photoThumbnailHeight = DesignTokens.spacing2xl * 2;
+/// One Câmera/Galeria card — icon above label, the whole card tappable.
+class _PhotoCaptureCard extends StatelessWidget {
+  const _PhotoCaptureCard({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
 
-/// Renders the picked photo at [path] — shown while processing, while
-/// recognized (editable text below it), and for a save-failure error
-/// that still carries the photo. Never shown for `payloadTooLarge`/a
-/// generic OCR-call failure (no text yet to anchor it to), matching
-/// `_PhotoErrorView`'s own branches.
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: label,
+      excludeSemantics: true,
+      child: InkWell(
+        borderRadius: const BorderRadius.all(
+          Radius.circular(DesignTokens.radiusMd),
+        ),
+        onTap: onTap,
+        child: Container(
+          padding: DesignTokens.photoCaptureCardPadding,
+          decoration: const BoxDecoration(
+            color: DesignTokens.colorSurfaceBg,
+            borderRadius: BorderRadius.all(
+              Radius.circular(DesignTokens.radiusMd),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: DesignTokens.photoCaptureCardIconSize,
+                color: DesignTokens.colorPrimary,
+              ),
+              const SizedBox(height: DesignTokens.spacingSm),
+              Text(
+                label,
+                style: DesignTokens.textCaptionSm.copyWith(
+                  color: DesignTokens.colorTextPrimary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Renders the picked photo at [path] at a fixed [width]/[height] — shown
+/// while processing, while recognized (small, beside the editable text),
+/// and for a save-failure error that still carries the photo. Never shown
+/// for `payloadTooLarge`/a generic OCR-call failure (no text yet to anchor
+/// it to), matching `_PhotoErrorView`'s own branches.
 class _PhotoThumbnail extends StatelessWidget {
-  const _PhotoThumbnail({required this.path});
+  const _PhotoThumbnail({
+    required this.path,
+    required this.width,
+    required this.height,
+  });
 
   final String path;
+  final double width;
+  final double height;
 
   @override
   Widget build(BuildContext context) {
@@ -1231,13 +1500,15 @@ class _PhotoThumbnail extends StatelessWidget {
       ),
       child: Image.file(
         File(path),
-        height: _photoThumbnailHeight,
+        width: width,
+        height: height,
         fit: BoxFit.cover,
         // A deleted/unreadable temp file (edge case, never expected in
         // practice) must never crash the tab — falls back to a plain
         // placeholder rather than the framework's default red error box.
         errorBuilder: (context, error, stackTrace) => Container(
-          height: _photoThumbnailHeight,
+          width: width,
+          height: height,
           color: DesignTokens.colorBorder,
           alignment: Alignment.center,
           child: const Icon(
@@ -1260,7 +1531,11 @@ class _PhotoProcessingView extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _PhotoThumbnail(path: path),
+        _PhotoThumbnail(
+          path: path,
+          width: DesignTokens.photoThumbnailLargeWidth,
+          height: DesignTokens.photoThumbnailLargeHeight,
+        ),
         const SizedBox(height: DesignTokens.spacingMd),
         const SizedBox(
           width: DesignTokens.accountSettingsSavingIndicatorSize,
@@ -1300,43 +1575,60 @@ class _PhotoRecognizedView extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _PhotoThumbnail(path: path),
-        const SizedBox(height: DesignTokens.spacingMd),
-        TextField(
-          controller: controller,
-          enabled: !saving,
-          minLines: 3,
-          maxLines: null,
-          // Mirrors `POST /entries`'s own `content` cap, same as
-          // `_TextoTab`/`_AudioTranscribedView`.
-          maxLength: 20000,
-          onChanged: (value) =>
-              context.read<PhotoEntryCubit>().updateText(value),
-          style: DesignTokens.textBodyLg.copyWith(
-            color: DesignTokens.colorTextPrimary,
-          ),
-          decoration: const InputDecoration(
-            counterText: '',
-            contentPadding: DesignTokens.textFieldContentPadding,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.all(
-                Radius.circular(DesignTokens.radiusSm),
-              ),
-              borderSide: BorderSide(
-                color: DesignTokens.colorBorder,
-                width: DesignTokens.borderWidthDefault,
+        // Correction: `cerne-prototype.html`'s own `isPhotoRecognized`
+        // block shows a small thumbnail *beside* the extracted text, not
+        // stacked above a full-width one — the latter both mismatched the
+        // prototype and, stretched by this `Column`'s own
+        // `crossAxisAlignment.stretch`, was the "large preview" overflow
+        // this correction fixes.
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _PhotoThumbnail(
+              path: path,
+              width: DesignTokens.photoThumbnailSmallSize,
+              height: DesignTokens.photoThumbnailSmallSize,
+            ),
+            const SizedBox(width: DesignTokens.photoRecognizedGap),
+            Expanded(
+              child: TextField(
+                controller: controller,
+                enabled: !saving,
+                minLines: 3,
+                maxLines: null,
+                // Mirrors `POST /entries`'s own `content` cap, same as
+                // `_TextoTab`/`_AudioTranscribedView`.
+                maxLength: 20000,
+                onChanged: (value) =>
+                    context.read<PhotoEntryCubit>().updateText(value),
+                style: DesignTokens.textBodyLg.copyWith(
+                  color: DesignTokens.colorTextPrimary,
+                ),
+                decoration: const InputDecoration(
+                  counterText: '',
+                  contentPadding: DesignTokens.textFieldContentPadding,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.all(
+                      Radius.circular(DesignTokens.radiusSm),
+                    ),
+                    borderSide: BorderSide(
+                      color: DesignTokens.colorBorder,
+                      width: DesignTokens.borderWidthDefault,
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.all(
+                      Radius.circular(DesignTokens.radiusSm),
+                    ),
+                    borderSide: BorderSide(
+                      color: DesignTokens.colorPrimary,
+                      width: DesignTokens.borderWidthEmphasis,
+                    ),
+                  ),
+                ),
               ),
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.all(
-                Radius.circular(DesignTokens.radiusSm),
-              ),
-              borderSide: BorderSide(
-                color: DesignTokens.colorPrimary,
-                width: DesignTokens.borderWidthEmphasis,
-              ),
-            ),
-          ),
+          ],
         ),
         const SizedBox(height: DesignTokens.spacingMd),
         AppButton(
@@ -1368,7 +1660,11 @@ class _PhotoErrorView extends StatelessWidget {
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _PhotoThumbnail(path: state.path),
+            _PhotoThumbnail(
+              path: state.path,
+              width: DesignTokens.photoThumbnailLargeWidth,
+              height: DesignTokens.photoThumbnailLargeHeight,
+            ),
             const SizedBox(height: DesignTokens.spacingMd),
             const Icon(Icons.error_outline, color: DesignTokens.colorError),
             const SizedBox(height: DesignTokens.spacingSm),
@@ -1447,43 +1743,59 @@ class _PhotoErrorView extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _PhotoThumbnail(path: state.path),
-            const SizedBox(height: DesignTokens.spacingMd),
-            TextField(
-              controller: controller,
-              minLines: 3,
-              maxLines: null,
-              maxLength: 20000,
-              onChanged: (value) =>
-                  context.read<PhotoEntryCubit>().updateText(value),
-              style: DesignTokens.textBodyLg.copyWith(
-                color: DesignTokens.colorTextPrimary,
-              ),
-              decoration: const InputDecoration(
-                counterText: '',
-                contentPadding: DesignTokens.textFieldContentPadding,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.all(
-                    Radius.circular(DesignTokens.radiusSm),
-                  ),
-                  borderSide: BorderSide(
-                    color: DesignTokens.colorBorder,
-                    width: DesignTokens.borderWidthDefault,
+            // Same side-by-side layout as `_PhotoRecognizedView` — this
+            // branch is a save failure on otherwise-recognized text, not a
+            // distinct prototype state, so it keeps the small thumbnail
+            // rather than the full-width one that caused the overflow this
+            // correction fixes.
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _PhotoThumbnail(
+                  path: state.path,
+                  width: DesignTokens.photoThumbnailSmallSize,
+                  height: DesignTokens.photoThumbnailSmallSize,
+                ),
+                const SizedBox(width: DesignTokens.photoRecognizedGap),
+                Expanded(
+                  child: TextField(
+                    controller: controller,
+                    minLines: 3,
+                    maxLines: null,
+                    maxLength: 20000,
+                    onChanged: (value) =>
+                        context.read<PhotoEntryCubit>().updateText(value),
+                    style: DesignTokens.textBodyLg.copyWith(
+                      color: DesignTokens.colorTextPrimary,
+                    ),
+                    decoration: const InputDecoration(
+                      counterText: '',
+                      contentPadding: DesignTokens.textFieldContentPadding,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.all(
+                          Radius.circular(DesignTokens.radiusSm),
+                        ),
+                        borderSide: BorderSide(
+                          color: DesignTokens.colorBorder,
+                          width: DesignTokens.borderWidthDefault,
+                        ),
+                      ),
+                      // Review finding: missing here while
+                      // `_PhotoRecognizedView`'s otherwise-identical field
+                      // already has it — added for consistency.
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.all(
+                          Radius.circular(DesignTokens.radiusSm),
+                        ),
+                        borderSide: BorderSide(
+                          color: DesignTokens.colorPrimary,
+                          width: DesignTokens.borderWidthEmphasis,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-                // Review finding: missing here while
-                // `_PhotoRecognizedView`'s otherwise-identical field
-                // already has it — added for consistency.
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.all(
-                    Radius.circular(DesignTokens.radiusSm),
-                  ),
-                  borderSide: BorderSide(
-                    color: DesignTokens.colorPrimary,
-                    width: DesignTokens.borderWidthEmphasis,
-                  ),
-                ),
-              ),
+              ],
             ),
             const SizedBox(height: DesignTokens.spacingSm),
             Text(

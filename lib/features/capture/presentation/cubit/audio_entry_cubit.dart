@@ -18,9 +18,12 @@ sealed class AudioCaptureState {
   const AudioCaptureState();
 }
 
-/// The state immediately after the modal opens on the Áudio tab exits
-/// (Never: this story's trivial cross-tab case), and the state a fresh
-/// `AudioEntryCubit` always starts in.
+/// The state a fresh `AudioEntryCubit` always starts in, and the state
+/// reached after leaving the tab mid-recording (`cancel()`). Rendered by
+/// `InsertionModal`'s own `_AudioIdleView` as the prototype's round
+/// microphone button over "Toque para gravar" — [AudioEntryCubit.
+/// startRecording] only ever runs once the user taps it (correction:
+/// entering the tab previously called it automatically).
 class AudioIdle extends AudioCaptureState {
   const AudioIdle();
 }
@@ -146,10 +149,11 @@ class AudioEntryCubit extends Cubit<AudioCaptureState> {
   /// itself (Boundaries).
   Stream<double> get amplitudeStream => _micRecorder.amplitudeStream;
 
-  /// Starts recording — called from `InsertionModal`'s tab-switch
-  /// listener the instant the Áudio tab becomes active (Acceptance
-  /// Criteria: "recording starts immediately"), and again by [retry] when
-  /// the last attempt failed before any file ever existed (permission
+  /// Starts recording — called from `InsertionModal`'s own
+  /// `_AudioIdleView` the moment the user taps the idle mic button
+  /// (correction: a previous pass called this automatically from the
+  /// tab-switch listener instead), and again by [retry] when the last
+  /// attempt failed before any file ever existed (permission
   /// denied). Ignored while a recording is already in progress, and —
   /// Review finding — ignored once the pipeline has moved past recording
   /// ([AudioProcessing]/[AudioTranscribed]/an [AudioError] that still

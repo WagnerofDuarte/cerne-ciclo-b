@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -30,6 +31,24 @@ const _savedEntry = Entry(
   updatedAt: '2026-01-01T00:00:00Z',
   mediaDurationSeconds: 7,
 );
+
+/// A minimal valid 1x1 transparent PNG (same bytes
+/// `insertion_modal_photo_test.dart` uses) — only this file's own
+/// "Foto→Áudio mid-OCR" test needs a real picked photo on disk, since
+/// `_PhotoProcessingView` renders a real `Image.file` of it and an
+/// arbitrary byte sequence can hang the decoder instead of erroring
+/// quickly, stalling `pumpAndSettle()`.
+const _validPng1x1 = <int>[
+  0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, //
+  0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, //
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, //
+  0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, //
+  0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, //
+  0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, //
+  0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, //
+  0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, //
+  0x42, 0x60, 0x82, //
+];
 
 /// Scriptable fakes (not mocktail — same "plain fake" convention
 /// `insertion_modal_test.dart`'s own `_FakeEntriesRepository` already
@@ -68,8 +87,20 @@ class _FakeMicRecorder implements MicRecorder {
 class _FakeAudioTranscriber implements AudioTranscriber {
   String? nextTranscription;
 
+  /// Lets a test hold `transcribe()` unresolved, to simulate leaving the
+  /// Áudio tab (via a tab switch) while on-device transcription is still
+  /// running — same gate convention `_FakePhotoPicker.cameraGate` above
+  /// already uses. `null` (the default) resolves immediately.
+  Completer<void>? transcribeGate;
+
   @override
-  Future<String?> transcribe(String audioPath) async => nextTranscription;
+  Future<String?> transcribe(String audioPath) async {
+    final activeGate = transcribeGate;
+    if (activeGate != null) {
+      await activeGate.future;
+    }
+    return nextTranscription;
+  }
 }
 
 /// `pickFromGallery` stays a trivial "never expected to be called" fake —
@@ -91,6 +122,14 @@ class _FakePhotoPicker implements PhotoPicker {
   Future<PickedPhoto?> pickFromCamera() async {
     cameraCalls++;
     final activeGate = cameraGate;
+    // Review finding: stays loud by default (unlike `pickFromGallery`'s
+    // unconditional throw, every other test in this file still gets that
+    // same "not expected to be called" safety net) — only a test that
+    // explicitly configures `cameraGate`/`nextCameraResult` opts into the
+    // configurable behavior spec-3-4's cross-tab tests need.
+    if (activeGate == null && nextCameraResult == null) {
+      throw UnimplementedError('not expected to be called');
+    }
     if (activeGate != null) {
       await activeGate.future;
     }
@@ -103,11 +142,22 @@ class _FakePhotoPicker implements PhotoPicker {
 }
 
 class _FakeMediaRepository implements MediaRepository {
+  Either<Failure, OcrResult> Function()? nextResult;
+
   @override
   Future<Either<Failure, OcrResult>> recognizeText({
     required Uint8List imageBytes,
     required String mimeType,
-  }) async => throw UnimplementedError('not expected to be called');
+  }) async {
+    // Stays loud by default (same convention `_FakePhotoPicker.
+    // pickFromCamera()` above restores) — only spec-3-4's "Foto→Áudio
+    // mid-OCR" test configures `nextResult`; no other test in this file
+    // ever lets a pick reach OCR.
+    if (nextResult == null) {
+      throw UnimplementedError('not expected to be called');
+    }
+    return nextResult!();
+  }
 }
 
 class _FakeEntriesRepository implements EntriesRepository {
@@ -170,23 +220,37 @@ Future<void> _openModal(
 /// spec-3-2's own I/O & Edge-Case Matrix — only the two native-package
 /// ports are faked (see the classes above). `PhotoEntryCubit` is a fresh
 /// instance, left unconfigured by every test except spec-3-4's own
-/// cross-tab tests below, which do switch to the Foto tab and configure
-/// `_FakePhotoPicker.nextCameraResult`/`cameraGate` to drive an in-flight
-/// Câmera pick; `pickFromGallery()` stays untouched throughout — no test
-/// in this file, including spec-3-4's, ever taps Galeria.
+/// cross-tab tests below — two of which (Foto→Áudio mid-pick, and the
+/// chained test) switch to the Foto tab and configure
+/// `_FakePhotoPicker.cameraGate` to drive an in-flight Câmera pick; the
+/// third (Áudio→Foto mid-recording) switches to an idle Foto tab without
+/// configuring either picker field. `pickFromGallery()` stays untouched
+/// throughout — no test in this file, including spec-3-4's, ever taps
+/// Galeria.
 void main() {
   late _FakeMicRecorder fakeMicRecorder;
   late _FakeAudioTranscriber fakeAudioTranscriber;
   late _FakePhotoPicker fakePhotoPicker;
+  late _FakeMediaRepository fakeMediaRepository;
   late _FakeEntriesRepository fakeRepository;
   late TextEntryCubit textCubit;
   late AudioEntryCubit audioCubit;
   late PhotoEntryCubit photoCubit;
+  late Directory tempDir;
+  late File photoFile;
 
   setUp(() {
+    // Only this file's own "Foto→Áudio mid-OCR" test ever picks a real
+    // photo through to `PhotoProcessing` — every other test either never
+    // touches Foto or (spec-3-4's mid-pick tests) switches away before
+    // the picker call itself resolves.
+    tempDir = Directory.systemTemp.createTempSync('cerne_test_audio_modal_');
+    photoFile = File('${tempDir.path}/foto.png')
+      ..writeAsBytesSync(_validPng1x1);
     fakeMicRecorder = _FakeMicRecorder();
     fakeAudioTranscriber = _FakeAudioTranscriber();
     fakePhotoPicker = _FakePhotoPicker();
+    fakeMediaRepository = _FakeMediaRepository();
     fakeRepository = _FakeEntriesRepository();
     textCubit = TextEntryCubit(fakeRepository);
     audioCubit = AudioEntryCubit(
@@ -196,7 +260,7 @@ void main() {
     );
     photoCubit = PhotoEntryCubit(
       fakePhotoPicker,
-      _FakeMediaRepository(),
+      fakeMediaRepository,
       fakeRepository,
     );
   });
@@ -228,12 +292,15 @@ void main() {
     if (!photoCubit.isClosed) {
       await photoCubit.close();
     }
+    if (tempDir.existsSync()) {
+      tempDir.deleteSync(recursive: true);
+    }
   });
 
   testWidgets(
-    'Happy path: switching to Áudio starts recording immediately with a '
-    'running timer; stopping transcribes; Salvar fires source: audio + '
-    'mediaDurationSeconds and closes the modal',
+    'Happy path: Áudio opens on the idle mic button; tapping it starts '
+    'recording with a running timer; stopping transcribes; Salvar fires '
+    'source: audio + mediaDurationSeconds and closes the modal',
     (tester) async {
       fakeRepository.nextResult = () => right(_savedEntry);
       fakeMicRecorder.nextStopResult = const MicRecording(
@@ -250,6 +317,15 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Áudio'));
+      await tester.pumpAndSettle();
+
+      // Correction: entering the tab shows the idle mic button first
+      // (`cerne-prototype.html`'s own `isAudioIdle` block) — recording
+      // never starts on its own.
+      expect(find.text('Toque para gravar'), findsOneWidget);
+      expect(fakeMicRecorder.startCalls, 0);
+
+      await tester.tap(find.byIcon(Icons.mic));
       // A single `pump()`, never `pumpAndSettle()`, from here until the
       // recording stops below — `AudioEntryCubit`'s own 1-second
       // `Timer.periodic` (the elapsed-time ticker) never produces a
@@ -278,10 +354,48 @@ void main() {
   );
 
   testWidgets(
-    'An amplitudeStream error while recording never escapes uncaught — '
-    'the waveform just stays frozen on its last sample (Review finding: '
-    'the real MicRecorder.amplitudeStream can surface a native-side '
-    'error, which _Waveform guards with onError)',
+    'Correction: Processando shows a spinner + "_ de áudio" caption, and '
+    'Transcrito shows the original "áudio original · _" duration — both '
+    'previously missing entirely',
+    (tester) async {
+      fakeMicRecorder.nextStopResult = const MicRecording(
+        path: '/tmp/a.wav',
+        durationSeconds: 42,
+      );
+      fakeAudioTranscriber.nextTranscription = 'Hoje foi um bom dia.';
+      fakeAudioTranscriber.transcribeGate = Completer<void>();
+      await _openModal(
+        tester,
+        cubit: textCubit,
+        audioCubit: audioCubit,
+        photoCubit: photoCubit,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Áudio'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.mic));
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.stop));
+      // Only a `pump()` — `transcribeGate` holds `transcribe()` unresolved
+      // so `AudioProcessing`'s own build stays observable, same
+      // convention as this file's other gated tests.
+      await tester.pump();
+
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('00:42 de áudio'), findsOneWidget);
+
+      fakeAudioTranscriber.transcribeGate!.complete();
+      await tester.pumpAndSettle();
+
+      expect(find.text('áudio original · 00:42'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'An amplitudeStream error while recording never escapes uncaught, and '
+    'the waveform keeps its last pre-error bar height (Review finding: the '
+    'real MicRecorder.amplitudeStream can surface a native-side error, '
+    'which _Waveform guards with onError)',
     (tester) async {
       final amplitudeController = StreamController<double>();
       fakeMicRecorder.amplitudeController = amplitudeController;
@@ -294,17 +408,30 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Áudio'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.mic));
       // Never `pumpAndSettle()` here — see the happy path test's own
       // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
       await tester.pump();
       amplitudeController.add(0.6);
       await tester.pump();
 
+      final heightBeforeError = tester
+          .getSize(find.byType(AnimatedContainer).last)
+          .height;
+
       amplitudeController.addError(Exception('native amplitude failure'));
       // If `onError` were ever dropped, this `pump()` is where the
       // uncaught stream error would surface as a failed test.
       await tester.pump();
 
+      // The waveform's last bar keeps the pre-error sample instead of
+      // resetting (Review finding: the previous version of this test only
+      // checked the elapsed-timer label, never the waveform itself).
+      expect(
+        tester.getSize(find.byType(AnimatedContainer).last).height,
+        heightBeforeError,
+      );
       expect(find.text('00:00'), findsOneWidget);
 
       // Ends mid-recording — same cleanup as the other mid-recording
@@ -329,6 +456,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Áudio'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.mic));
     // Never `pumpAndSettle()` here — see the happy path test's own
     // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
     await tester.pump();
@@ -372,6 +501,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Áudio'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.mic));
     // Never `pumpAndSettle()` here — see the happy path test's own
     // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
     await tester.pump();
@@ -411,6 +542,8 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Áudio'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.mic));
       // Never `pumpAndSettle()` here — see the happy path test's own
       // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
       await tester.pump();
@@ -442,6 +575,8 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Áudio'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.mic));
       // Never `pumpAndSettle()` here — see the happy path test's own
       // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
       await tester.pump();
@@ -468,6 +603,8 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Áudio'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.mic));
       // Never `pumpAndSettle()` here — see the happy path test's own
       // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
       await tester.pump();
@@ -481,7 +618,7 @@ void main() {
 
       expect(fakeMicRecorder.cancelCalls, 1);
       // Foto shows its idle capture buttons — nothing auto-started on
-      // entry (unlike Áudio, which auto-starts recording on entry).
+      // entry (same as Áudio now: both tabs wait for an explicit tap).
       expect(find.text('Câmera'), findsOneWidget);
       expect(find.text('Galeria'), findsOneWidget);
       expect(fakeRepository.createCallCount, 0);
@@ -490,8 +627,8 @@ void main() {
   );
 
   testWidgets(
-    'Story 3.4: Foto→Áudio mid-pick switch discards the pick and starts '
-    'recording immediately',
+    'Story 3.4: Foto→Áudio mid-pick switch discards the pick; Áudio is '
+    'ready to record',
     (tester) async {
       fakePhotoPicker.cameraGate = Completer<void>();
       await _openModal(
@@ -510,11 +647,17 @@ void main() {
       // `insertion_modal_photo_test.dart`'s own "Leave tab mid-pick"
       // test avoids this same way.
       await tester.pump();
+      // Confirms the pick actually started before the interrupting
+      // switch below — otherwise "mid-pick" would rest only on the gate
+      // `Completer`'s existence, not an observed call.
+      expect(fakePhotoPicker.cameraCalls, 1);
 
       await tester.tap(find.text('Áudio'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.mic));
       await tester.pump();
 
-      // Recording starts immediately despite the still-pending pick.
+      // Recording starts despite the still-pending pick.
       expect(fakeMicRecorder.startCalls, 1);
       expect(fakeRepository.createCallCount, 0);
 
@@ -550,6 +693,8 @@ void main() {
 
       // Record audio.
       await tester.tap(find.text('Áudio'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.mic));
       await tester.pump();
       expect(fakeMicRecorder.startCalls, 1);
       expect(fakeRepository.createCallCount, 0);
@@ -563,6 +708,9 @@ void main() {
       // Start a photo pick (held in flight by the gate).
       await tester.tap(find.text('Câmera'));
       await tester.pump();
+      // Confirms the pick actually started before the interrupting
+      // switch below.
+      expect(fakePhotoPicker.cameraCalls, 1);
       expect(fakeRepository.createCallCount, 0);
 
       // Switch to Texto — cancels/discards the still-in-flight pick.
@@ -596,6 +744,127 @@ void main() {
     },
   );
 
+  testWidgets(
+    'Story 3.4: Áudio→Foto switch mid-transcription cancels the pending '
+    'transcription, never auto-starts anything on Foto (the cross-tab '
+    'rule exercised above only ever interrupted AudioRecording — the mic '
+    'has already stopped by this point, only the on-device transcription '
+    'result is still pending)',
+    (tester) async {
+      fakeMicRecorder.nextStopResult = const MicRecording(
+        path: '/tmp/a.wav',
+        durationSeconds: 7,
+      );
+      fakeAudioTranscriber.transcribeGate = Completer<void>();
+      await _openModal(
+        tester,
+        cubit: textCubit,
+        audioCubit: audioCubit,
+        photoCubit: photoCubit,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Áudio'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.mic));
+      // Never `pumpAndSettle()` here — see the happy path test's own
+      // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.stop));
+      // Only a `pump()` — the gate above holds `transcribe()` unresolved,
+      // same convention as this file's own `cameraGate`.
+      await tester.pump();
+
+      // Confirms transcription actually started before the interrupting
+      // switch below — `stopRecording()` emits `AudioProcessing` before
+      // awaiting the (now-gated) transcriber.
+      expect(audioCubit.state, isA<AudioProcessing>());
+      expect(fakeRepository.createCallCount, 0);
+
+      await tester.tap(find.text('Foto'));
+      await tester.pumpAndSettle();
+
+      // `cancel()` reset the cubit back to idle instead of leaving it
+      // stuck mid-transcription.
+      expect(audioCubit.state, isA<AudioIdle>());
+      // Foto shows its idle capture buttons — nothing auto-started on
+      // entry.
+      expect(find.text('Câmera'), findsOneWidget);
+      expect(find.text('Galeria'), findsOneWidget);
+      expect(fakeRepository.createCallCount, 0);
+
+      // Flushes the now-abandoned transcription so nothing is left
+      // dangling past this test — its eventual result must be a no-op,
+      // never resurrecting the already-reset Áudio tab (same hygiene the
+      // chained test's own `cameraGate!.complete()` uses).
+      fakeAudioTranscriber.transcribeGate!.complete();
+      await tester.pump();
+
+      expect(audioCubit.state, isA<AudioIdle>());
+      expect(fakeRepository.createCallCount, 0);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Story 3.4: Foto→Áudio switch mid-OCR discards the pending OCR '
+    'result; Áudio is then ready to record (the cross-tab rule '
+    'exercised above only ever interrupted the picker call itself — '
+    'here the picker has already resolved into `PhotoProcessing` and OCR '
+    'is the pending async op left to cancel; same technique '
+    '`insertion_modal_photo_test.dart`\'s own "canceling mid-pick (tab '
+    'switch away while PhotoProcessing)" test already uses to reach that '
+    'state deterministically)',
+    (tester) async {
+      fakePhotoPicker.nextCameraResult = PickedPhoto(
+        path: photoFile.path,
+        mimeType: 'image/png',
+      );
+      // Never resolved in this test: the tab switch below cancels before
+      // OCR's result would matter, same as that mirrored test's own
+      // unconfigured `fakeMediaRepository`.
+      fakePhotoPicker.cameraGate = Completer<void>();
+      await _openModal(
+        tester,
+        cubit: textCubit,
+        audioCubit: audioCubit,
+        photoCubit: photoCubit,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Foto'));
+      await tester.pumpAndSettle();
+
+      unawaited(photoCubit.pickFromCamera());
+      await tester.pump();
+      fakePhotoPicker.cameraGate!.complete();
+      // Two pumps (not `pumpAndSettle()`, which would never settle while
+      // `PhotoProcessing`'s `CircularProgressIndicator` keeps rescheduling
+      // frames) — the first resolves the real `File.readAsBytes()` call,
+      // the second lets `PhotoProcessing`'s build land.
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Reconhecendo texto...'), findsOneWidget);
+      expect(fakeRepository.createCallCount, 0);
+
+      await tester.tap(find.text('Áudio'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.mic));
+      await tester.pump();
+
+      // Recording starts despite the still-pending OCR.
+      expect(fakeMicRecorder.startCalls, 1);
+      expect(photoCubit.state, isA<PhotoIdle>());
+      expect(fakeRepository.createCallCount, 0);
+
+      // Ends mid-recording — see the happy path test's own comment on
+      // `AudioEntryCubit`'s 1-second elapsed-time ticker.
+      await audioCubit.cancel();
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('the transcribed text is editable before Salvar', (tester) async {
     fakeMicRecorder.nextStopResult = const MicRecording(
       path: '/tmp/a.wav',
@@ -611,6 +880,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Áudio'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.mic));
     // Never `pumpAndSettle()` here — see the happy path test's own
     // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
     await tester.pump();
@@ -645,6 +916,8 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Áudio'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.mic));
       await tester.pump();
       await tester.tap(find.byIcon(Icons.stop));
       await tester.pumpAndSettle();
@@ -655,9 +928,11 @@ void main() {
       await tester.tap(find.text('Áudio'));
       await tester.pumpAndSettle();
 
-      // Still showing the earlier transcription — no second recording
-      // session started (startCalls stays at 1), and nothing was
-      // discarded.
+      // Still showing the earlier transcription — re-entering never
+      // shows the idle mic button again (`canStart` only matches
+      // `AudioIdle`/a file-less `AudioError`, neither of which this is),
+      // so no second recording session started (startCalls stays at 1),
+      // and nothing was discarded.
       expect(find.text('texto transcrito original'), findsOneWidget);
       expect(fakeMicRecorder.startCalls, 1);
     },
@@ -682,6 +957,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Áudio'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.mic));
       await tester.pump();
       await tester.tap(find.byIcon(Icons.stop));
       await tester.pumpAndSettle();
@@ -718,6 +995,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Áudio'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.mic));
     await tester.pump();
     await tester.tap(find.byIcon(Icons.stop));
     await tester.pumpAndSettle();
@@ -752,6 +1031,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Áudio'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.mic));
       await tester.pump();
       await tester.tap(find.byIcon(Icons.stop));
       await tester.pumpAndSettle();
@@ -793,6 +1074,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Áudio'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.mic));
     // Never `pumpAndSettle()` here — see the happy path test's own
     // comment on `AudioEntryCubit`'s 1-second elapsed-time ticker.
     await tester.pump();
@@ -821,6 +1104,8 @@ void main() {
         await tester.pumpAndSettle();
 
         await tester.tap(find.text('Áudio'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byIcon(Icons.mic));
         await tester.pump();
 
         expect(announcements, contains('Gravando áudio'));
@@ -849,6 +1134,8 @@ void main() {
           );
           await tester.pumpAndSettle();
           await tester.tap(find.text('Áudio'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byIcon(Icons.mic));
           await tester.pump();
 
           await tester.tap(find.byIcon(Icons.stop));
@@ -879,6 +1166,8 @@ void main() {
         );
         await tester.pumpAndSettle();
         await tester.tap(find.text('Áudio'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byIcon(Icons.mic));
         await tester.pump();
         await tester.tap(find.byIcon(Icons.stop));
         await tester.pumpAndSettle();
@@ -907,6 +1196,8 @@ void main() {
         );
         await tester.pumpAndSettle();
         await tester.tap(find.text('Áudio'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byIcon(Icons.mic));
         await tester.pump();
         await tester.tap(find.byIcon(Icons.stop));
         await tester.pumpAndSettle();
@@ -938,6 +1229,8 @@ void main() {
           );
           await tester.pumpAndSettle();
           await tester.tap(find.text('Áudio'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byIcon(Icons.mic));
           await tester.pump();
           await tester.tap(find.byIcon(Icons.stop));
           await tester.pumpAndSettle();
@@ -971,6 +1264,8 @@ void main() {
           );
           await tester.pumpAndSettle();
           await tester.tap(find.text('Áudio'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byIcon(Icons.mic));
           await tester.pump();
 
           await tester.tap(find.text('Texto'));
