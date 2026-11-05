@@ -10,15 +10,30 @@ import '../../../../core/design_tokens.dart';
 /// `EntriesSearchCubit.onQueryChanged` directly on every keystroke — there
 /// is no submit button anywhere on this widget, by design (Boundaries).
 ///
-/// The trailing funnel (`Icons.filter_list`) button is a no-op this story
-/// (Boundaries/Never: filters are spec-5-2) — still sized to the shared
-/// 44pt minimum tap target (`insertionModalTapTargetMin`, UX-DR23) so it
-/// reads as a real, future-functional control rather than a disabled
-/// placeholder.
+/// spec-5-2: the trailing funnel (`Icons.filter_list`) button now opens
+/// the filter sheet via [onFilterTap] (`MeusRegistrosScreen`'s own
+/// `EntriesFilterSheet.show()` call replaces the former no-op
+/// `onPressed: () {}`) — still sized to the shared 44pt minimum tap
+/// target (`insertionModalTapTargetMin`, UX-DR23). [hasActiveFilters]
+/// fills it (`colorPrimary` instead of the resting `colorTextSecondary`)
+/// whenever any filter is active (Boundaries: "fills the funnel icon").
 class EntriesSearchBar extends StatelessWidget {
-  const EntriesSearchBar({required this.onChanged, super.key});
+  const EntriesSearchBar({
+    required this.onChanged,
+    required this.onFilterTap,
+    this.hasActiveFilters = false,
+    super.key,
+  });
 
   final ValueChanged<String> onChanged;
+
+  /// spec-5-2 — opens the filter sheet.
+  final VoidCallback onFilterTap;
+
+  /// spec-5-2 — `true` whenever `MeusRegistrosCubit.hasActiveFilters` is
+  /// true; defaults `false` so this widget still renders sensibly for any
+  /// caller that has no filter state of its own to report.
+  final bool hasActiveFilters;
 
   @override
   Widget build(BuildContext context) {
@@ -29,9 +44,7 @@ class EntriesSearchBar extends StatelessWidget {
         boxShadow: DesignTokens.elevation1,
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: DesignTokens.spacingMd,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: DesignTokens.spacingMd),
         child: Row(
           children: [
             Expanded(
@@ -53,20 +66,20 @@ class EntriesSearchBar extends StatelessWidget {
                 ),
               ),
             ),
-            // spec-5-1 Boundaries: a no-op this story — filters land in
-            // spec-5-2.
             SizedBox(
               width: DesignTokens.insertionModalTapTargetMin,
               height: DesignTokens.insertionModalTapTargetMin,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                onPressed: () {},
+                onPressed: onFilterTap,
                 // Review finding: an unlabeled icon-only button gives a
                 // screen-reader user no indication of its purpose.
                 tooltip: 'Filtros',
-                icon: const Icon(
+                icon: Icon(
                   Icons.filter_list,
-                  color: DesignTokens.colorTextSecondary,
+                  color: hasActiveFilters
+                      ? DesignTokens.colorPrimary
+                      : DesignTokens.colorTextSecondary,
                 ),
               ),
             ),

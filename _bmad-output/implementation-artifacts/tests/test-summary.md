@@ -2,94 +2,36 @@
 
 ## Scope
 
-Story 4.4 (entry detail view) adds `EntriesRepository.getById` — the
-repository's third and last method (AD-11) — reached through a new
-`EntriesRemoteDataSource.get` -> `ApiClient` -> real `Dio`/interceptors ->
-real `entries` Hive box path, exactly the kind of new real-pipeline
-surface the prior (spec-4-3) run's own "Next Steps" flagged for this story
-to re-check.
+Story 5.1 (semantic search with debounced input) moved to `done`, including an uncommitted round-2 review patch (`search()`'s own de-dupe, a `MeusRegistrosScreen` skeleton-arm fix, and a cubit recovery test). Cross-checking every I/O-matrix row, acceptance criterion, and round-2 review finding against the existing suite found the feature's own test coverage (cubit, data source, repository, widget, e2e) already comprehensive — six scenarios, both round-1 and round-2 regressions, all exercised. Two concrete gaps remained, both tied directly to the uncommitted patch rather than to the story's original scope:
 
-Review findings (round 2) also added/changed coverage beyond the story's
-own scope:
+1. The patch's `initState` fix in `meus_registros_screen.dart` (arms the search skeleton when `EntriesSearchCubit` — a DI singleton — is already `ResourceLoading` at remount) had no test anywhere; every existing "slow request" case only starts a search *after* mount.
+2. The patch's extraction of `dedupedById<T>()` into `lib/core/utils/deduped_by_id.dart` (shared by `MeusRegistrosCubit` and `EntriesRepositoryImpl.search()`) left the new generic untested in isolation — both callers' own tests only exercise it indirectly through their own `Entry`/`EntryDto` call sites.
 
-- `EntryDetailCubit`'s `SessionStatus` composition was restructured to
-  fold into the sealed `EntryDetailState` itself (previously a side
-  field) — covered by new/updated tests in `entry_detail_cubit_test.dart`,
-  including a case where the session expires while a `getById` fetch is
-  still in flight (previously untested).
-- A debounce guard on `EntryRecordCard`'s new `onTap` (a rapid double-tap
-  could stack two pushes of the same detail route) — covered by a new
-  widget test in `meus_registros_screen_test.dart`.
-- A widget test asserting a tap landing specifically inside the card's
-  colored spine strip (not just the content text) still calls `onTap` —
-  guards the round-1 "whole-card tappable area" fix against regression.
-- Two new `app_router_test.dart` cases proving the nested
-  `/meus-registros/:id` route is gated by the shared `_redirect` the same
-  as any other destination: bounced to `/auth` while `unauthenticated`,
-  and never navigated away from while `expired` mid-session.
+Two items the spec's own round-2 review explicitly deferred (Dynamic Type coverage for `EntriesSearchBar`; the DTO→Entity mapping exception-safety gap in `list()`/`getById()`/`search()`) are left alone — both are pre-existing, feature-wide gaps the spec itself scoped out of this story, not something to fold in silently here.
 
 ## Generated Tests
 
-### E2E Tests
+### Widget test (screen-level regression guard)
 
-- [x] `test/features/entries/entry_detail_flow_e2e_test.dart` — drives the
-  real DI-resolved `EntriesRepository.getById` through real
-  `Dio`/interceptors and a real `entries` Hive box, answering the prior
-  run's own open question:
-  - Happy path: `getById()` fires one real GET to `entries-get/{id}` with
-    the right URL/headers/body, resolves `Right`, and persists to the real
-    Hive box.
-  - Offline fallback: a `NETWORK_OFFLINE` response is genuinely retried
-    `RetryInterceptor.maxRetries` times over the real retry pipeline
-    before falling back to a real cached entry in the Hive box.
-  - Not-found: a genuine `NOT_FOUND` response propagates as `Left` with no
-    retry and no synthesized cache fallback.
+- [x] `test/features/entries/presentation/screens/meus_registros_screen_test.dart` — new case in the `spec-5-1: docked search bar` group: starts a search, lets it debounce into `ResourceLoading` (held open via the fake repository's `searchGate`), tears the screen down and remounts it against the *same* `MeusRegistrosCubit`/`EntriesSearchCubit` instances (mirroring the real DI-singleton lifetime), then asserts the search skeleton stays blank below 300ms and appears past it — proving the new `initState` arms fresh on remount rather than staying blank forever.
+  - Verified the test actually guards the fix: temporarily reverted just the patch's `initState` branch, re-ran the new test alone, confirmed it failed (`Found 0 widgets with type "EntrySkeletonCard"`), then restored the file and confirmed `git diff --stat` matched the original uncommitted diff exactly before re-running the full suite.
 
-### Other new/updated tests (unit + widget)
+### Unit tests (new shared utility)
 
-- `entry_detail_cubit_test.dart` — `SessionStatus` folded into
-  `EntryDetailState`: stamped on the first emit, re-stamped on a later
-  status change without disturbing resolved entry/badge data, and stamped
-  correctly when the status changes mid-flight (before `getById`
-  resolves).
-- `entry_record_card_test.dart` — a tap inside the spine strip's own
-  bounds calls `onTap`.
-- `meus_registros_screen_test.dart` — a rapid double-tap on a card pushes
-  the detail route only once.
-- `app_router_test.dart` — the nested `:id` route redirects to `/auth`
-  while unauthenticated, and stays put through a mid-session expiry.
+- [x] `test/core/utils/deduped_by_id_test.dart` (new file) — direct coverage of `dedupedById<T>()`: first-occurrence-wins on a duplicate id, an already-unique list returned unchanged and in order, an empty list, the `seenIds` parameter dropping an item not repeated within the list itself, the caller's own `seenIds` set never being mutated, and genericity over a non-`String` item type keyed by a caller-supplied field.
 
 ## Verification
 
 - `fvm flutter analyze` — zero issues.
-- `fvm flutter test` — 721/721 passed (up from 679/679 in the spec-4-3
-  run — 42 new tests: the 3 E2E cases above plus the round-2 review-fix
-  unit/widget tests, with none removed).
+- `fvm flutter test` — 765/765 passed (7 new tests: 1 widget + 6 unit; none removed).
 
 ## Coverage
 
-- `entries.getById` (spec-4-4): success, offline-cache fallback, and
-  not-found — all three real-pipeline paths now covered end-to-end, the
-  same tier `entries.list`/`entries.create` already had.
-- `entries.list`/`entries.create`/retry real-pipeline coverage remains in
-  `entries_list_flow_e2e_test.dart` and `pending_write_sync_e2e_test.dart`
-  (prior runs) — untouched and still green.
-- `EntryDetailCubit`'s full I/O matrix (success, notFound, every other
-  non-absorbed failure, offline/timeout cache fallback at the repository
-  layer, the stale-generation guard, and now `SessionStatus` composition
-  at every point in `load()`'s lifecycle) is covered against fakes in
-  `entry_detail_cubit_test.dart`.
-- Navigation wiring (card tap -> push, the nested route's own auth
-  gating, debounce) is covered in `meus_registros_screen_test.dart`/
-  `app_router_test.dart` against fakes, per this project's
-  no-device-E2E-for-UI-taps convention.
+- Story 5.1's own six I/O-matrix rows (semantic match, rapid typing, query cleared, offline, stale response, slow request) and all three round-2 review-fix regressions (recovery from error, non-const `ResourceLoading` emits, de-dupe) were already covered before this run, across `entries_search_cubit_test.dart`, `entries_search_bar_test.dart`, `entries_remote_data_source_test.dart`, `entries_repository_impl_test.dart`, `meus_registros_screen_test.dart`, `bootstrap_integration_test.dart`, and `entries_search_flow_e2e_test.dart` (real-pipeline happy path + offline).
+- The one screen-level round-2 patch without coverage (remount-while-loading skeleton arm) and the one new shared utility without direct coverage (`dedupedById<T>()`) are both covered now.
+- Deferred, by design, not by oversight: Dynamic Type/accessibility-scaling coverage for `EntriesSearchBar` (pre-existing feature-wide gap per the spec's own round-2 review) and exception-safety for the DTO→Entity mapping step in `list()`/`getById()`/`search()` (same pre-existing pattern across all three repository methods) — both explicitly deferred in `spec-5-1-semantic-search-with-debounced-input.md` and `deferred-work.md`, not story-5.1-specific regressions.
 
 ## Next Steps
 
-- Story 4.4 is the last story in Epic 4 (entries) — Epic 5 (search/
-  filters) is next in delivery order; re-run this workflow once it's
-  implemented to check whether it opens its own new real-pipeline surface
-  worth an E2E test.
-- If a device/simulator or CI step is introduced (AGENTS.md notes none
-  exists yet), consider promoting the existing real-pipeline `test()`
-  suites into `integration_test/` driver tests against a real target.
+- Story 5.2 (metadata filters) is next in delivery order (`sprint-status.yaml`: `backlog`) — re-run this workflow once it's implemented, since it reactivates `EntriesSearchBar`'s currently-inert funnel icon and will need its own I/O-matrix coverage.
+- The deferred stale-search-box-on-remount bug (`EntriesSearchBar`'s uncontrolled `TextField` never re-seeding from the cubit's live query) remains a real, acknowledged gap in `deferred-work.md` — it's a product/UX defect, not a missing test, so it wasn't addressed here.

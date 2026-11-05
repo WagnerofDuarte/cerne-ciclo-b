@@ -6,9 +6,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart' hide State;
 import 'package:go_router/go_router.dart';
 
+import 'package:cerne/core/design_tokens.dart';
 import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/core/navigation/expiry_overlay_host.dart';
+import 'package:cerne/core/resource.dart';
 import 'package:cerne/core/widgets/back_arrow_header.dart';
 import 'package:cerne/core/widgets/confirmation_dialog.dart';
 import 'package:cerne/features/auth/domain/entities/session_status.dart';
@@ -110,12 +112,22 @@ class _FakeEntriesRepository implements EntriesRepository {
     int? mediaDurationSeconds,
   }) async => throw UnimplementedError('not expected to be called');
 
+  /// spec-5-2 — every `source`/`dateFrom`/`dateTo` this fake's `list()`
+  /// was called with, in order; this file's own filter tests read it to
+  /// assert what `MeusRegistrosCubit`/the filter sheet actually sent.
+  final List<({EntrySource? source, DateTime? dateFrom, DateTime? dateTo})>
+  listFilterCalls = [];
+
   @override
   Future<Either<Failure, EntriesPage>> list({
     String? cursor,
     int limit = 20,
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
   }) async {
     listCallCount++;
+    listFilterCalls.add((source: source, dateFrom: dateFrom, dateTo: dateTo));
     if (listCallCount == 1 && firstCallGate != null) {
       await firstCallGate!.future;
     }
@@ -567,45 +579,39 @@ void main() {
       },
     );
 
-    testWidgets(
-      'the back arrow navigates to / (Boundaries: "back arrow always '
-      'targets /"), mirroring the deleted MeusRegistrosPlaceholderScreen '
-      'test of the same thing',
-      (tester) async {
-        final fakeRepository = _FakeEntriesRepository()
-          ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
-        final cubit = MeusRegistrosCubit(
-          fakeRepository,
-          _FakePendingEntryWriteTracker(),
-        );
-        addTearDown(cubit.close);
-        final router = GoRouter(
-          initialLocation: '/meus-registros',
-          routes: [
-            GoRoute(
-              path: '/',
-              builder: (context, state) => const Text('Home'),
+    testWidgets('the back arrow navigates to / (Boundaries: "back arrow always '
+        'targets /"), mirroring the deleted MeusRegistrosPlaceholderScreen '
+        'test of the same thing', (tester) async {
+      final fakeRepository = _FakeEntriesRepository()
+        ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+      final cubit = MeusRegistrosCubit(
+        fakeRepository,
+        _FakePendingEntryWriteTracker(),
+      );
+      addTearDown(cubit.close);
+      final router = GoRouter(
+        initialLocation: '/meus-registros',
+        routes: [
+          GoRoute(path: '/', builder: (context, state) => const Text('Home')),
+          GoRoute(
+            path: '/meus-registros',
+            builder: (context, state) => MeusRegistrosScreen(
+              cubit: cubit,
+              searchCubit: _searchCubitFor(fakeRepository),
             ),
-            GoRoute(
-              path: '/meus-registros',
-              builder: (context, state) => MeusRegistrosScreen(
-                cubit: cubit,
-                searchCubit: _searchCubitFor(fakeRepository),
-              ),
-            ),
-          ],
-        );
-        addTearDown(router.dispose);
-        await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-        await tester.pumpAndSettle();
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+      await tester.pumpAndSettle();
 
-        await tester.tap(find.byIcon(Icons.chevron_left));
-        await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.chevron_left));
+      await tester.pumpAndSettle();
 
-        expect(router.state.uri.toString(), '/');
-        expect(find.text('Home'), findsOneWidget);
-      },
-    );
+      expect(router.state.uri.toString(), '/');
+      expect(find.text('Home'), findsOneWidget);
+    });
   });
 
   group('scroll pagination', () {
@@ -695,121 +701,117 @@ void main() {
 
   group('AC3: session expiry preserves scroll position (spec Acceptance '
       'Criteria, third bullet)', () {
-    testWidgets(
-      'the global ExpiryOverlayHost appearing over this screen while '
-      'scrolled does not throw and leaves the scroll position untouched',
-      (tester) async {
-        ConfirmationDialog.isOpen = false;
-        final firstPageItems = [
-          for (var i = 0; i < 20; i++)
-            _entry(
-              'e$i',
-              '2026-01-${(i + 1).toString().padLeft(2, '0')}T10:00:00',
-            ),
-        ];
-        final fakeRepository = _FakeEntriesRepository()
-          ..queueList(
-            right(EntriesPage(items: firstPageItems, nextCursor: null)),
-          );
-        final cubit = MeusRegistrosCubit(
-          fakeRepository,
-          _FakePendingEntryWriteTracker(),
+    testWidgets('the global ExpiryOverlayHost appearing over this screen while '
+        'scrolled does not throw and leaves the scroll position untouched', (
+      tester,
+    ) async {
+      ConfirmationDialog.isOpen = false;
+      final firstPageItems = [
+        for (var i = 0; i < 20; i++)
+          _entry(
+            'e$i',
+            '2026-01-${(i + 1).toString().padLeft(2, '0')}T10:00:00',
+          ),
+      ];
+      final fakeRepository = _FakeEntriesRepository()
+        ..queueList(
+          right(EntriesPage(items: firstPageItems, nextCursor: null)),
         );
-        addTearDown(cubit.close);
-        final fakeSessionRepository = _FakeSessionRepository();
-        addTearDown(fakeSessionRepository.dispose);
-        final navigatorKey = GlobalKey<NavigatorState>();
-        final router = GoRouter(
-          routes: [
-            GoRoute(path: '/', builder: (context, state) => const SizedBox()),
-          ],
-        );
-        addTearDown(router.dispose);
+      final cubit = MeusRegistrosCubit(
+        fakeRepository,
+        _FakePendingEntryWriteTracker(),
+      );
+      addTearDown(cubit.close);
+      final fakeSessionRepository = _FakeSessionRepository();
+      addTearDown(fakeSessionRepository.dispose);
+      final navigatorKey = GlobalKey<NavigatorState>();
+      final router = GoRouter(
+        routes: [
+          GoRoute(path: '/', builder: (context, state) => const SizedBox()),
+        ],
+      );
+      addTearDown(router.dispose);
 
-        await tester.pumpWidget(
-          MaterialApp(
-            home: ExpiryOverlayHost(
-              sessionRepository: fakeSessionRepository,
-              router: router,
-              navigatorKey: navigatorKey,
-              child: Navigator(
-                key: navigatorKey,
-                onGenerateRoute: (settings) => MaterialPageRoute<void>(
-                  builder: (context) => MeusRegistrosScreen(
-                    cubit: cubit,
-                    searchCubit: _searchCubitFor(fakeRepository),
-                  ),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ExpiryOverlayHost(
+            sessionRepository: fakeSessionRepository,
+            router: router,
+            navigatorKey: navigatorKey,
+            child: Navigator(
+              key: navigatorKey,
+              onGenerateRoute: (settings) => MaterialPageRoute<void>(
+                builder: (context) => MeusRegistrosScreen(
+                  cubit: cubit,
+                  searchCubit: _searchCubitFor(fakeRepository),
                 ),
               ),
             ),
           ),
-        );
-        await tester.pumpAndSettle();
+        ),
+      );
+      await tester.pumpAndSettle();
 
-        final listView = tester.widget<ListView>(find.byType(ListView));
-        final controller = listView.controller!;
-        expect(controller.position.maxScrollExtent, greaterThan(0));
-        controller.jumpTo(100);
-        await tester.pump();
-        final scrollOffsetBeforeExpiry = controller.offset;
+      final listView = tester.widget<ListView>(find.byType(ListView));
+      final controller = listView.controller!;
+      expect(controller.position.maxScrollExtent, greaterThan(0));
+      controller.jumpTo(100);
+      await tester.pump();
+      final scrollOffsetBeforeExpiry = controller.offset;
 
-        fakeSessionRepository.setStatus(SessionStatus.expired);
-        await tester.pumpAndSettle();
+      fakeSessionRepository.setStatus(SessionStatus.expired);
+      await tester.pumpAndSettle();
 
-        expect(tester.takeException(), isNull);
-        expect(find.text('Sessão expirada'), findsOneWidget);
-        expect(controller.offset, scrollOffsetBeforeExpiry);
-      },
-    );
+      expect(tester.takeException(), isNull);
+      expect(find.text('Sessão expirada'), findsOneWidget);
+      expect(controller.offset, scrollOffsetBeforeExpiry);
+    });
   });
 
   group('spec-4-4: card tap navigates to entry detail', () {
-    testWidgets(
-      'tapping a card\'s body pushes /meus-registros/:id with that '
-      'entry\'s own id',
-      (tester) async {
-        final fakeRepository = _FakeEntriesRepository()
-          ..queueList(
-            right(
-              EntriesPage(
-                items: [_entry('e1', '2026-01-01T10:00:00')],
-                nextCursor: null,
-              ),
+    testWidgets('tapping a card\'s body pushes /meus-registros/:id with that '
+        'entry\'s own id', (tester) async {
+      final fakeRepository = _FakeEntriesRepository()
+        ..queueList(
+          right(
+            EntriesPage(
+              items: [_entry('e1', '2026-01-01T10:00:00')],
+              nextCursor: null,
             ),
-          );
-        final cubit = MeusRegistrosCubit(
-          fakeRepository,
-          _FakePendingEntryWriteTracker(),
+          ),
         );
-        addTearDown(cubit.close);
-        final router = GoRouter(
-          initialLocation: '/meus-registros',
-          routes: [
-            GoRoute(
-              path: '/meus-registros',
-              builder: (context, state) => MeusRegistrosScreen(
-                cubit: cubit,
-                searchCubit: _searchCubitFor(fakeRepository),
-              ),
+      final cubit = MeusRegistrosCubit(
+        fakeRepository,
+        _FakePendingEntryWriteTracker(),
+      );
+      addTearDown(cubit.close);
+      final router = GoRouter(
+        initialLocation: '/meus-registros',
+        routes: [
+          GoRoute(
+            path: '/meus-registros',
+            builder: (context, state) => MeusRegistrosScreen(
+              cubit: cubit,
+              searchCubit: _searchCubitFor(fakeRepository),
             ),
-            GoRoute(
-              path: '/meus-registros/:id',
-              builder: (context, state) =>
-                  Text('Detail: ${state.pathParameters['id']}'),
-            ),
-          ],
-        );
-        addTearDown(router.dispose);
-        await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-        await tester.pumpAndSettle();
+          ),
+          GoRoute(
+            path: '/meus-registros/:id',
+            builder: (context, state) =>
+                Text('Detail: ${state.pathParameters['id']}'),
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+      await tester.pumpAndSettle();
 
-        await tester.tap(find.textContaining('content-e1'));
-        await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('content-e1'));
+      await tester.pumpAndSettle();
 
-        expect(router.state.uri.toString(), '/meus-registros/e1');
-        expect(find.text('Detail: e1'), findsOneWidget);
-      },
-    );
+      expect(router.state.uri.toString(), '/meus-registros/e1');
+      expect(find.text('Detail: e1'), findsOneWidget);
+    });
 
     testWidgets(
       'a rapid double-tap on a card pushes the detail route only once '
@@ -940,9 +942,7 @@ void main() {
               ),
             ),
           )
-          ..queueSearch(
-            right([_entry('search-1', '2026-01-01T10:00:00')]),
-          );
+          ..queueSearch(right([_entry('search-1', '2026-01-01T10:00:00')]));
 
         await _pumpScreen(tester, fakeRepository);
         await tester.pumpAndSettle();
@@ -971,9 +971,7 @@ void main() {
               ),
             ),
           )
-          ..queueSearch(
-            right([_entry('search-1', '2026-01-01T10:00:00')]),
-          );
+          ..queueSearch(right([_entry('search-1', '2026-01-01T10:00:00')]));
 
         await _pumpScreen(tester, fakeRepository);
         await tester.pumpAndSettle();
@@ -1071,6 +1069,265 @@ void main() {
 
         gate.complete();
         await tester.pumpAndSettle();
+      },
+    );
+
+    testWidgets('Review fix (round 2): remounting while a search is already '
+        'ResourceLoading arms the search skeleton fresh, instead of staying '
+        'blank forever — e.g. the user navigates away to another tab and '
+        'back while EntriesSearchCubit (a DI singleton) is still mid-search; '
+        'BlocConsumer\'s listener never fires for a state already current at '
+        'subscription time, so only initState inspecting the cubit\'s state '
+        'up front catches this', (tester) async {
+      final gate = Completer<void>();
+      addTearDown(() {
+        if (!gate.isCompleted) {
+          gate.complete();
+        }
+      });
+      final fakeRepository = _FakeEntriesRepository()
+        ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+        ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+        ..searchGate = gate
+        ..queueSearch(right([_entry('search-1', '2026-01-01T10:00:00')]));
+
+      final cubit = MeusRegistrosCubit(
+        fakeRepository,
+        _FakePendingEntryWriteTracker(),
+      );
+      addTearDown(cubit.close);
+      final searchCubit = _searchCubitFor(fakeRepository);
+
+      Widget buildScreen() => MaterialApp(
+        home: MeusRegistrosScreen(cubit: cubit, searchCubit: searchCubit),
+      );
+
+      await tester.pumpWidget(buildScreen());
+      await tester.pumpAndSettle();
+
+      // Start a search and let it debounce into ResourceLoading — the
+      // repository's own gate holds it there indefinitely, so this
+      // state is still current when the screen below is torn down.
+      await tester.enterText(find.byType(TextField), 'ansiedade');
+      await tester.pump(const Duration(milliseconds: 350));
+      expect(searchCubit.state, isA<ResourceLoading<List<Entry>>>());
+
+      // Tear this screen down (simulating navigating away to another
+      // tab) — `cubit`/`searchCubit` are DI singletons the screen never
+      // closes, so both keep running underneath.
+      await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+
+      // Remount: a brand-new State subscribes to the still-loading
+      // searchCubit. Flush the fresh (ungated) loadFirstPage() call
+      // initState also fires, so only the search branch below is live.
+      await tester.pumpWidget(buildScreen());
+      await tester.pump();
+
+      // Below the 300ms threshold since remounting — no skeleton yet.
+      await tester.pump(const Duration(milliseconds: 299));
+      expect(find.byType(EntrySkeletonCard), findsNothing);
+
+      // Past the threshold, re-armed by the new State's own initState.
+      await tester.pump(const Duration(milliseconds: 2));
+      expect(find.byType(EntrySkeletonCard), findsWidgets);
+
+      gate.complete();
+      await tester.pumpAndSettle();
+    });
+  });
+
+  group('spec-5-2: metadata filters', () {
+    testWidgets(
+      'Boundaries: "fills the funnel icon" — colorPrimary once a filter is '
+      'applied, reverting to colorTextSecondary once cleared',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        Icon funnelIcon() =>
+            tester.widget<Icon>(find.byIcon(Icons.filter_list));
+        expect(funnelIcon().color, DesignTokens.colorTextSecondary);
+
+        await tester.tap(find.byIcon(Icons.filter_list));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Manual'));
+        await tester.tap(find.text('Aplicar'));
+        await tester.pumpAndSettle();
+
+        expect(funnelIcon().color, DesignTokens.colorPrimary);
+
+        await tester.tap(find.text('Limpar filtros'));
+        await tester.pumpAndSettle();
+
+        expect(funnelIcon().color, DesignTokens.colorTextSecondary);
+      },
+    );
+
+    testWidgets(
+      'tapping the funnel icon opens the filter sheet with both groups, '
+      'and no CATEGORIA group (Design Notes: the backend has no category '
+      'filter)',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byIcon(Icons.filter_list));
+        await tester.pumpAndSettle();
+
+        expect(find.text('INTERVALO DE DATA'), findsOneWidget);
+        expect(find.text('TIPO DE ENTRADA'), findsOneWidget);
+        expect(find.text('CATEGORIA'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'Acceptance Criteria: applying a source filter sends it to list(), '
+      'renders a removable active-filter chip, and its "x" re-queries '
+      'without that filter',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byIcon(Icons.filter_list));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Áudio'));
+        await tester.tap(find.text('Aplicar'));
+        await tester.pumpAndSettle();
+
+        expect(fakeRepository.listFilterCalls.last.source, EntrySource.audio);
+        expect(find.text('Áudio'), findsOneWidget);
+
+        await tester.tap(find.byIcon(Icons.close));
+        await tester.pumpAndSettle();
+
+        expect(fakeRepository.listFilterCalls.last.source, isNull);
+        expect(find.text('Áudio'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'I/O matrix: "Clear all filters" — "Limpar filtros" restores the '
+      'full list in place without a screen reload/re-mount',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..queueList(
+            right(
+              EntriesPage(
+                items: [_entry('e1', '2026-01-01T10:00:00')],
+                nextCursor: null,
+              ),
+            ),
+          );
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byIcon(Icons.filter_list));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Manual'));
+        await tester.tap(find.text('Aplicar'));
+        await tester.pumpAndSettle();
+        expect(find.text('Limpar filtros'), findsOneWidget);
+
+        await tester.tap(find.text('Limpar filtros'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Limpar filtros'), findsNothing);
+        expect(find.textContaining('content-e1'), findsOneWidget);
+        expect(fakeRepository.listFilterCalls.last.source, isNull);
+      },
+    );
+
+    testWidgets('code-review fix: the funnel must not read as "filled" while a '
+        'search is active — filters+search integration is out of scope '
+        'this story (5.3) — and reverts to "filled" once the search query '
+        'is cleared again', (tester) async {
+      final fakeRepository = _FakeEntriesRepository()
+        ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+        ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+        ..queueSearch(right([_entry('search-1', '2026-01-01T10:00:00')]));
+
+      await _pumpScreen(tester, fakeRepository);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.filter_list));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Manual'));
+      await tester.tap(find.text('Aplicar'));
+      await tester.pumpAndSettle();
+
+      Icon funnelIcon() => tester.widget<Icon>(find.byIcon(Icons.filter_list));
+      expect(funnelIcon().color, DesignTokens.colorPrimary);
+
+      await tester.enterText(find.byType(TextField), 'ansiedade');
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+
+      // A search is now on screen — the filter is still active on the
+      // cubit, but it was never applied to this search, so the funnel
+      // must not read as "filled" here.
+      expect(funnelIcon().color, DesignTokens.colorTextSecondary);
+
+      await tester.enterText(find.byType(TextField), '');
+      await tester.pumpAndSettle();
+
+      // Back to the plain filtered timeline — "filled" again.
+      expect(funnelIcon().color, DesignTokens.colorPrimary);
+    });
+
+    testWidgets(
+      'code-review fix: two active filters render as two separate chips '
+      '— tapping the date-range chip\'s own "x" drops only the date '
+      'range, keeping the source filter intact',
+      (tester) async {
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)))
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byIcon(Icons.filter_list));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Áudio'));
+        await tester.tap(find.text('Este mês'));
+        await tester.tap(find.text('Aplicar'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Áudio'), findsOneWidget);
+        expect(find.text('Este mês'), findsOneWidget);
+        expect(fakeRepository.listFilterCalls.last.source, EntrySource.audio);
+        expect(fakeRepository.listFilterCalls.last.dateFrom, isNotNull);
+        expect(fakeRepository.listFilterCalls.last.dateTo, isNotNull);
+
+        // Two removable chips now, each with its own "x" — the date-
+        // range chip is the second one rendered (_ActiveFiltersRow: the
+        // source chip always comes first).
+        expect(find.byIcon(Icons.close), findsNWidgets(2));
+        await tester.tap(find.byIcon(Icons.close).last);
+        await tester.pumpAndSettle();
+
+        expect(fakeRepository.listFilterCalls.last.source, EntrySource.audio);
+        expect(fakeRepository.listFilterCalls.last.dateFrom, isNull);
+        expect(fakeRepository.listFilterCalls.last.dateTo, isNull);
+        expect(find.text('Áudio'), findsOneWidget);
+        expect(find.text('Este mês'), findsNothing);
       },
     );
   });

@@ -6,6 +6,7 @@ import 'package:fpdart/fpdart.dart';
 import 'package:hive_ce/hive_ce.dart';
 
 import '../../../../core/failure/failure.dart';
+import '../../../../core/utils/deduped_by_id.dart';
 import '../../domain/entities/entries_page.dart';
 import '../../domain/entities/entry.dart';
 import '../../domain/repositories/entries_repository.dart';
@@ -55,8 +56,17 @@ class EntriesRepositoryImpl implements EntriesRepository {
   Future<Either<Failure, EntriesPage>> list({
     String? cursor,
     int limit = 20,
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
   }) async {
-    final result = await _remoteDataSource.list(cursor: cursor, limit: limit);
+    final result = await _remoteDataSource.list(
+      cursor: cursor,
+      limit: limit,
+      source: source,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+    );
     return result.match(
       (failure) async {
         // Boundaries/Design Notes: the Hive-cache fallback is scoped to
@@ -133,13 +143,13 @@ class EntriesRepositoryImpl implements EntriesRepository {
       },
       (dtos) async {
         // Review finding: de-duplicated by id first (first-occurrence-wins,
-        // same semantics as `MeusRegistrosCubit._dedupedById`'s own
-        // trust-but-verify convention for server data) — so the `putAll`
-        // below and the returned list stay consistent, and
-        // `_SearchResults`' `ListView.builder` (keyed by `ValueKey(entry.
-        // id)`) never sees a duplicate key even if the backend ever
-        // violated its own no-duplicate-ids invariant.
-        final dedupedDtos = _dedupedById(dtos);
+        // same semantics as `MeusRegistrosCubit`'s own trust-but-verify
+        // convention for server data, shared via `core/utils/
+        // deduped_by_id.dart`) — so the `putAll` below and the returned
+        // list stay consistent, and `_SearchResults`' `ListView.builder`
+        // (keyed by `ValueKey(entry.id)`) never sees a duplicate key even
+        // if the backend ever violated its own no-duplicate-ids invariant.
+        final dedupedDtos = dedupedById(dtos, (dto) => dto.id);
         // Same RNF09 rationale as create()/list()/getById()'s own
         // Hive-write guards — a thrown Hive/disk exception must never
         // escape unmapped.
@@ -173,7 +183,9 @@ class EntriesRepositoryImpl implements EntriesRepository {
       if (cached == null) {
         return left(originalFailure);
       }
-      return right(_toEntry(EntryDto.fromJson(Map<String, dynamic>.from(cached))));
+      return right(
+        _toEntry(EntryDto.fromJson(Map<String, dynamic>.from(cached))),
+      );
     } catch (error) {
       return left(Failure.malformedResponse(message: error.toString()));
     }
@@ -217,18 +229,4 @@ class EntriesRepositoryImpl implements EntriesRepository {
     updatedAt: dto.updatedAt,
     mediaDurationSeconds: dto.mediaDurationSeconds,
   );
-}
-
-/// [search]'s own trust-but-verify guard (Review finding) — first-
-/// occurrence-wins, same semantics as `MeusRegistrosCubit._dedupedById`'s
-/// own defensive de-duplication of server data, applied here to the raw
-/// [EntryDto] list before it's ever persisted or mapped, so both the Hive
-/// box write and the returned `List<Entry>` stay duplicate-free and
-/// consistent with each other.
-List<EntryDto> _dedupedById(List<EntryDto> dtos) {
-  final seen = <String>{};
-  return [
-    for (final dto in dtos)
-      if (seen.add(dto.id)) dto,
-  ];
 }

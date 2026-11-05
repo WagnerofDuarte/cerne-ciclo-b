@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:cerne/core/design_tokens.dart';
 import 'package:cerne/features/entries/presentation/widgets/entries_search_bar.dart';
 
 void main() {
@@ -9,7 +10,11 @@ void main() {
     'and no submit button anywhere on the widget',
     (tester) async {
       await tester.pumpWidget(
-        MaterialApp(home: Scaffold(body: EntriesSearchBar(onChanged: (_) {}))),
+        MaterialApp(
+          home: Scaffold(
+            body: EntriesSearchBar(onChanged: (_) {}, onFilterTap: () {}),
+          ),
+        ),
       );
 
       expect(find.text('Buscar nos registros...'), findsOneWidget);
@@ -28,7 +33,11 @@ void main() {
     'so a screen-reader user gets some indication of its purpose',
     (tester) async {
       await tester.pumpWidget(
-        MaterialApp(home: Scaffold(body: EntriesSearchBar(onChanged: (_) {}))),
+        MaterialApp(
+          home: Scaffold(
+            body: EntriesSearchBar(onChanged: (_) {}, onFilterTap: () {}),
+          ),
+        ),
       );
 
       final iconButton = tester.widget<IconButton>(find.byType(IconButton));
@@ -44,7 +53,9 @@ void main() {
       final received = <String>[];
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: EntriesSearchBar(onChanged: received.add)),
+          home: Scaffold(
+            body: EntriesSearchBar(onChanged: received.add, onFilterTap: () {}),
+          ),
         ),
       );
 
@@ -55,26 +66,60 @@ void main() {
   );
 
   testWidgets(
-    'the trailing funnel button is a no-op this story (spec-5-1 Boundaries '
-    '— filters land in spec-5-2) but is tappable at the shared 44pt tap '
-    'target',
+    'spec-5-2: tapping the trailing funnel button calls onFilterTap, at '
+    'the shared 44pt tap target',
     (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(home: Scaffold(body: EntriesSearchBar(onChanged: (_) {}))),
-      );
-
-      // Tapping must not throw and must not call onChanged.
-      final received = <String>[];
+      var filterTapped = false;
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: EntriesSearchBar(onChanged: received.add)),
+          home: Scaffold(
+            body: EntriesSearchBar(
+              onChanged: (_) {},
+              onFilterTap: () => filterTapped = true,
+            ),
+          ),
         ),
       );
+
       await tester.tap(find.byIcon(Icons.filter_list));
       await tester.pump();
 
-      expect(received, isEmpty);
+      expect(filterTapped, isTrue);
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('spec-5-2 Boundaries: "fills the funnel icon" — hasActiveFilters '
+      'switches the icon from colorTextSecondary to colorPrimary', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: EntriesSearchBar(onChanged: (_) {}, onFilterTap: () {}),
+        ),
+      ),
+    );
+    expect(
+      tester.widget<Icon>(find.byIcon(Icons.filter_list)).color,
+      DesignTokens.colorTextSecondary,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: EntriesSearchBar(
+            onChanged: (_) {},
+            onFilterTap: () {},
+            hasActiveFilters: true,
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      tester.widget<Icon>(find.byIcon(Icons.filter_list)).color,
+      DesignTokens.colorPrimary,
+    );
+  });
 }

@@ -50,6 +50,9 @@ class _FakeEntriesRepository implements EntriesRepository {
   Future<Either<Failure, EntriesPage>> list({
     String? cursor,
     int limit = 20,
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
   }) async => throw UnimplementedError('not expected to be called');
 
   @override

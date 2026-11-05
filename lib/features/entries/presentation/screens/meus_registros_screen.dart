@@ -20,6 +20,7 @@ import '../../domain/entities/sync_badge_state.dart';
 import '../cubit/entries_search_cubit.dart';
 import '../cubit/meus_registros_cubit.dart';
 import '../cubit/meus_registros_state.dart';
+import '../widgets/entries_filter_sheet.dart';
 import '../widgets/entries_search_bar.dart';
 import '../widgets/entry_record_card.dart';
 import '../widgets/entry_skeleton_card.dart';
@@ -92,6 +93,21 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
       }
     });
     _scrollController.addListener(_onScroll);
+    // Review finding: `searchCubit` is a long-lived singleton (Code Map)
+    // that can already be `ResourceLoading` the moment this `State` is
+    // (re)created — e.g. the user switches tabs away mid-search and back,
+    // which tears down and rebuilds this plain `GoRoute`'s widget while the
+    // DI-singleton cubit keeps running. `BlocConsumer`'s `listener` below
+    // only fires on a *new* state, never for one already current at
+    // subscription time, so without this check the search skeleton would
+    // never arm for an in-flight search resumed this way.
+    if (widget.searchCubit.state is ResourceLoading<List<Entry>>) {
+      _searchSkeletonTimer = Timer(_skeletonThreshold, () {
+        if (mounted) {
+          setState(() => _showSearchSkeleton = true);
+        }
+      });
+    }
   }
 
   @override
@@ -180,7 +196,30 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
                 DesignTokens.spacingMd,
                 0,
               ),
-              child: EntriesSearchBar(onChanged: widget.searchCubit.onQueryChanged),
+              // spec-5-2: `hasActiveFilters`/`onFilterTap` need the real
+              // `MeusRegistrosCubit` — this now rebuilds on its state too,
+              // while `EntriesSearchBar` itself stays a dumb, stateless
+              // widget, same as before. Also rebuilds on `EntriesSearchCubit`
+              // (code-review fix): the funnel must only read as "filled"
+              // while the plain/filtered timeline is actually what's on
+              // screen — filters+search integration is 5.3's job, out of
+              // this story's scope, so "filled" next to search results
+              // that were never filtered would be misleading.
+              child: BlocBuilder<EntriesSearchCubit, Resource<List<Entry>>>(
+                builder: (context, searchState) =>
+                    BlocBuilder<MeusRegistrosCubit, MeusRegistrosState>(
+                      builder: (context, _) => EntriesSearchBar(
+                        onChanged: widget.searchCubit.onQueryChanged,
+                        onFilterTap: () => EntriesFilterSheet.show(
+                          context,
+                          cubit: widget.cubit,
+                        ),
+                        hasActiveFilters:
+                            searchState is ResourceIdle<List<Entry>> &&
+                            widget.cubit.hasActiveFilters,
+                      ),
+                    ),
+              ),
             ),
             Expanded(
               child: BlocConsumer<EntriesSearchCubit, Resource<List<Entry>>>(
@@ -193,24 +232,45 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
                   // variant renders the search surface instead.
                   if (searchState is ResourceIdle<List<Entry>>) {
                     return BlocBuilder<MeusRegistrosCubit, MeusRegistrosState>(
-                      builder: (context, state) => switch (state) {
-                        MeusRegistrosLoading() =>
-                          _showSkeleton
-                              ? const _SkeletonList()
-                              : const SizedBox.shrink(),
-                        MeusRegistrosEmpty() => const _EmptyState(),
-                        MeusRegistrosError(message: final message) =>
-                          _ErrorState(
-                            message: message,
-                            onRetry: widget.cubit.loadFirstPage,
+                      builder: (context, state) {
+                        final timeline = switch (state) {
+                          MeusRegistrosLoading() =>
+                            _showSkeleton
+                                ? const _SkeletonList()
+                                : const SizedBox.shrink(),
+                          MeusRegistrosEmpty() => const _EmptyState(),
+                          MeusRegistrosError(message: final message) =>
+                            _ErrorState(
+                              message: message,
+                              // Code-review fix: `retryCurrentPage()`, not
+                              // `loadFirstPage()` — the latter resets the
+                              // active filter selection, silently turning
+                              // a failed *filtered* retry into a
+                              // successful unfiltered one.
+                              onRetry: widget.cubit.retryCurrentPage,
+                            ),
+                          MeusRegistrosLoaded() => _EntryList(
+                            state: state,
+                            scrollController: _scrollController,
+                            onRetryLoadMore: widget.cubit.retryLoadMore,
+                            onRetryTap: (entry) => widget.cubit.retry(entry.id),
+                            onCardTap: _openDetail,
                           ),
-                        MeusRegistrosLoaded() => _EntryList(
-                          state: state,
-                          scrollController: _scrollController,
-                          onRetryLoadMore: widget.cubit.retryLoadMore,
-                          onRetryTap: (entry) => widget.cubit.retry(entry.id),
-                          onCardTap: _openDetail,
-                        ),
+                        };
+                        // spec-5-2: the active-filter chip row only ever
+                        // renders here, inside the plain-timeline branch
+                        // (Boundaries/Never: no combined search+filter
+                        // query this story) — and only once a filter is
+                        // actually active.
+                        if (!widget.cubit.hasActiveFilters) {
+                          return timeline;
+                        }
+                        return Column(
+                          children: [
+                            _ActiveFiltersRow(cubit: widget.cubit),
+                            Expanded(child: timeline),
+                          ],
+                        );
                       },
                     );
                   }
@@ -259,28 +319,30 @@ class _SearchResults extends StatelessWidget {
         const SizedBox.shrink(),
       ResourceLoading<List<Entry>>() =>
         showSkeleton ? const _SkeletonList() : const SizedBox.shrink(),
-      ResourceError<List<Entry>>(failure: final failure) =>
-        _SearchErrorState(message: failure.message),
-      ResourceData<List<Entry>>(data: final entries) => entries.isEmpty
-          ? const _EmptySearchResults()
-          : ListView.builder(
-              padding: DesignTokens.screenPadding,
-              itemCount: entries.length,
-              itemBuilder: (context, index) {
-                final entry = entries[index];
-                return Padding(
-                  key: ValueKey(entry.id),
-                  padding: const EdgeInsets.only(
-                    bottom: DesignTokens.spacingSm,
-                  ),
-                  child: EntryRecordCard(
-                    entry: entry,
-                    badgeState: const SyncBadgeState.synchronized(),
-                    onTap: () => onCardTap(entry),
-                  ),
-                );
-              },
-            ),
+      ResourceError<List<Entry>>(failure: final failure) => _SearchErrorState(
+        message: failure.message,
+      ),
+      ResourceData<List<Entry>>(data: final entries) =>
+        entries.isEmpty
+            ? const _EmptySearchResults()
+            : ListView.builder(
+                padding: DesignTokens.screenPadding,
+                itemCount: entries.length,
+                itemBuilder: (context, index) {
+                  final entry = entries[index];
+                  return Padding(
+                    key: ValueKey(entry.id),
+                    padding: const EdgeInsets.only(
+                      bottom: DesignTokens.spacingSm,
+                    ),
+                    child: EntryRecordCard(
+                      entry: entry,
+                      badgeState: const SyncBadgeState.synchronized(),
+                      onTap: () => onCardTap(entry),
+                    ),
+                  );
+                },
+              ),
     };
   }
 }
@@ -582,6 +644,115 @@ class _LoadMoreFooter extends StatelessWidget {
       );
     }
     return const SizedBox.shrink();
+  }
+}
+
+/// spec-5-2 — the active-filter chip row rendered under the search bar
+/// whenever `MeusRegistrosCubit.hasActiveFilters` is true (Boundaries);
+/// reads the cubit's own filter fields directly rather than threading them
+/// through `MeusRegistrosState` (Design Notes: a filter change already
+/// re-emits a new state via `applyFilters()`/`clearFilters()`, so this
+/// widget's own `BlocBuilder` ancestor already rebuilds it in lockstep).
+class _ActiveFiltersRow extends StatelessWidget {
+  const _ActiveFiltersRow({required this.cubit});
+
+  final MeusRegistrosCubit cubit;
+
+  @override
+  Widget build(BuildContext context) {
+    final source = cubit.activeSource;
+    final dateFrom = cubit.activeDateFrom;
+    final dateTo = cubit.activeDateTo;
+    final hasDateRange = dateFrom != null && dateTo != null;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        DesignTokens.spacingMd,
+        DesignTokens.spacingSm,
+        DesignTokens.spacingMd,
+        0,
+      ),
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: DesignTokens.spacingSm,
+        runSpacing: DesignTokens.spacingSm,
+        children: [
+          if (source != null)
+            _ActiveFilterChip(
+              label: entrySourceLabel(source),
+              // I/O matrix: "Remove one of two active chips" — re-applies
+              // every *other* active filter exactly as it stood, dropping
+              // only this one.
+              onRemove: () =>
+                  cubit.applyFilters(dateFrom: dateFrom, dateTo: dateTo),
+            ),
+          if (hasDateRange)
+            _ActiveFilterChip(
+              label: dateRangePresetMatching(dateFrom, DateTime.now()).label,
+              onRemove: () => cubit.applyFilters(source: source),
+            ),
+          AppButton(
+            variant: AppButtonVariant.textGhost,
+            label: 'Limpar filtros',
+            // I/O matrix: "Clear all filters" — restores the full
+            // unfiltered list in place, no reload/re-mount (Boundaries).
+            onPressed: cubit.clearFilters,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One removable active-filter chip — `colorSecondary`/
+/// `colorCategoryChipText`/`radiusFull` (Boundaries: exact token reuse,
+/// no new token).
+class _ActiveFilterChip extends StatelessWidget {
+  const _ActiveFilterChip({required this.label, required this.onRemove});
+
+  final String label;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '$label, remover filtro',
+      excludeSemantics: true,
+      child: InkWell(
+        borderRadius: const BorderRadius.all(
+          Radius.circular(DesignTokens.radiusFull),
+        ),
+        onTap: onRemove,
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: DesignTokens.spacingMd,
+            vertical: DesignTokens.spacingXs,
+          ),
+          decoration: const BoxDecoration(
+            color: DesignTokens.colorSecondary,
+            borderRadius: BorderRadius.all(
+              Radius.circular(DesignTokens.radiusFull),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: DesignTokens.textLabelMd.copyWith(
+                  color: DesignTokens.colorCategoryChipText,
+                ),
+              ),
+              const SizedBox(width: DesignTokens.spacingXs),
+              const Icon(
+                Icons.close,
+                color: DesignTokens.colorCategoryChipText,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

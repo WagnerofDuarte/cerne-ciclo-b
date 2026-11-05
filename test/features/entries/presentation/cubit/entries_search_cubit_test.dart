@@ -73,6 +73,9 @@ class _FakeEntriesRepository implements EntriesRepository {
   Future<Either<Failure, EntriesPage>> list({
     String? cursor,
     int limit = 20,
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
   }) async => throw UnimplementedError('not expected to be called');
 
   @override
@@ -213,6 +216,37 @@ void main() {
           isA<NetworkOffline>(),
         ),
       ]);
+    },
+  );
+
+  test(
+    'Review finding: recovers from ResourceError — a failed search '
+    'followed by a new query re-arms the debounce and reaches '
+    'ResourceData normally, rather than getting stuck in error',
+    () async {
+      fakeRepository.queueSearch(
+        left(const Failure.networkOffline(message: 'Sem conexão')),
+      );
+      fakeRepository.queueSearch(right([_entry('e1')]));
+
+      final emitted = await _emittedDuring(cubit, () async {
+        cubit.onQueryChanged('ansiedade');
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+        cubit.onQueryChanged('nervosismo');
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+      });
+
+      expect(emitted, [
+        isA<ResourceLoading<List<Entry>>>(),
+        isA<ResourceError<List<Entry>>>(),
+        isA<ResourceLoading<List<Entry>>>(),
+        isA<ResourceData<List<Entry>>>().having(
+          (s) => s.data.map((e) => e.id),
+          'data ids',
+          ['e1'],
+        ),
+      ]);
+      expect(fakeRepository.searchCalls, ['ansiedade', 'nervosismo']);
     },
   );
 

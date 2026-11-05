@@ -236,6 +236,113 @@ void main() {
       expect(captured.single, {'limit': 5, 'cursor': 'abc123'});
     });
 
+    test('spec-5-2: source/dateFrom/dateTo are omitted entirely when null '
+        '(same convention as cursor)', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-list',
+          queryParameters: any(named: 'queryParameters'),
+        ),
+      ).thenAnswer((_) async => right(_listBody()));
+
+      await dataSource.list();
+
+      final captured = verify(
+        () => mockApiClient.get(
+          'entries-list',
+          queryParameters: captureAny(named: 'queryParameters'),
+        ),
+      ).captured;
+      expect(captured.single, {'limit': 20});
+    });
+
+    test('spec-5-2: a non-null source is sent as its own .name', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-list',
+          queryParameters: any(named: 'queryParameters'),
+        ),
+      ).thenAnswer((_) async => right(_listBody()));
+
+      await dataSource.list(source: EntrySource.audio);
+
+      final captured = verify(
+        () => mockApiClient.get(
+          'entries-list',
+          queryParameters: captureAny(named: 'queryParameters'),
+        ),
+      ).captured;
+      expect(captured.single, {'limit': 20, 'source': 'audio'});
+    });
+
+    test(
+      'spec-5-2 code-review fix: non-null dateFrom/dateTo are sent as '
+      'their own .toUtc().toIso8601String() — a local-time '
+      'toIso8601String() has no Z/offset suffix, which isn\'t valid '
+      'RFC3339 and doesn\'t satisfy the contract\'s own format: date-time',
+      () async {
+        when(
+          () => mockApiClient.get(
+            'entries-list',
+            queryParameters: any(named: 'queryParameters'),
+          ),
+        ).thenAnswer((_) async => right(_listBody()));
+        final dateFrom = DateTime(2026, 1, 1);
+        final dateTo = DateTime(2026, 1, 31);
+
+        await dataSource.list(dateFrom: dateFrom, dateTo: dateTo);
+
+        final captured = verify(
+          () => mockApiClient.get(
+            'entries-list',
+            queryParameters: captureAny(named: 'queryParameters'),
+          ),
+        ).captured;
+        final sent = captured.single as Map<String, dynamic>;
+        expect(sent['limit'], 20);
+        expect(sent['dateFrom'], dateFrom.toUtc().toIso8601String());
+        expect(sent['dateTo'], dateTo.toUtc().toIso8601String());
+        // RFC3339: always ends in Z (UTC) or an explicit numeric offset —
+        // never a bare local-time string with neither.
+        expect(sent['dateFrom'], endsWith('Z'));
+        expect(sent['dateTo'], endsWith('Z'));
+      },
+    );
+
+    test('spec-5-2: source + dateFrom + dateTo are all sent together in one '
+        'query — AND narrowing is the backend\'s own job, this data source '
+        'just forwards every non-null param', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-list',
+          queryParameters: any(named: 'queryParameters'),
+        ),
+      ).thenAnswer((_) async => right(_listBody()));
+      final dateFrom = DateTime(2026, 1, 1);
+      final dateTo = DateTime(2026, 1, 31);
+
+      await dataSource.list(
+        cursor: 'abc',
+        source: EntrySource.photo,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+      );
+
+      final captured = verify(
+        () => mockApiClient.get(
+          'entries-list',
+          queryParameters: captureAny(named: 'queryParameters'),
+        ),
+      ).captured;
+      expect(captured.single, {
+        'limit': 20,
+        'cursor': 'abc',
+        'source': 'photo',
+        'dateFrom': dateFrom.toUtc().toIso8601String(),
+        'dateTo': dateTo.toUtc().toIso8601String(),
+      });
+    });
+
     test(
       'decodes every item in data plus meta.nextCursor on success',
       () async {
@@ -355,24 +462,27 @@ void main() {
   // spec-4-4 (RF07) — `EntriesRepository.getById`'s own data-source call,
   // `entries-get` with [id] as its one trailing path segment.
   group('EntriesRemoteDataSource.get', () {
-    test('calls GET entries-get with [id] as the one pathParams entry', () async {
-      when(
-        () => mockApiClient.get(
-          'entries-get',
-          pathParams: any(named: 'pathParams'),
-        ),
-      ).thenAnswer((_) async => right(_entryBody()));
+    test(
+      'calls GET entries-get with [id] as the one pathParams entry',
+      () async {
+        when(
+          () => mockApiClient.get(
+            'entries-get',
+            pathParams: any(named: 'pathParams'),
+          ),
+        ).thenAnswer((_) async => right(_entryBody()));
 
-      await dataSource.get('e1');
+        await dataSource.get('e1');
 
-      final captured = verify(
-        () => mockApiClient.get(
-          'entries-get',
-          pathParams: captureAny(named: 'pathParams'),
-        ),
-      ).captured;
-      expect(captured.single, ['e1']);
-    });
+        final captured = verify(
+          () => mockApiClient.get(
+            'entries-get',
+            pathParams: captureAny(named: 'pathParams'),
+          ),
+        ).captured;
+        expect(captured.single, ['e1']);
+      },
+    );
 
     test('decodes the EntryDto from the response data object', () async {
       when(
@@ -458,28 +568,25 @@ void main() {
   // `entries-search` with exactly one `q` query parameter (no
   // `limit`/`cursor`, Boundaries).
   group('EntriesRemoteDataSource.search', () {
-    test(
-      'calls GET entries-search with exactly {q: query} as queryParameters '
-      '— never limit/cursor',
-      () async {
-        when(
-          () => mockApiClient.get(
-            'entries-search',
-            queryParameters: any(named: 'queryParameters'),
-          ),
-        ).thenAnswer((_) async => right(_listBody()));
+    test('calls GET entries-search with exactly {q: query} as queryParameters '
+        '— never limit/cursor', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: any(named: 'queryParameters'),
+        ),
+      ).thenAnswer((_) async => right(_listBody()));
 
-        await dataSource.search('ansiedade');
+      await dataSource.search('ansiedade');
 
-        final captured = verify(
-          () => mockApiClient.get(
-            'entries-search',
-            queryParameters: captureAny(named: 'queryParameters'),
-          ),
-        ).captured;
-        expect(captured.single, {'q': 'ansiedade'});
-      },
-    );
+      final captured = verify(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: captureAny(named: 'queryParameters'),
+        ),
+      ).captured;
+      expect(captured.single, {'q': 'ansiedade'});
+    });
 
     test('decodes every item in data via the same EntryDto.fromJson list() '
         'already uses', () async {
@@ -488,9 +595,7 @@ void main() {
           'entries-search',
           queryParameters: any(named: 'queryParameters'),
         ),
-      ).thenAnswer(
-        (_) async => right(_listBody(ids: ['e1', 'e2'])),
-      );
+      ).thenAnswer((_) async => right(_listBody(ids: ['e1', 'e2'])));
 
       final result = await dataSource.search('ansiedade');
 
@@ -515,31 +620,28 @@ void main() {
       });
     });
 
-    test(
-      'a superset response (similarity/mode fields) is simply ignored, '
-      'same as list()\'s/get()\'s own superset handling',
-      () async {
-        when(
-          () => mockApiClient.get(
-            'entries-search',
-            queryParameters: any(named: 'queryParameters'),
-          ),
-        ).thenAnswer(
-          (_) async => right({
-            'data': [
-              {..._entryJson('e1'), 'similarity': 0.87, 'mode': 'semantic'},
-            ],
-          }),
-        );
+    test('a superset response (similarity/mode fields) is simply ignored, '
+        'same as list()\'s/get()\'s own superset handling', () async {
+      when(
+        () => mockApiClient.get(
+          'entries-search',
+          queryParameters: any(named: 'queryParameters'),
+        ),
+      ).thenAnswer(
+        (_) async => right({
+          'data': [
+            {..._entryJson('e1'), 'similarity': 0.87, 'mode': 'semantic'},
+          ],
+        }),
+      );
 
-        final result = await dataSource.search('ansiedade');
+      final result = await dataSource.search('ansiedade');
 
-        expect(result.isRight(), isTrue);
-        result.match((_) => fail('expected Right'), (items) {
-          expect(items.single.id, 'e1');
-        });
-      },
-    );
+      expect(result.isRight(), isTrue);
+      result.match((_) => fail('expected Right'), (items) {
+        expect(items.single.id, 'e1');
+      });
+    });
 
     test('a malformed 200 body maps to Left(malformedResponse), never '
         'throws (RNF09)', () async {
@@ -560,8 +662,7 @@ void main() {
     });
 
     test('networkOffline from ApiClient passes straight through as Left, '
-        'unmapped — no cache fallback at this layer either (AD-9)',
-        () async {
+        'unmapped — no cache fallback at this layer either (AD-9)', () async {
       when(
         () => mockApiClient.get(
           'entries-search',

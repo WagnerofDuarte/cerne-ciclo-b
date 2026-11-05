@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../core/utils/deduped_by_id.dart';
 import '../../domain/entities/entry.dart';
 import '../../domain/entities/pending_entry_write.dart';
 import '../../domain/repositories/entries_repository.dart';
@@ -27,9 +28,7 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
     _pendingSubscription = _tracker.pendingWrites.listen(
       _onPendingWritesChanged,
     );
-    _confirmedSubscription = _tracker.confirmedWrites.listen(
-      _onEntryConfirmed,
-    );
+    _confirmedSubscription = _tracker.confirmedWrites.listen(_onEntryConfirmed);
   }
 
   final EntriesRepository _repository;
@@ -56,23 +55,94 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
   /// emitted.
   int _generation = 0;
 
+  /// spec-5-2 — the session-scoped filter selection (Design Notes): `null`
+  /// for each field means "no filter of that kind", never a sentinel
+  /// value. Reset to "no filters" by [loadFirstPage] itself (a fresh
+  /// mount always starts from the full unfiltered timeline — same
+  /// "always re-fetches from scratch" contract that method's own doc
+  /// already gives, extended here to the filter selection too), set by
+  /// [applyFilters], cleared by [clearFilters], and carried forward by
+  /// every [_fetchMore] call so a paginated continuation never silently
+  /// drops the filters its first page was fetched with.
+  EntrySource? _activeSource;
+  DateTime? _activeDateFrom;
+  DateTime? _activeDateTo;
+
+  /// `MeusRegistrosScreen`'s own read of the current filter selection —
+  /// deliberately not part of [MeusRegistrosState] itself: [applyFilters]/
+  /// [clearFilters] already re-emit a new state on every change, so
+  /// whichever `BlocBuilder` reads these getters during its own `builder`
+  /// callback rebuilds in lockstep with them regardless.
+  EntrySource? get activeSource => _activeSource;
+  DateTime? get activeDateFrom => _activeDateFrom;
+  DateTime? get activeDateTo => _activeDateTo;
+
+  /// `EntriesSearchBar.hasActiveFilters`/the active-filter chip row's own
+  /// "is any filter active at all" check.
+  bool get hasActiveFilters =>
+      _activeSource != null || _activeDateFrom != null || _activeDateTo != null;
+
+  /// Code-review fix (spec-5-2): whether [source]/[occurredAt] would pass
+  /// the currently active filter selection — `true` unconditionally once
+  /// [hasActiveFilters] is false. Guards every path below that would
+  /// otherwise prepend/show a brand-new confirmed entry or pending-write
+  /// placeholder that doesn't actually belong in the currently filtered
+  /// view (Review finding: "a newly-created entry bypasses the active
+  /// filter" — e.g. saving a manual-text entry while `source: audio` is
+  /// active must never visibly violate that filter).
+  bool _matchesActiveFilters({
+    required EntrySource source,
+    required DateTime occurredAt,
+  }) {
+    if (_activeSource != null && source != _activeSource) {
+      return false;
+    }
+    if (_activeDateFrom != null && occurredAt.isBefore(_activeDateFrom!)) {
+      return false;
+    }
+    if (_activeDateTo != null && occurredAt.isAfter(_activeDateTo!)) {
+      return false;
+    }
+    return true;
+  }
+
+  /// [_pendingWrites] filtered down to the ones that actually match
+  /// [_matchesActiveFilters] — [_pendingWrites] itself stays the tracker's
+  /// own full, unfiltered bookkeeping (every write in flight/failed,
+  /// regardless of the active filter), but a placeholder card for one
+  /// that doesn't match the active filter must never render, same
+  /// invariant a confirmed [Entry] gets below.
+  List<PendingEntryWrite> get _visiblePendingWrites => _pendingWrites
+      .where(
+        (pending) => _matchesActiveFilters(
+          source: pending.source,
+          occurredAt: pending.startedAt,
+        ),
+      )
+      .toList();
+
   void _onPendingWritesChanged(List<PendingEntryWrite> pendingWrites) {
     _pendingWrites = pendingWrites;
+    final visible = _visiblePendingWrites;
     final current = state;
     if (current is MeusRegistrosLoaded) {
-      emit(current.copyWith(pendingWrites: pendingWrites));
-    } else if ((current is MeusRegistrosEmpty || current is MeusRegistrosError) &&
-        pendingWrites.isNotEmpty) {
+      emit(current.copyWith(pendingWrites: visible));
+    } else if ((current is MeusRegistrosEmpty ||
+            current is MeusRegistrosError) &&
+        visible.isNotEmpty) {
       // A capture save starts while this screen is showing "no entries
       // yet" or a load failure (Review finding: the latter previously
       // fell through this check entirely, silently dropping the pending
       // card) — its own placeholder card must still show immediately
-      // (Acceptance Criteria), not wait for a reload.
+      // (Acceptance Criteria), not wait for a reload. Gated on `visible`
+      // rather than the raw `pendingWrites` (code-review fix): a pending
+      // write that doesn't match the active filter has nothing to show
+      // here at all.
       emit(
         MeusRegistrosLoaded(
           entries: const [],
           nextCursor: null,
-          pendingWrites: pendingWrites,
+          pendingWrites: visible,
         ),
       );
     }
@@ -95,30 +165,45 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
       for (final pending in _pendingWrites)
         if (pending.tempId != confirmation.tempId) pending,
     ];
+    // Code-review fix: a confirmed entry that doesn't match the active
+    // filter selection must never visibly violate it by appearing in the
+    // list anyway.
+    final matchesFilter = _matchesActiveFilters(
+      source: entry.source,
+      occurredAt: DateTime.parse(entry.occurredAt).toLocal(),
+    );
     final current = state;
     if (current is MeusRegistrosLoaded) {
       // Prepended, not reloaded (Design Notes) — preserves this cubit's
       // own pagination state (`nextCursor`/`loadMoreFailed`) exactly as
       // `loadMore()`'s own cursor-overlap robustness already relies on;
-      // `_dedupedById` (unchanged) absorbs the degenerate case where a
+      // `dedupedById` (unchanged) absorbs the degenerate case where a
       // later `list()`/`loadMore()` page's cursor also happens to repeat
       // this same (now server-known) id.
       emit(
         current.copyWith(
-          entries: _dedupedById([entry, ...current.entries]),
-          pendingWrites: _pendingWrites,
+          entries: matchesFilter
+              ? dedupedById([entry, ...current.entries], (e) => e.id)
+              : current.entries,
+          pendingWrites: _visiblePendingWrites,
         ),
       );
     } else if (current is MeusRegistrosEmpty || current is MeusRegistrosError) {
       // Review finding: MeusRegistrosError previously fell through this
       // check too, same rationale as `_onPendingWritesChanged` above.
-      emit(
-        MeusRegistrosLoaded(
-          entries: [entry],
-          nextCursor: null,
-          pendingWrites: _pendingWrites,
-        ),
-      );
+      // Only transitions into `MeusRegistrosLoaded` when this entry
+      // actually matches the active filter (code-review fix) — otherwise
+      // there's nothing new to show here, so the screen stays exactly as
+      // it was.
+      if (matchesFilter) {
+        emit(
+          MeusRegistrosLoaded(
+            entries: [entry],
+            nextCursor: null,
+            pendingWrites: _visiblePendingWrites,
+          ),
+        );
+      }
     }
     // MeusRegistrosLoading: the next loadFirstPage() fetches the server's
     // own fresh page, which already includes this entry now that it's
@@ -132,11 +217,72 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
   /// `MeusRegistrosScreen.initState` calls this once, every mount — always
   /// re-fetches from scratch rather than keeping a previous visit's page
   /// around, since a new entry may have been saved (Insertion Modal, Epic
-  /// 3) since the last visit.
-  Future<void> loadFirstPage() async {
+  /// 3) since the last visit. spec-5-2: also resets the filter selection
+  /// to "none" first (a fresh mount's own "from scratch" promise extended
+  /// to filters, Design Notes) — [_loadFiltered] then runs with that
+  /// cleared selection, same as [clearFilters] would.
+  Future<void> loadFirstPage() {
+    _activeSource = null;
+    _activeDateFrom = null;
+    _activeDateTo = null;
+    return _loadFiltered();
+  }
+
+  /// `MeusRegistrosScreen`'s own `_ErrorState` retry button (code-review
+  /// fix, spec-5-2) — unlike [loadFirstPage] (always resets to "no
+  /// filters", for the fresh-mount case), this retries with whichever
+  /// filter selection is still current. Review finding: wiring the error
+  /// retry button to [loadFirstPage] silently dropped the active filter
+  /// on retry — a failed *filtered* query would "succeed" by quietly
+  /// showing the full unfiltered list instead of retrying the same
+  /// filtered one.
+  Future<void> retryCurrentPage() => _loadFiltered();
+
+  /// `EntriesFilterSheet`'s own "Aplicar" button (spec-5-2) — replaces
+  /// whichever filters were active before with exactly [source]/
+  /// [dateFrom]/[dateTo] (never merged with the previous selection: the
+  /// active-filter chip row's own "x" already recomputes the full
+  /// replacement set itself, passing back in every filter it wants kept —
+  /// I/O matrix: "Remove one of two active chips"). Omitting a parameter
+  /// clears that one filter dimension; omitting all three is equivalent to
+  /// [clearFilters]. A separate method from [loadFirstPage] by design —
+  /// see Design Notes — though both ultimately share [_loadFiltered]'s own
+  /// "bump generation, replace state via list()" body.
+  Future<void> applyFilters({
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) {
+    _activeSource = source;
+    _activeDateFrom = dateFrom;
+    _activeDateTo = dateTo;
+    return _loadFiltered();
+  }
+
+  /// The active-filter chip row's own "Limpar filtros" link (spec-5-2) —
+  /// restores the full unfiltered list in place (I/O matrix: "Clear all
+  /// filters"), without a screen reload/re-mount.
+  Future<void> clearFilters() {
+    _activeSource = null;
+    _activeDateFrom = null;
+    _activeDateTo = null;
+    return _loadFiltered();
+  }
+
+  /// [loadFirstPage]/[applyFilters]/[clearFilters]'s own shared "bump
+  /// generation, replace state via list()" body — always queries
+  /// whichever filter selection ([_activeSource]/[_activeDateFrom]/
+  /// [_activeDateTo]) is current at call time, cursor-less (always a
+  /// fresh first page, never a continuation — [_fetchMore] is the one
+  /// path that ever passes a cursor).
+  Future<void> _loadFiltered() async {
     final generation = ++_generation;
     emit(const MeusRegistrosLoading());
-    final result = await _repository.list();
+    final result = await _repository.list(
+      source: _activeSource,
+      dateFrom: _activeDateFrom,
+      dateTo: _activeDateTo,
+    );
     // Mirrors `AccountSettingsCubit.toggleBiometric`'s own guard: `close()`
     // can race this awaited call (e.g. a fast app teardown mid-request) —
     // `emit()` after `close()` would otherwise throw.
@@ -149,8 +295,12 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
         // `_pendingWrites` overlay below — a write already pending/failed
         // when the first page fails to load must still show its own
         // placeholder card, not disappear behind a plain error screen
-        // until the next unrelated `pendingWrites` emission.
-        if (_pendingWrites.isEmpty) {
+        // until the next unrelated `pendingWrites` emission. Gated on
+        // `_visiblePendingWrites` (code-review fix, spec-5-2): a pending
+        // write that doesn't match the active filter selection has
+        // nothing to show here either.
+        final visiblePendingWrites = _visiblePendingWrites;
+        if (visiblePendingWrites.isEmpty) {
           emit(MeusRegistrosError(message: failure.message));
           return;
         }
@@ -158,7 +308,7 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
           MeusRegistrosLoaded(
             entries: const [],
             nextCursor: null,
-            pendingWrites: _pendingWrites,
+            pendingWrites: visiblePendingWrites,
           ),
         );
       },
@@ -176,16 +326,18 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
         // spec-4-2: a pending write already outstanding still needs its
         // own placeholder card to show, even over an otherwise-empty first
         // page — skips straight to `MeusRegistrosEmpty` only once neither
-        // applies.
-        if (page.items.isEmpty && _pendingWrites.isEmpty) {
+        // applies. Gated on `_visiblePendingWrites` (code-review fix,
+        // spec-5-2), same rationale as the failure branch above.
+        final visiblePendingWrites = _visiblePendingWrites;
+        if (page.items.isEmpty && visiblePendingWrites.isEmpty) {
           emit(const MeusRegistrosEmpty());
           return;
         }
         emit(
           MeusRegistrosLoaded(
-            entries: _dedupedById(page.items),
+            entries: dedupedById(page.items, (entry) => entry.id),
             nextCursor: nextCursor,
-            pendingWrites: _pendingWrites,
+            pendingWrites: visiblePendingWrites,
           ),
         );
       },
@@ -221,7 +373,15 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
     }
     final generation = _generation;
     emit(current.copyWith(isLoadingMore: true, loadMoreFailed: false));
-    final result = await _repository.list(cursor: current.nextCursor);
+    // spec-5-2 I/O matrix: "Load more with filters active" — the
+    // continuation carries the exact same filter selection as whichever
+    // `_loadFiltered()` call fetched this page's own first page.
+    final result = await _repository.list(
+      cursor: current.nextCursor,
+      source: _activeSource,
+      dateFrom: _activeDateFrom,
+      dateTo: _activeDateTo,
+    );
     if (isClosed || generation != _generation) {
       return;
     }
@@ -239,9 +399,13 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
         // I/O matrix: "Next page appended, no dup ids" — defensive
         // de-duplication in case a cursor-boundary entry is ever repeated
         // by the server, including a repeat *within* this same page
-        // (`_dedupedById`'s running `seenIds` set covers both).
+        // (`dedupedById`'s running `seenIds` set covers both).
         final seenIds = latest.entries.map((entry) => entry.id).toSet();
-        final newEntries = _dedupedById(page.items, seenIds: seenIds);
+        final newEntries = dedupedById(
+          page.items,
+          (entry) => entry.id,
+          seenIds: seenIds,
+        );
         // Defensive guard against a degenerate server response: if every
         // item in this "successful" page was already present by id (zero
         // genuinely-new entries) yet the server still reports a non-null
@@ -267,17 +431,4 @@ class MeusRegistrosCubit extends Cubit<MeusRegistrosState> {
     await _confirmedSubscription.cancel();
     return super.close();
   }
-}
-
-/// Filters [entries] down to the first occurrence of each id, checked
-/// against [seenIds] (default empty) — covers both a duplicate against an
-/// already-held id *and* a duplicate within [entries] itself, since a
-/// local copy of [seenIds] accumulates as entries are walked (the caller's
-/// own set, if any, is never mutated).
-List<Entry> _dedupedById(List<Entry> entries, {Set<String>? seenIds}) {
-  final seen = {...?seenIds};
-  return [
-    for (final entry in entries)
-      if (seen.add(entry.id)) entry,
-  ];
 }

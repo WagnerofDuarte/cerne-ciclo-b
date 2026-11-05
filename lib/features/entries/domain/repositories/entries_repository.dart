@@ -26,16 +26,32 @@ abstract class EntriesRepository {
   /// behavior assumed, undocumented (Code Map, decided per AGENTS.md
   /// policy: "where `docs/input/` is silent... decide and proceed").
   ///
+  /// spec-5-2 — [source]/[dateFrom]/[dateTo] are forwarded to
+  /// `entries-list` as its own `source`/`dateFrom`/`dateTo` query
+  /// parameters (`EntriesRemoteDataSource.list()`'s own doc), each only
+  /// when non-null; combining more than one narrows with AND logic (the
+  /// backend's own semantics, RF06 Acceptance Criteria) — this repository
+  /// does no client-side filtering/joining of its own (AD-9).
+  ///
   /// On [Failure.networkOffline]/[Failure.networkTimeout] specifically,
   /// falls back to a full dump of the `entries` Hive box, sorted
   /// `occurredAt` desc, with `EntriesPage.nextCursor: null` (Boundaries) —
   /// every *other* [Failure] (e.g. [Failure.authExpired]) propagates as
-  /// `Left`, unmapped (RNF09).
+  /// `Left`, unmapped (RNF09). That fallback (`cursor == null` only) stays
+  /// filter-oblivious regardless of [source]/[dateFrom]/[dateTo] — AD-9:
+  /// the cache is never locally filtered, so an offline first page always
+  /// renders the full cached list even with filters active.
   ///
   /// A successful page persists every item to the `entries` Hive box
   /// *before* returning `Right` — same "persist then return" ordering
   /// [create] already uses.
-  Future<Either<Failure, EntriesPage>> list({String? cursor, int limit = 20});
+  Future<Either<Failure, EntriesPage>> list({
+    String? cursor,
+    int limit = 20,
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  });
 
   /// spec-4-4 (RF07) — calls `entries-get` (`ApiClient.get`, via
   /// `EntriesRemoteDataSource`) with [id] as the one path parameter, then

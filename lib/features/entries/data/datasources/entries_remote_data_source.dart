@@ -46,18 +46,38 @@ class EntriesRemoteDataSource {
   }
 
   /// Calls `entries-list` (`ApiClient.get`) with `limit` always sent, and
-  /// `cursor` only when non-null (spec-4-1's own convention for an
-  /// optional-in-the-contract query parameter, mirroring [create]'s own
-  /// `mediaDurationSeconds` handling). Returns the raw page as a record —
-  /// no dedicated DTO wrapper type, since `EntriesRepositoryImpl.list()` is
-  /// this record's only reader.
+  /// `cursor`/`source`/`dateFrom`/`dateTo` only when non-null (spec-4-1's
+  /// own convention for an optional-in-the-contract query parameter,
+  /// mirroring [create]'s own `mediaDurationSeconds` handling — spec-5-2
+  /// extends it to these three new filter params). [source] is sent as
+  /// its own `.name` (the contract's own enum string); [dateFrom]/
+  /// [dateTo] as `.toUtc().toIso8601String()` — Review finding: a local
+  /// (non-UTC) `DateTime.toIso8601String()` has no `Z`/offset suffix,
+  /// which isn't valid RFC3339 and so doesn't satisfy the contract's own
+  /// `format: date-time` (`openapi.yaml`). Converting to UTC only here,
+  /// at the serialization boundary, keeps every caller's own local-
+  /// calendar computation (`EntriesFilterSheet`'s "local midnight this
+  /// Monday"/"the 1st of this month") correct — this data source never
+  /// computes the range itself, only forwards whatever
+  /// [EntriesRepository.list]'s own caller already resolved. Returns the
+  /// raw page as a record — no dedicated DTO wrapper type, since
+  /// `EntriesRepositoryImpl.list()` is this record's only reader.
   Future<Either<Failure, ({List<EntryDto> items, String? nextCursor})>> list({
     String? cursor,
     int limit = 20,
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
   }) async {
     final result = await _apiClient.get(
       'entries-list',
-      queryParameters: {'limit': limit, 'cursor': ?cursor},
+      queryParameters: {
+        'limit': limit,
+        'cursor': ?cursor,
+        'source': ?source?.name,
+        'dateFrom': ?dateFrom?.toUtc().toIso8601String(),
+        'dateTo': ?dateTo?.toUtc().toIso8601String(),
+      },
     );
     return result.flatMap((json) {
       try {
