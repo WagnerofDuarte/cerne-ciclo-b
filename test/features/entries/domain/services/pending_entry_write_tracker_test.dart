@@ -36,6 +36,7 @@ class _FakeEntriesRepository implements EntriesRepository {
     required String content,
     required EntrySource source,
     int? mediaDurationSeconds,
+    String? chatMessageId,
   }) {
     createCallCount++;
     createdContents.add(content);

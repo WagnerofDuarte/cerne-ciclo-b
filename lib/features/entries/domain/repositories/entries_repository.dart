@@ -15,10 +15,19 @@ abstract class EntriesRepository {
   /// box itself. Every [Failure] — including
   /// [Failure.networkOffline] — is returned as `Left`, unmapped and
   /// un-retried; the caller decides what to do with it (RNF09).
+  ///
+  /// spec-6-4 — [chatMessageId] is sent only when non-null (the pre-
+  /// reserved `Entry.chatMessageId`/`EntrySource.chat` slot, Boundaries:
+  /// "not a new architectural call"); every caller before RF10 passed
+  /// `null` implicitly, so this is purely additive. Idempotent at the
+  /// backend level for a given [chatMessageId] — a repeat call with the
+  /// same value never creates a second Entry (epic context's own
+  /// Technical Decisions).
   Future<Either<Failure, Entry>> create({
     required String content,
     required EntrySource source,
     int? mediaDurationSeconds,
+    String? chatMessageId,
   });
 
   /// Calls `entries-list` (`ApiClient.get`, via

@@ -4,6 +4,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:fpdart/fpdart.dart';
 
 import '../../../../core/failure/failure.dart';
+import '../../../../core/isolated_side_effect.dart';
+import '../../../entries/domain/entities/entry.dart';
+import '../../../entries/domain/usecases/save_chat_message_as_entry_use_case.dart';
+import '../../domain/entities/bookmark_state.dart';
 import '../../domain/entities/chat_message.dart';
 import '../../domain/entities/chat_session.dart';
 import '../../domain/entities/chat_stream_event.dart';
@@ -16,8 +20,11 @@ import 'chat_state.dart';
 /// same app session never re-bootstraps the session/history it already
 /// loaded (`init()`'s own no-op guard below).
 class ChatCubit extends Cubit<ChatState> {
-  ChatCubit(this._repository, this._connectivityWatcher)
-    : super(const ChatBootstrapLoading()) {
+  ChatCubit(
+    this._repository,
+    this._connectivityWatcher,
+    this._saveChatMessageAsEntryUseCase,
+  ) : super(const ChatBootstrapLoading()) {
     // spec-6-3 — subscribes immediately (not gated on bootstrap), so the
     // very first connectivity read is never missed while a slow
     // `init()` is still in flight; `_handleConnectivityChange` itself is
@@ -39,6 +46,11 @@ class ChatCubit extends Cubit<ChatState> {
 
   final ChatRepository _repository;
   final ConnectivityWatcher _connectivityWatcher;
+
+  /// spec-6-4 (RF10) — the shared use case AGENTS.md's RF10 rule requires;
+  /// never `EntriesRepository`, never anything under `entries/data/`/
+  /// `entries/presentation/` (Boundaries).
+  final SaveChatMessageAsEntryUseCase _saveChatMessageAsEntryUseCase;
 
   StreamSubscription<bool>? _connectivitySubscription;
 
@@ -136,10 +148,11 @@ class ChatCubit extends Cubit<ChatState> {
           // the new `_ConversasSection` sort"): a malformed `updatedAt`
           // must never crash bootstrap itself, so it falls back to the
           // epoch and simply sorts last instead of throwing.
-          final mostRecent = [...fetchedSessions]..sort(
-            (a, b) => (DateTime.tryParse(b.updatedAt) ?? DateTime(0))
-                .compareTo(DateTime.tryParse(a.updatedAt) ?? DateTime(0)),
-          );
+          final mostRecent = [...fetchedSessions]
+            ..sort(
+              (a, b) => (DateTime.tryParse(b.updatedAt) ?? DateTime(0))
+                  .compareTo(DateTime.tryParse(a.updatedAt) ?? DateTime(0)),
+            );
           return right(mostRecent.first);
         });
     if (isClosed) {
@@ -588,6 +601,111 @@ class ChatCubit extends Cubit<ChatState> {
       ),
     );
   }
+
+  /// spec-6-4 (RF10) — Boundaries: the bookmark affordance exists only on
+  /// [ChatMessageRole.user] bubbles; tapping it turns that exact message
+  /// into a journal Entry (`source: EntrySource.chat`) through
+  /// [_saveChatMessageAsEntryUseCase] only — never `EntriesRepository`
+  /// directly (AGENTS.md's RF10 rule). A no-op (I/O & Edge-Case Matrix)
+  /// when: [state] isn't [ChatReady]; [messageId] isn't found; its role
+  /// isn't [ChatMessageRole.user]; its [ChatUiMessage.serverId] is still
+  /// `null` (mirrors [retryMessage]'s own guard — the backend id a save
+  /// sends as `chatMessageId`, Boundaries); its [ChatUiMessage.
+  /// bookmarkState] is already [BookmarkSaved] (client-side no-op — a
+  /// repeat save is itself idempotent at the backend, Boundaries) or
+  /// already [BookmarkSaving] (re-entrancy guard, scoped to this one
+  /// message — [_isSending] stays scoped to send/retry only, never shared
+  /// with this guard).
+  Future<void> bookmarkMessage(String messageId) async {
+    final current = state;
+    if (current is! ChatReady) {
+      return;
+    }
+    final index = current.messages.indexWhere(
+      (message) => message.id == messageId,
+    );
+    if (index == -1) {
+      return;
+    }
+    final message = current.messages[index];
+    final serverId = message.serverId;
+    if (message.role != ChatMessageRole.user ||
+        serverId == null ||
+        message.bookmarkState is BookmarkSaved ||
+        message.bookmarkState is BookmarkSaving) {
+      return;
+    }
+
+    // Boundaries: both of this method's own emit() calls check isClosed
+    // first — not just the one after the await below.
+    if (isClosed) {
+      return;
+    }
+    emit(
+      current.copyWith(
+        messages: [
+          for (final existing in current.messages)
+            if (existing.id == messageId)
+              existing.copyWith(bookmarkState: const BookmarkState.saving())
+            else
+              existing,
+        ],
+      ),
+    );
+
+    final sideEffectResult = await isolatedSideEffect(
+      () => _saveChatMessageAsEntry(
+        content: message.content,
+        chatMessageId: serverId,
+      ),
+    );
+    // Flattens isolatedSideEffect's own outer Either (Left only on a
+    // thrown exception, mapped to malformedResponse — I/O matrix: "Side-
+    // effect throws") with the use case's own inner Either (Left on a
+    // normal, non-thrown save failure — I/O matrix: "Save fails") into
+    // one plain Either<Failure, Entry>, so both scenarios flip the bubble
+    // to the same retryable error state via the one match() below.
+    final result = sideEffectResult.match(
+      (failure) => left(failure),
+      (inner) => inner,
+    );
+
+    if (isClosed) {
+      return;
+    }
+    final latest = state;
+    if (latest is! ChatReady) {
+      return;
+    }
+    emit(
+      latest.copyWith(
+        messages: [
+          for (final existing in latest.messages)
+            if (existing.id == messageId)
+              existing.copyWith(
+                bookmarkState: result.match(
+                  (failure) => BookmarkState.error(failure),
+                  (_) => const BookmarkState.saved(),
+                ),
+              )
+            else
+              existing,
+        ],
+      ),
+    );
+  }
+
+  /// [bookmarkMessage]'s own save call — forwards to
+  /// [_saveChatMessageAsEntryUseCase] verbatim, wrapped by
+  /// [isolatedSideEffect] at the call site above (never here) so a
+  /// synchronous throw from the use case itself is still caught.
+  Future<Either<Failure, Entry>> _saveChatMessageAsEntry({
+    required String content,
+    required String chatMessageId,
+  }) => _saveChatMessageAsEntryUseCase(
+    content: content,
+    chatMessageId: chatMessageId,
+  );
 
   String _nextLocalId() => 'local-${_localIdCounter++}';
 

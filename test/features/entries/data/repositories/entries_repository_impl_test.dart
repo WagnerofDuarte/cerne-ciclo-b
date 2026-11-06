@@ -145,6 +145,45 @@ void main() {
         (_) => fail('expected Left'),
       );
     });
+
+    test('spec-6-4: a non-null chatMessageId is threaded through to the '
+        'remote data source and onto the mapped Entry', () async {
+      const chatDto = EntryDto(
+        id: 'e3',
+        content: 'Reflexão salva do chat.',
+        source: EntrySource.chat,
+        chatMessageId: 'srv-msg-1',
+        occurredAt: '2026-01-01T00:00:00Z',
+        serverRevision: 1,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      );
+      when(
+        () => mockRemoteDataSource.create(
+          content: any(named: 'content'),
+          source: any(named: 'source'),
+          chatMessageId: any(named: 'chatMessageId'),
+        ),
+      ).thenAnswer((_) async => right(chatDto));
+
+      final result = await repository.create(
+        content: 'Reflexão salva do chat.',
+        source: EntrySource.chat,
+        chatMessageId: 'srv-msg-1',
+      );
+
+      verify(
+        () => mockRemoteDataSource.create(
+          content: 'Reflexão salva do chat.',
+          source: EntrySource.chat,
+          chatMessageId: 'srv-msg-1',
+        ),
+      ).called(1);
+      result.match((_) => fail('expected Right'), (entry) {
+        expect(entry.chatMessageId, 'srv-msg-1');
+        expect(entry.source, EntrySource.chat);
+      });
+    });
   });
 
   group('create() — failure', () {

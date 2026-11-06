@@ -670,4 +670,20 @@ class DesignTokens {
     horizontal: spacingSm,
     vertical: spacingXs,
   );
+
+  /// spec-6-4's bookmark affordance icon (idle/saving/saved/error) — its
+  /// own standalone `16.0` literal, deliberately never an alias of
+  /// [entriesSearchBarIconSize] even though the two coincide at this exact
+  /// value today: they're unrelated design decisions (a chat bubble's
+  /// bookmark vs. Meus Registros' search/filter icons) that happen to
+  /// share a number, not the same design token.
+  static const double chatBookmarkIconSize = 16.0;
+
+  /// The bookmark affordance's own Reduce-Motion `saving` label's width
+  /// cap (Boundaries: "sits in a width-capped slot... so it cannot
+  /// squeeze the message bubble under large accessibility text scaling")
+  /// — a short Portuguese label ("Salvando") never needs more than this
+  /// at any reasonable text-scale factor, and `TextOverflow.ellipsis`
+  /// covers the rest.
+  static const double chatBookmarkSavingLabelMaxWidth = 64.0;
 }

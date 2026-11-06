@@ -4,12 +4,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 
 import 'package:cerne/core/failure/failure.dart';
+import 'package:cerne/features/chat/domain/entities/bookmark_state.dart';
 import 'package:cerne/features/chat/domain/entities/chat_message.dart';
 import 'package:cerne/features/chat/domain/entities/chat_session.dart';
 import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
 import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_state.dart';
+import 'package:cerne/features/entries/domain/entities/entry.dart';
+import 'package:cerne/features/entries/domain/usecases/save_chat_message_as_entry_use_case.dart';
 
 import '../../../../support/fake_connectivity_watcher.dart';
 
@@ -76,15 +79,67 @@ class _FakeChatRepository implements ChatRepository {
   }
 }
 
+/// spec-6-4 — a controllable fake, same `Completer`-per-call shape
+/// `pending_entry_write_tracker_test.dart`'s own `_FakeEntriesRepository`
+/// already uses: lets a test resolve a call whenever it chooses (to
+/// observe the `saving` state in between), or throw synchronously (I/O
+/// matrix: "Side-effect throws").
+class _FakeSaveChatMessageAsEntryUseCase
+    implements SaveChatMessageAsEntryUseCase {
+  final List<({String content, String chatMessageId})> calls = [];
+  final List<Completer<Either<Failure, Entry>>> _completers = [];
+
+  /// When set, the *next* [call] throws synchronously instead of
+  /// recording a completer — exercises `isolatedSideEffect`'s own
+  /// catch-to-`malformedResponse` path from `bookmarkMessage`'s call site.
+  bool throwOnNextCall = false;
+
+  @override
+  Future<Either<Failure, Entry>> call({
+    required String content,
+    required String chatMessageId,
+  }) {
+    calls.add((content: content, chatMessageId: chatMessageId));
+    if (throwOnNextCall) {
+      throwOnNextCall = false;
+      throw Exception('boom');
+    }
+    final completer = Completer<Either<Failure, Entry>>();
+    _completers.add(completer);
+    return completer.future;
+  }
+
+  void resolve(int callIndex, Either<Failure, Entry> result) {
+    _completers[callIndex].complete(result);
+  }
+}
+
+const _savedEntry = Entry(
+  id: 'entry-1',
+  content: 'oi',
+  source: EntrySource.chat,
+  chatMessageId: 'srv-1',
+  occurredAt: '2026-01-01T00:00:00Z',
+  serverRevision: 1,
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z',
+);
+
 void main() {
   late _FakeChatRepository fakeRepository;
   late FakeConnectivityWatcher fakeConnectivityWatcher;
+  late _FakeSaveChatMessageAsEntryUseCase fakeSaveChatMessageAsEntryUseCase;
   late ChatCubit cubit;
 
   setUp(() {
     fakeRepository = _FakeChatRepository();
     fakeConnectivityWatcher = FakeConnectivityWatcher();
-    cubit = ChatCubit(fakeRepository, fakeConnectivityWatcher);
+    fakeSaveChatMessageAsEntryUseCase = _FakeSaveChatMessageAsEntryUseCase();
+    cubit = ChatCubit(
+      fakeRepository,
+      fakeConnectivityWatcher,
+      fakeSaveChatMessageAsEntryUseCase,
+    );
   });
 
   tearDown(() async {
@@ -199,7 +254,11 @@ void main() {
         fakeRepository,
         onListSessions: () => listSessionsCallCount++,
       );
-      final secondCubit = ChatCubit(countingRepository, FakeConnectivityWatcher());
+      final secondCubit = ChatCubit(
+        countingRepository,
+        FakeConnectivityWatcher(),
+        _FakeSaveChatMessageAsEntryUseCase(),
+      );
       await secondCubit.init();
       await secondCubit.init();
       expect(listSessionsCallCount, 1);
@@ -217,7 +276,11 @@ void main() {
           fakeRepository,
           onCreateSession: () => createSessionCallCount++,
         );
-        final secondCubit = ChatCubit(countingRepository, FakeConnectivityWatcher());
+        final secondCubit = ChatCubit(
+          countingRepository,
+          FakeConnectivityWatcher(),
+          _FakeSaveChatMessageAsEntryUseCase(),
+        );
 
         final first = secondCubit.init();
         final second = secondCubit.init();
@@ -685,6 +748,7 @@ void main() {
         final freshCubit = ChatCubit(
           fakeRepository,
           FakeConnectivityWatcher(),
+          _FakeSaveChatMessageAsEntryUseCase(),
         );
         await freshCubit.init();
 
@@ -935,7 +999,11 @@ void main() {
         () async {
           final freshRepository = _FakeChatRepository();
           final freshWatcher = FakeConnectivityWatcher();
-          final freshCubit = ChatCubit(freshRepository, freshWatcher);
+          final freshCubit = ChatCubit(
+            freshRepository,
+            freshWatcher,
+            _FakeSaveChatMessageAsEntryUseCase(),
+          );
 
           freshWatcher.emit(false);
           await Future<void>.delayed(Duration.zero);
@@ -1009,7 +1077,11 @@ void main() {
           createdAt: '2026-01-01T00:00:00Z',
         ),
       ]);
-      final staleCubit = ChatCubit(staleRepository, FakeConnectivityWatcher());
+      final staleCubit = ChatCubit(
+        staleRepository,
+        FakeConnectivityWatcher(),
+        _FakeSaveChatMessageAsEntryUseCase(),
+      );
       await staleCubit.init();
       expect(staleCubit.state, isA<ChatReady>());
 
@@ -1025,6 +1097,265 @@ void main() {
       await staleCubit.close();
     },
   );
+
+  group('bookmarkMessage() — spec-6-4', () {
+    /// Drives a send that resolves into a `complete` user bubble with a
+    /// known [serverId] (via `message_created`) — the "happy path"/most
+    /// scenarios' own precondition: a user bubble eligible for
+    /// bookmarking.
+    Future<String> sendAndCompleteWithServerId(
+      String content,
+      String serverId,
+    ) async {
+      final future = cubit.sendMessage(content);
+      await Future<void>.delayed(Duration.zero);
+      final controller = fakeRepository.lastSendController!;
+      controller.add(right(ChatMessageCreatedEvent(serverId)));
+      controller.add(right(const ChatDoneEvent()));
+      await controller.close();
+      await future;
+      // Review finding: filters by role rather than assuming index 0,
+      // so this helper keeps working if message ordering ever changes
+      // (e.g. a prepended system message) instead of silently asserting
+      // on the wrong bubble.
+      return (cubit.state as ChatReady).messages
+          .firstWhere((message) => message.role == ChatMessageRole.user)
+          .id;
+    }
+
+    setUp(() async {
+      await cubit.init();
+    });
+
+    test(
+      'happy path: idle -> saving -> saved, the use case called once with '
+      'the message content and its serverId as chatMessageId',
+      () async {
+        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+        expect(
+          (cubit.state as ChatReady).messages[0].bookmarkState,
+          const BookmarkState.idle(),
+        );
+
+        final bookmarkFuture = cubit.bookmarkMessage(userId);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(
+          (cubit.state as ChatReady).messages[0].bookmarkState,
+          const BookmarkState.saving(),
+        );
+        expect(fakeSaveChatMessageAsEntryUseCase.calls, [
+          (content: 'oi', chatMessageId: 'srv-1'),
+        ]);
+
+        fakeSaveChatMessageAsEntryUseCase.resolve(0, right(_savedEntry));
+        await bookmarkFuture;
+
+        expect(
+          (cubit.state as ChatReady).messages[0].bookmarkState,
+          const BookmarkState.saved(),
+        );
+      },
+    );
+
+    test(
+      'I/O matrix "Already saved": tapping a saved bubble again is a '
+      'no-op — no new call, no state change',
+      () async {
+        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+        final bookmarkFuture = cubit.bookmarkMessage(userId);
+        fakeSaveChatMessageAsEntryUseCase.resolve(0, right(_savedEntry));
+        await bookmarkFuture;
+        expect(
+          (cubit.state as ChatReady).messages[0].bookmarkState,
+          const BookmarkState.saved(),
+        );
+        final before = cubit.state;
+
+        await cubit.bookmarkMessage(userId);
+
+        expect(fakeSaveChatMessageAsEntryUseCase.calls, hasLength(1));
+        expect(cubit.state, same(before));
+      },
+    );
+
+    test(
+      'I/O matrix "No serverId yet": tapping bookmark before '
+      'message_created ever set serverId is a no-op, same guard shape as '
+      'retryMessage',
+      () async {
+        final future = cubit.sendMessage('oi');
+        await Future<void>.delayed(Duration.zero);
+        final userId = (cubit.state as ChatReady).messages[0].id;
+        expect((cubit.state as ChatReady).messages[0].serverId, isNull);
+
+        await cubit.bookmarkMessage(userId);
+
+        expect(fakeSaveChatMessageAsEntryUseCase.calls, isEmpty);
+        expect(
+          (cubit.state as ChatReady).messages[0].bookmarkState,
+          const BookmarkState.idle(),
+        );
+
+        fakeRepository.lastSendController!.add(right(const ChatDoneEvent()));
+        await fakeRepository.lastSendController!.close();
+        await future;
+      },
+    );
+
+    test(
+      'a bookmark attempt on an AI (assistant) bubble is a no-op — the '
+      'affordance only ever exists on the user\'s own messages',
+      () async {
+        final future = cubit.sendMessage('oi');
+        await Future<void>.delayed(Duration.zero);
+        final controller = fakeRepository.lastSendController!;
+        controller.add(right(const ChatMessageCreatedEvent('srv-1')));
+        controller.add(right(const ChatDoneEvent()));
+        await controller.close();
+        await future;
+        final aiId = (cubit.state as ChatReady).messages[1].id;
+        expect((cubit.state as ChatReady).messages[1].role, ChatMessageRole.assistant);
+
+        await cubit.bookmarkMessage(aiId);
+
+        expect(fakeSaveChatMessageAsEntryUseCase.calls, isEmpty);
+      },
+    );
+
+    test(
+      'I/O matrix "Save fails": create() resolves Left(Failure) -> the '
+      'bubble flips to error (retryable); the rest of the session '
+      '(isSending, other messages) is unaffected',
+      () async {
+        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+
+        final bookmarkFuture = cubit.bookmarkMessage(userId);
+        fakeSaveChatMessageAsEntryUseCase.resolve(
+          0,
+          left(const Failure.networkTimeout(message: 'timeout')),
+        );
+        await bookmarkFuture;
+
+        final ready = cubit.state as ChatReady;
+        expect(
+          ready.messages[0].bookmarkState,
+          isA<BookmarkError>(),
+        );
+        expect(ready.isSending, isFalse);
+        expect(ready.messages, hasLength(2));
+      },
+    );
+
+    test(
+      'I/O matrix "Save fails" Error Handling: tapping an error bubble '
+      'again re-attempts the same save, returning to saving and then '
+      'resolving per the new result — never stuck on the first failure',
+      () async {
+        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+
+        final firstAttempt = cubit.bookmarkMessage(userId);
+        fakeSaveChatMessageAsEntryUseCase.resolve(
+          0,
+          left(const Failure.networkTimeout(message: 'timeout')),
+        );
+        await firstAttempt;
+        expect(
+          (cubit.state as ChatReady).messages[0].bookmarkState,
+          isA<BookmarkError>(),
+        );
+
+        final retryAttempt = cubit.bookmarkMessage(userId);
+        await Future<void>.delayed(Duration.zero);
+        expect(fakeSaveChatMessageAsEntryUseCase.calls, hasLength(2));
+        expect(
+          (cubit.state as ChatReady).messages[0].bookmarkState,
+          const BookmarkState.saving(),
+        );
+
+        fakeSaveChatMessageAsEntryUseCase.resolve(1, right(_savedEntry));
+        await retryAttempt;
+        expect(
+          (cubit.state as ChatReady).messages[0].bookmarkState,
+          const BookmarkState.saved(),
+        );
+      },
+    );
+
+    test(
+      'I/O matrix "Side-effect throws": a synchronous throw from the use '
+      'case is caught by isolatedSideEffect, mapped to '
+      'malformedResponse, and never propagates to the caller — the '
+      'bubble still flips to error',
+      () async {
+        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+        fakeSaveChatMessageAsEntryUseCase.throwOnNextCall = true;
+
+        await cubit.bookmarkMessage(userId);
+
+        final ready = cubit.state as ChatReady;
+        expect(ready.messages[0].bookmarkState, isA<BookmarkError>());
+        expect(
+          (ready.messages[0].bookmarkState as BookmarkError).failure,
+          isA<MalformedResponse>(),
+        );
+      },
+    );
+
+    test(
+      'I/O matrix "Second tap while saving": a no-op re-entrancy guard, '
+      'scoped to that one message — never a second call while the first '
+      'is still in flight',
+      () async {
+        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+
+        final firstBookmark = cubit.bookmarkMessage(userId);
+        await Future<void>.delayed(Duration.zero);
+        expect(fakeSaveChatMessageAsEntryUseCase.calls, hasLength(1));
+
+        await cubit.bookmarkMessage(userId);
+        expect(fakeSaveChatMessageAsEntryUseCase.calls, hasLength(1));
+
+        fakeSaveChatMessageAsEntryUseCase.resolve(0, right(_savedEntry));
+        await firstBookmark;
+      },
+    );
+
+    test(
+      'a save failure never disables the composer or affects other '
+      'bubbles — the session stays fully usable',
+      () async {
+        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+
+        final bookmarkFuture = cubit.bookmarkMessage(userId);
+        fakeSaveChatMessageAsEntryUseCase.resolve(
+          0,
+          left(const Failure.networkTimeout(message: 'timeout')),
+        );
+        await bookmarkFuture;
+
+        final ready = cubit.state as ChatReady;
+        expect(ready.isOffline, isFalse);
+        expect(ready.messages[1].bookmarkState, const BookmarkState.idle());
+      },
+    );
+
+    test(
+      'review: close()-ing the cubit while a bookmark save is in flight '
+      'never crashes — the stray emit after close is simply swallowed, '
+      'guarded by isClosed on both of bookmarkMessage\'s own emit() calls',
+      () async {
+        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+
+        final bookmarkFuture = cubit.bookmarkMessage(userId);
+        await Future<void>.delayed(Duration.zero);
+        await cubit.close();
+        fakeSaveChatMessageAsEntryUseCase.resolve(0, right(_savedEntry));
+
+        await expectLater(bookmarkFuture, completes);
+      },
+    );
+  });
 }
 
 /// A thin wrapper used only by the "calling init() again is a no-op" test

@@ -1,4 +1,5 @@
 import '../../../../core/failure/failure.dart';
+import '../../domain/entities/bookmark_state.dart';
 import '../../domain/entities/chat_message.dart';
 import '../../domain/entities/chat_session.dart';
 
@@ -126,6 +127,7 @@ class ChatUiMessage {
     required this.status,
     this.serverId,
     this.createdAt,
+    this.bookmarkState = const BookmarkState.idle(),
   });
 
   final String id;
@@ -158,10 +160,19 @@ class ChatUiMessage {
   /// `chat-messages-retry` with no `serverId`").
   final String? serverId;
 
+  /// spec-6-4 — this bubble's own bookmark affordance state, `idle` by
+  /// default; `ChatBubble` only ever renders it on a
+  /// [ChatMessageRole.user] bubble (Boundaries), but it's modeled here
+  /// unconditionally (same as every other [ChatUiMessage] field) rather
+  /// than made nullable for the AI-bubble case — an AI bubble simply never
+  /// has its own value read.
+  final BookmarkState bookmarkState;
+
   ChatUiMessage copyWith({
     String? content,
     ChatMessageStatus? status,
     String? serverId,
+    BookmarkState? bookmarkState,
   }) => ChatUiMessage(
     id: id,
     role: role,
@@ -169,6 +180,7 @@ class ChatUiMessage {
     status: status ?? this.status,
     serverId: serverId ?? this.serverId,
     createdAt: createdAt,
+    bookmarkState: bookmarkState ?? this.bookmarkState,
   );
 
   @override
@@ -180,14 +192,23 @@ class ChatUiMessage {
           other.content == content &&
           other.status == status &&
           other.serverId == serverId &&
-          other.createdAt == createdAt);
+          other.createdAt == createdAt &&
+          other.bookmarkState == bookmarkState);
 
   @override
-  int get hashCode =>
-      Object.hash(id, role, content, status, serverId, createdAt);
+  int get hashCode => Object.hash(
+    id,
+    role,
+    content,
+    status,
+    serverId,
+    createdAt,
+    bookmarkState,
+  );
 
   @override
   String toString() =>
       'ChatUiMessage(id: $id, role: $role, content: $content, '
-      'status: $status, serverId: $serverId, createdAt: $createdAt)';
+      'status: $status, serverId: $serverId, createdAt: $createdAt, '
+      'bookmarkState: $bookmarkState)';
 }

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:cerne/core/design_tokens.dart';
+import 'package:cerne/core/failure/failure.dart';
+import 'package:cerne/features/chat/domain/entities/bookmark_state.dart';
 import 'package:cerne/features/chat/domain/entities/chat_message.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_state.dart';
 import 'package:cerne/features/chat/presentation/widgets/chat_bubble.dart';
@@ -11,6 +13,7 @@ Future<void> _pump(
   ChatUiMessage message, {
   bool disableAnimations = false,
   VoidCallback? onRetry,
+  ValueChanged<String>? onBookmark,
 }) async {
   await tester.pumpWidget(
     Builder(
@@ -20,7 +23,11 @@ Future<void> _pump(
         ),
         child: MaterialApp(
           home: Scaffold(
-            body: ChatBubble(message: message, onRetry: onRetry),
+            body: ChatBubble(
+              message: message,
+              onRetry: onRetry,
+              onBookmark: onBookmark,
+            ),
           ),
         ),
       ),
@@ -266,6 +273,239 @@ void main() {
           find.textContaining('toque para tentar novamente'),
           findsNothing,
         );
+      },
+    );
+  });
+
+  group('spec-6-4 — bookmark affordance, user bubbles only', () {
+    testWidgets(
+      'Boundaries: never rendered on an AI bubble, regardless of state or '
+      'onBookmark being set',
+      (tester) async {
+        await _pump(
+          tester,
+          const ChatUiMessage(
+            id: '1',
+            role: ChatMessageRole.assistant,
+            content: 'Oi',
+            status: ChatMessageStatus.complete,
+            bookmarkState: BookmarkState.saved(),
+          ),
+          onBookmark: (_) {},
+        );
+
+        expect(find.byIcon(Icons.bookmark_border), findsNothing);
+        expect(find.byIcon(Icons.check), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'idle: outline icon, neutral color',
+      (tester) async {
+        await _pump(
+          tester,
+          const ChatUiMessage(
+            id: '1',
+            role: ChatMessageRole.user,
+            content: 'Oi',
+            status: ChatMessageStatus.complete,
+          ),
+          onBookmark: (_) {},
+        );
+
+        final icon = tester.widget<Icon>(find.byIcon(Icons.bookmark_border));
+        expect(icon.color, DesignTokens.colorTextSecondary);
+        expect(icon.size, DesignTokens.chatBookmarkIconSize);
+      },
+    );
+
+    testWidgets(
+      'saving: a spinner by default',
+      (tester) async {
+        await _pump(
+          tester,
+          const ChatUiMessage(
+            id: '1',
+            role: ChatMessageRole.user,
+            content: 'Oi',
+            status: ChatMessageStatus.complete,
+            bookmarkState: BookmarkState.saving(),
+          ),
+          onBookmark: (_) {},
+        );
+
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+        expect(find.text('Salvando'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'saving under Reduce Motion: a static label instead of the '
+      'spinner, in a width-capped slot',
+      (tester) async {
+        await _pump(
+          tester,
+          const ChatUiMessage(
+            id: '1',
+            role: ChatMessageRole.user,
+            content: 'Oi',
+            status: ChatMessageStatus.complete,
+            bookmarkState: BookmarkState.saving(),
+          ),
+          disableAnimations: true,
+          onBookmark: (_) {},
+        );
+
+        expect(find.byType(CircularProgressIndicator), findsNothing);
+        expect(find.text('Salvando'), findsOneWidget);
+        final constrainedBoxes = tester.widgetList<ConstrainedBox>(
+          find.ancestor(
+            of: find.text('Salvando'),
+            matching: find.byType(ConstrainedBox),
+          ),
+        );
+        expect(
+          constrainedBoxes.map((c) => c.constraints.maxWidth),
+          contains(DesignTokens.chatBookmarkSavingLabelMaxWidth),
+        );
+      },
+    );
+
+    testWidgets(
+      'saved: ochre check (colorAccent)',
+      (tester) async {
+        await _pump(
+          tester,
+          const ChatUiMessage(
+            id: '1',
+            role: ChatMessageRole.user,
+            content: 'Oi',
+            status: ChatMessageStatus.complete,
+            bookmarkState: BookmarkState.saved(),
+          ),
+          onBookmark: (_) {},
+        );
+
+        final icon = tester.widget<Icon>(find.byIcon(Icons.check));
+        expect(icon.color, DesignTokens.colorAccent);
+      },
+    );
+
+    testWidgets(
+      'error: red warning icon (colorError)',
+      (tester) async {
+        await _pump(
+          tester,
+          const ChatUiMessage(
+            id: '1',
+            role: ChatMessageRole.user,
+            content: 'Oi',
+            status: ChatMessageStatus.complete,
+            bookmarkState: BookmarkState.error(
+              Failure.networkTimeout(message: 'timeout'),
+            ),
+          ),
+          onBookmark: (_) {},
+        );
+
+        final icon = tester.widget<Icon>(
+          find.byIcon(Icons.warning_amber_rounded),
+        );
+        expect(icon.color, DesignTokens.colorError);
+      },
+    );
+
+    testWidgets(
+      'tapping it invokes onBookmark with the message id — tap target is '
+      '44pt min and exposed as Semantics(button: true)',
+      (tester) async {
+        String? tappedId;
+        await _pump(
+          tester,
+          const ChatUiMessage(
+            id: 'msg-1',
+            role: ChatMessageRole.user,
+            content: 'Oi',
+            status: ChatMessageStatus.complete,
+          ),
+          onBookmark: (id) => tappedId = id,
+        );
+
+        await tester.tap(find.byIcon(Icons.bookmark_border));
+        await tester.pump();
+
+        expect(tappedId, 'msg-1');
+
+        final semantics = tester.getSemantics(
+          find.ancestor(
+            of: find.byIcon(Icons.bookmark_border),
+            matching: find.byWidgetPredicate((w) => w is Semantics),
+          ).first,
+        );
+        expect(semantics.flagsCollection.isButton, isTrue);
+
+        final constrainedBoxes = tester.widgetList<ConstrainedBox>(
+          find.ancestor(
+            of: find.byIcon(Icons.bookmark_border),
+            matching: find.byType(ConstrainedBox),
+          ),
+        );
+        expect(
+          constrainedBoxes.map((c) => c.constraints.minWidth),
+          contains(DesignTokens.insertionModalTapTargetMin),
+        );
+        expect(
+          constrainedBoxes.map((c) => c.constraints.minHeight),
+          contains(DesignTokens.insertionModalTapTargetMin),
+        );
+      },
+    );
+
+    testWidgets(
+      'with no onBookmark callback: the icon still renders (state is '
+      'always visible) but exposes no button semantics node',
+      (tester) async {
+        await _pump(
+          tester,
+          const ChatUiMessage(
+            id: 'msg-1',
+            role: ChatMessageRole.user,
+            content: 'Oi',
+            status: ChatMessageStatus.complete,
+          ),
+        );
+
+        expect(find.byIcon(Icons.bookmark_border), findsOneWidget);
+        expect(
+          find.byWidgetPredicate(
+            (w) => w is Semantics && (w.properties.button ?? false),
+          ),
+          findsNothing,
+        );
+      },
+    );
+
+    testWidgets(
+      'tapping a saved bubble is still routed through onBookmark — the '
+      'client-side no-op lives in ChatCubit, not this widget',
+      (tester) async {
+        var tapCount = 0;
+        await _pump(
+          tester,
+          const ChatUiMessage(
+            id: 'msg-1',
+            role: ChatMessageRole.user,
+            content: 'Oi',
+            status: ChatMessageStatus.complete,
+            bookmarkState: BookmarkState.saved(),
+          ),
+          onBookmark: (_) => tapCount++,
+        );
+
+        await tester.tap(find.byIcon(Icons.check));
+        await tester.pump();
+
+        expect(tapCount, 1);
       },
     );
   });

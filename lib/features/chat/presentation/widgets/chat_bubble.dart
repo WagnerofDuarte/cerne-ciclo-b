@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/design_tokens.dart';
+import '../../domain/entities/bookmark_state.dart';
 import '../../domain/entities/chat_message.dart';
 import '../cubit/chat_state.dart';
 
@@ -8,6 +9,17 @@ import '../cubit/chat_state.dart';
 /// below so a future copy edit can't desync the spoken label from what's
 /// actually on screen.
 const _retryCopy = 'Falha ao gerar resposta — toque para tentar novamente';
+
+/// spec-6-4 — the bookmark affordance's own per-[BookmarkState] semantics
+/// label (`Semantics.label`), kept alongside its own icon/color mapping
+/// below so the two can never desync, same rationale [_retryCopy] already
+/// gives.
+String _bookmarkSemanticsLabel(BookmarkState state) => switch (state) {
+  BookmarkIdle() => 'Salvar como registro',
+  BookmarkSaving() => 'Salvando registro',
+  BookmarkSaved() => 'Registro salvo',
+  BookmarkError() => 'Falha ao salvar registro — toque para tentar novamente',
+};
 
 /// One message bubble — user (Boundaries: `colorChatBubbleUser`, squared
 /// bottom-right corner) vs AI (`colorSurfaceElevated`, squared bottom-left
@@ -20,7 +32,12 @@ const _retryCopy = 'Falha ao gerar resposta — toque para tentar novamente';
 /// `complete` (plain text, nothing else). [ChatUiMessage.content] itself is
 /// rendered as-is in every state — never cleared on failure (I/O matrix).
 class ChatBubble extends StatefulWidget {
-  const ChatBubble({required this.message, this.onRetry, super.key});
+  const ChatBubble({
+    required this.message,
+    this.onRetry,
+    this.onBookmark,
+    super.key,
+  });
 
   final ChatUiMessage message;
 
@@ -28,6 +45,13 @@ class ChatBubble extends StatefulWidget {
   /// retry copy; `null` on a user bubble (never shown there, only an AI
   /// response ever fails) or whenever a caller has nothing to wire it to.
   final VoidCallback? onRetry;
+
+  /// spec-6-4 — invoked with [message.id] when the user taps the bookmark
+  /// affordance on one of their own ([ChatMessageRole.user]) bubbles;
+  /// `null` whenever a caller has nothing to wire it to (same convention
+  /// [onRetry] already uses). Never shown at all on an AI bubble
+  /// (Boundaries), regardless of this being set.
+  final ValueChanged<String>? onBookmark;
 
   @override
   State<ChatBubble> createState() => _ChatBubbleState();
@@ -148,6 +172,71 @@ class _ChatBubbleState extends State<ChatBubble>
       ),
     );
 
+    // spec-6-4 — Boundaries: the bookmark affordance exists only on
+    // `ChatMessageRole.user` bubbles; its icon+color pair is driven
+    // unconditionally off `message.bookmarkState` (same "icon always
+    // reflects state regardless of a wired callback" convention
+    // `retryIndicator` above already uses), with the tappable
+    // `Semantics(button: true)` wrapper gated on `onBookmark` actually
+    // being supplied. Built lazily, only inside the `isUser` branch below
+    // (review finding: an AI bubble can never carry a meaningful
+    // `bookmarkState`, so there's no reason to construct this —
+    // including `_BookmarkIndicator`'s own switch over it — just to
+    // discard it every AI-bubble rebuild).
+    final onBookmark = widget.onBookmark;
+    Widget buildBookmarkButton() {
+      final bookmarkButton = InkWell(
+        onTap: onBookmark == null ? null : () => onBookmark(message.id),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            minWidth: DesignTokens.insertionModalTapTargetMin,
+            minHeight: DesignTokens.insertionModalTapTargetMin,
+          ),
+          child: Center(
+            child: _BookmarkIndicator(
+              state: message.bookmarkState,
+              reduceMotion: reduceMotion,
+            ),
+          ),
+        ),
+      );
+      return onBookmark == null
+          ? bookmarkButton
+          : Semantics(
+              button: true,
+              label: _bookmarkSemanticsLabel(message.bookmarkState),
+              excludeSemantics: true,
+              child: bookmarkButton,
+            );
+    }
+
+    // The timestamp caption and the bookmark button sit side by side
+    // (Code Map: "bookmark button beside timeCaption") — only on a user
+    // bubble; an AI bubble's own caption row is unchanged. The caption is
+    // wrapped in `Flexible` + ellipsis (review finding) so this 2-child
+    // row — new with this story, the AI-only `timeCaption` alone was
+    // never at risk — can't overflow under extreme accessibility text
+    // scaling; in practice the `HH:mm`/"agora" caption is always short
+    // enough that this never visibly truncates.
+    final timeRow = isUser
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  _formatTime(message.createdAt),
+                  overflow: TextOverflow.ellipsis,
+                  style: DesignTokens.textMonoCaption.copyWith(
+                    color: DesignTokens.colorTextSecondary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: DesignTokens.spacingXs),
+              buildBookmarkButton(),
+            ],
+          )
+        : timeCaption;
+
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
@@ -211,12 +300,71 @@ class _ChatBubbleState extends State<ChatBubble>
               // already supplies the matching 4px gap between the two).
               if (message.status == ChatMessageStatus.failed)
                 retryIndicatorWithSemantics,
-              timeCaption,
+              timeRow,
             ],
           ),
         ),
       ),
     );
+  }
+}
+
+/// spec-6-4 — [ChatBubble]'s own bookmark glyph: icon + color together,
+/// never color alone (Boundaries), one combination per [BookmarkState].
+/// [BookmarkSaving] swaps to a static label instead of the spinner under
+/// Reduce Motion — kept in its own width-capped slot
+/// ([DesignTokens.chatBookmarkSavingLabelMaxWidth], the same
+/// maxWidth-constrained shape [ChatBubble]'s own outer bubble container
+/// is constrained by) so it can never grow past its slot and squeeze the
+/// message bubble under large accessibility text scaling.
+class _BookmarkIndicator extends StatelessWidget {
+  const _BookmarkIndicator({required this.state, required this.reduceMotion});
+
+  final BookmarkState state;
+  final bool reduceMotion;
+
+  @override
+  Widget build(BuildContext context) {
+    return switch (state) {
+      BookmarkIdle() => const Icon(
+        Icons.bookmark_border,
+        size: DesignTokens.chatBookmarkIconSize,
+        color: DesignTokens.colorTextSecondary,
+      ),
+      BookmarkSaving() =>
+        reduceMotion
+            ? ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: DesignTokens.chatBookmarkSavingLabelMaxWidth,
+                ),
+                child: Text(
+                  'Salvando',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: DesignTokens.textCaptionSm.copyWith(
+                    color: DesignTokens.colorTextSecondary,
+                  ),
+                ),
+              )
+            : const SizedBox(
+                width: DesignTokens.chatBookmarkIconSize,
+                height: DesignTokens.chatBookmarkIconSize,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: DesignTokens.colorTextSecondary,
+                ),
+              ),
+      BookmarkSaved() => const Icon(
+        Icons.check,
+        size: DesignTokens.chatBookmarkIconSize,
+        color: DesignTokens.colorAccent,
+      ),
+      BookmarkError() => const Icon(
+        Icons.warning_amber_rounded,
+        size: DesignTokens.chatBookmarkIconSize,
+        color: DesignTokens.colorError,
+      ),
+    };
   }
 }
 

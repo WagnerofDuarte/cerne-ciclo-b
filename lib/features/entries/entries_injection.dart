@@ -7,6 +7,7 @@ import 'data/datasources/entries_remote_data_source.dart';
 import 'data/repositories/entries_repository_impl.dart';
 import 'domain/repositories/entries_repository.dart';
 import 'domain/services/pending_entry_write_tracker.dart';
+import 'domain/usecases/save_chat_message_as_entry_use_case.dart';
 import 'presentation/cubit/entries_search_cubit.dart';
 import 'presentation/cubit/entry_detail_cubit.dart';
 import 'presentation/cubit/meus_registros_cubit.dart';
@@ -46,6 +47,17 @@ Future<void> registerEntriesFeature() async {
   sl.registerLazySingleton<PendingEntryWriteTracker>(
     () => PendingEntryWriteTrackerImpl(repository: sl<EntriesRepository>()),
     dispose: (tracker) => tracker.dispose(),
+  );
+
+  // spec-6-4 (RF10) — the shared use case `ChatCubit.bookmarkMessage`
+  // depends on (AGENTS.md's RF10 rule), registered here (not in
+  // `chat_injection.dart`) since it wraps `EntriesRepository`, the entries
+  // feature's own port; `registerChatFeature()` runs after this one
+  // (`injection_container.dart`), so `sl<SaveChatMessageAsEntryUseCase>()`
+  // is always already registered by the time `chat_injection.dart` wires
+  // it into `ChatCubit`.
+  sl.registerLazySingleton<SaveChatMessageAsEntryUseCase>(
+    () => SaveChatMessageAsEntryUseCaseImpl(sl<EntriesRepository>()),
   );
 
   // spec-4-1 — `MeusRegistrosCubit` is a `lazySingleton`, not a factory

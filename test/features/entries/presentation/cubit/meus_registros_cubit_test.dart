@@ -55,6 +55,7 @@ class _FakeEntriesRepository implements EntriesRepository {
     required String content,
     required EntrySource source,
     int? mediaDurationSeconds,
+    String? chatMessageId,
   }) async => throw UnimplementedError('not expected to be called');
 
   @override
@@ -107,6 +108,7 @@ class _GatedEntriesRepository implements EntriesRepository {
     required String content,
     required EntrySource source,
     int? mediaDurationSeconds,
+    String? chatMessageId,
   }) async => throw UnimplementedError('not expected to be called');
 
   @override

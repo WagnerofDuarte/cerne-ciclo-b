@@ -13,6 +13,8 @@ import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
 import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_state.dart';
+import 'package:cerne/features/entries/domain/entities/entry.dart';
+import 'package:cerne/features/entries/domain/usecases/save_chat_message_as_entry_use_case.dart';
 
 import '../../support/fake_connectivity_watcher.dart';
 
@@ -79,6 +81,19 @@ class _FakeChatRepository implements ChatRepository {
   ) => const Stream.empty();
 }
 
+/// spec-6-4 — a throwing fake: this drawer-focused suite never exercises
+/// the bookmark affordance itself (that's `chat_cubit_test.dart`'s/
+/// `chat_screen_test.dart`'s job), only `AppDrawer`'s own
+/// `switchSession`/`startNewSession` wiring.
+class _UnusedSaveChatMessageAsEntryUseCase
+    implements SaveChatMessageAsEntryUseCase {
+  @override
+  Future<Either<Failure, Entry>> call({
+    required String content,
+    required String chatMessageId,
+  }) async => throw UnimplementedError('not expected to be called');
+}
+
 /// Tiny standalone `GoRouter` — [AppDrawer] needs *some* router ancestor
 /// to resolve `context.go(...)`, and — since spec-6-2 — a `ChatCubit`
 /// ancestor too, provided here exactly the way `ChatScreen` provides it
@@ -131,7 +146,11 @@ void main() {
   setUp(() async {
     fakeRepository = _FakeChatRepository();
     fakeConnectivityWatcher = FakeConnectivityWatcher();
-    cubit = ChatCubit(fakeRepository, fakeConnectivityWatcher);
+    cubit = ChatCubit(
+      fakeRepository,
+      fakeConnectivityWatcher,
+      _UnusedSaveChatMessageAsEntryUseCase(),
+    );
     await cubit.init();
   });
 
@@ -189,6 +208,7 @@ void main() {
       final crashCubit = ChatCubit(
         crashFakeRepository,
         FakeConnectivityWatcher(),
+        _UnusedSaveChatMessageAsEntryUseCase(),
       );
       addTearDown(crashCubit.close);
       await crashCubit.init();
@@ -318,7 +338,11 @@ void main() {
     ) async {
       final repository = _FakeChatRepository();
       final watcher = FakeConnectivityWatcher();
-      final localCubit = ChatCubit(repository, watcher);
+      final localCubit = ChatCubit(
+        repository,
+        watcher,
+        _UnusedSaveChatMessageAsEntryUseCase(),
+      );
       await localCubit.init();
       addTearDown(localCubit.close);
       addTearDown(watcher.close);

@@ -15,6 +15,7 @@ import 'package:cerne/features/capture/domain/services/photo_picker.dart';
 import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/photo_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
+import 'package:cerne/features/chat/domain/entities/bookmark_state.dart';
 import 'package:cerne/features/chat/domain/entities/chat_message.dart';
 import 'package:cerne/features/chat/domain/entities/chat_session.dart';
 import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
@@ -25,6 +26,7 @@ import 'package:cerne/features/chat/presentation/screens/chat_screen.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
+import 'package:cerne/features/entries/domain/usecases/save_chat_message_as_entry_use_case.dart';
 
 import '../../../../support/fake_connectivity_watcher.dart';
 
@@ -83,6 +85,37 @@ class _FakeChatRepository implements ChatRepository {
     final controller = StreamController<Either<Failure, ChatStreamEvent>>();
     lastRetryController = controller;
     return controller.stream;
+  }
+}
+
+/// spec-6-4 — a controllable fake, same shape `chat_cubit_test.dart`'s own
+/// `_FakeSaveChatMessageAsEntryUseCase` uses: lets the new end-to-end
+/// bookmark test below assert exactly what `ChatCubit.bookmarkMessage`
+/// wired through — `content`/`chatMessageId` — from a real, pumped
+/// `ChatScreen` tap, not just `ChatCubit`'s own unit tests.
+class _FakeSaveChatMessageAsEntryUseCase
+    implements SaveChatMessageAsEntryUseCase {
+  final List<({String content, String chatMessageId})> calls = [];
+  Either<Failure, Entry> result = right(
+    const Entry(
+      id: 'entry-1',
+      content: 'oi',
+      source: EntrySource.chat,
+      chatMessageId: 'srv-1',
+      occurredAt: '2026-01-01T00:00:00Z',
+      serverRevision: 1,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    ),
+  );
+
+  @override
+  Future<Either<Failure, Entry>> call({
+    required String content,
+    required String chatMessageId,
+  }) async {
+    calls.add((content: content, chatMessageId: chatMessageId));
+    return result;
   }
 }
 
@@ -183,9 +216,14 @@ void main() {
     WidgetTester tester,
     _FakeChatRepository repository, {
     FakeConnectivityWatcher? connectivityWatcher,
+    SaveChatMessageAsEntryUseCase? saveChatMessageAsEntryUseCase,
   }) async {
     final watcher = connectivityWatcher ?? FakeConnectivityWatcher();
-    final cubit = ChatCubit(repository, watcher);
+    final cubit = ChatCubit(
+      repository,
+      watcher,
+      saveChatMessageAsEntryUseCase ?? _FakeSaveChatMessageAsEntryUseCase(),
+    );
     addTearDown(cubit.close);
     addTearDown(watcher.close);
     await tester.pumpWidget(MaterialApp(home: ChatScreen(cubit: cubit)));
@@ -654,6 +692,48 @@ void main() {
       repository.lastRetryController?.add(right(const ChatDoneEvent()));
       await repository.lastRetryController?.close();
       await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'spec-6-4 — tapping the bookmark icon on a real, pumped ChatScreen '
+    'reaches the wired-through SaveChatMessageAsEntryUseCase with the '
+    'expected content/chatMessageId (the previous round left '
+    'chat_screen.dart\'s own onBookmark wiring line untested)',
+    (tester) async {
+      final repository = _FakeChatRepository();
+      final fakeUseCase = _FakeSaveChatMessageAsEntryUseCase();
+      final cubit = await pumpScreen(
+        tester,
+        repository,
+        saveChatMessageAsEntryUseCase: fakeUseCase,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'oi, tudo bem?');
+      await tester.tap(find.byIcon(Icons.send_outlined));
+      await tester.pump();
+
+      // message_created captures the user bubble's own serverId —
+      // bookmarkMessage's own non-null-serverId guard needs it.
+      repository.lastSendController?.add(
+        right(const ChatMessageCreatedEvent('srv-user-1')),
+      );
+      repository.lastSendController?.add(right(const ChatDoneEvent()));
+      await repository.lastSendController?.close();
+      await tester.pumpAndSettle();
+
+      expect((cubit.state as ChatReady).messages[0].serverId, 'srv-user-1');
+
+      await tester.tap(find.byIcon(Icons.bookmark_border));
+      await tester.pumpAndSettle();
+
+      expect(fakeUseCase.calls, [
+        (content: 'oi, tudo bem?', chatMessageId: 'srv-user-1'),
+      ]);
+      final ready = cubit.state as ChatReady;
+      expect(ready.messages[0].bookmarkState, const BookmarkState.saved());
+      expect(find.byIcon(Icons.check), findsOneWidget);
     },
   );
 }

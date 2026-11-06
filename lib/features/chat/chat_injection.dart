@@ -3,6 +3,7 @@ import 'package:hive_ce/hive_ce.dart';
 
 import '../../core/di/injection_container.dart';
 import '../../core/network/api_client.dart';
+import '../entries/domain/usecases/save_chat_message_as_entry_use_case.dart';
 import 'data/datasources/chat_remote_data_source.dart';
 import 'data/repositories/chat_repository_impl.dart';
 import 'data/services/connectivity_plus_watcher.dart';
@@ -29,8 +30,14 @@ Future<void> registerChatFeature() async {
   // other and from `entries_injection.dart`'s own unnamed one — `get_it`
   // keys a registration by type + instance name, so three same-typed
   // singletons coexist safely.
-  sl.registerSingleton<Box<Map>>(sessionsBox, instanceName: chatSessionsBoxName);
-  sl.registerSingleton<Box<Map>>(messagesBox, instanceName: chatMessagesBoxName);
+  sl.registerSingleton<Box<Map>>(
+    sessionsBox,
+    instanceName: chatSessionsBoxName,
+  );
+  sl.registerSingleton<Box<Map>>(
+    messagesBox,
+    instanceName: chatMessagesBoxName,
+  );
 
   sl.registerLazySingleton<ChatRemoteDataSource>(
     () => ChatRemoteDataSource(sl<ApiClient>()),
@@ -58,8 +65,18 @@ Future<void> registerChatFeature() async {
   // session (`ChatCubit.init()`'s own no-op guard). `dispose:` wires
   // `close()` into `get_it`'s own reset lifecycle, same convention every
   // other long-lived cubit in this codebase already uses.
+  // spec-6-4 (RF10) — `sl<SaveChatMessageAsEntryUseCase>()` is registered
+  // by `registerEntriesFeature()`, which `setupCoreDependencies()` always
+  // runs before this function (`injection_container.dart`), so it's
+  // already available here; only the use-case file is imported above,
+  // never `entries/domain/repositories/entries_repository.dart` (AGENTS.md
+  // RF10 rule).
   sl.registerLazySingleton<ChatCubit>(
-    () => ChatCubit(sl<ChatRepository>(), sl<ConnectivityWatcher>()),
+    () => ChatCubit(
+      sl<ChatRepository>(),
+      sl<ConnectivityWatcher>(),
+      sl<SaveChatMessageAsEntryUseCase>(),
+    ),
     dispose: (cubit) => cubit.close(),
   );
 }

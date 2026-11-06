@@ -22,6 +22,8 @@ import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
 import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
 import 'package:cerne/features/chat/presentation/screens/chat_screen.dart';
+import 'package:cerne/features/entries/domain/entities/entry.dart';
+import 'package:cerne/features/entries/domain/usecases/save_chat_message_as_entry_use_case.dart';
 import 'package:cerne/features/vault/domain/entities/vault_status.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 import 'package:cerne/features/vault/presentation/screens/vault_lock_screen.dart';
@@ -214,6 +216,20 @@ class _FakeChatRepository implements ChatRepository {
   ) => const Stream.empty();
 }
 
+/// spec-6-4 — same "never expected to be called" throwing-fake convention
+/// every other touched test file in this story now uses, swapped in for
+/// the real DI-backed `SaveChatMessageAsEntryUseCase` (which would
+/// otherwise wrap the real `EntriesRepository`/`ApiClient`/`Dio`
+/// pipeline) — this suite never exercises the bookmark affordance itself.
+class _UnusedSaveChatMessageAsEntryUseCase
+    implements SaveChatMessageAsEntryUseCase {
+  @override
+  Future<Either<Failure, Entry>> call({
+    required String content,
+    required String chatMessageId,
+  }) async => throw UnimplementedError('not expected to be called');
+}
+
 /// Proves the one real production composition root — `CerneApp` resolving
 /// `sl<AuthCubit>()`/`sl<SessionRepository>()`/`sl<VaultRepository>()`,
 /// building the one `go_router` (Story 1.6; AD-14's vault gate), and
@@ -291,7 +307,11 @@ void main() {
     // by `_FakeChatRepository` so reaching Home/Chat never hits the network.
     sl.unregister<ChatCubit>();
     sl.registerLazySingleton<ChatCubit>(
-      () => ChatCubit(_FakeChatRepository(), FakeConnectivityWatcher()),
+      () => ChatCubit(
+        _FakeChatRepository(),
+        FakeConnectivityWatcher(),
+        _UnusedSaveChatMessageAsEntryUseCase(),
+      ),
       dispose: (cubit) => cubit.close(),
     );
     // `ConfirmationDialog.isOpen` is a static single-overlay guard (shared

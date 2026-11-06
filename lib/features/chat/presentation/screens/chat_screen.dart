@@ -201,6 +201,12 @@ class _ChatScreenState extends State<ChatScreen> {
                       // bubble is harmless.
                       onRetry: () =>
                           widget.cubit.retryMessage(messages[index].id),
+                      // spec-6-4 — only a user bubble ever renders the
+                      // bookmark affordance at all (`ChatBubble`'s own
+                      // guard), so wiring this unconditionally on every
+                      // bubble is harmless, same rationale `onRetry`
+                      // above already documents.
+                      onBookmark: (id) => widget.cubit.bookmarkMessage(id),
                     ),
                   ),
                 },

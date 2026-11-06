@@ -33,11 +33,13 @@ class EntriesRepositoryImpl implements EntriesRepository {
     required String content,
     required EntrySource source,
     int? mediaDurationSeconds,
+    String? chatMessageId,
   }) async {
     final result = await _remoteDataSource.create(
       content: content,
       source: source,
       mediaDurationSeconds: mediaDurationSeconds,
+      chatMessageId: chatMessageId,
     );
     return result.match((failure) async => left(failure), (dto) async {
       // A thrown Hive/disk exception must never escape unmapped (RNF09) —

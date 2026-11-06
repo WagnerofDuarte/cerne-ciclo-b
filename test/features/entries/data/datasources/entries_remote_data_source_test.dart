@@ -132,6 +132,30 @@ void main() {
       });
     });
 
+    test('spec-6-4: a non-null chatMessageId is sent alongside content/'
+        'source', () async {
+      when(() => mockApiClient.post('entries-create', data: any(named: 'data')))
+          .thenAnswer((_) async => right(_entryBody(source: 'chat')));
+
+      await dataSource.create(
+        content: 'Reflexão salva do chat.',
+        source: EntrySource.chat,
+        chatMessageId: 'srv-msg-1',
+      );
+
+      final captured = verify(
+        () => mockApiClient.post(
+          'entries-create',
+          data: captureAny(named: 'data'),
+        ),
+      ).captured;
+      expect(captured.single, {
+        'content': 'Reflexão salva do chat.',
+        'source': 'chat',
+        'chatMessageId': 'srv-msg-1',
+      });
+    });
+
     test('decodes a non-null mediaDurationSeconds from the response data '
         'object', () async {
       when(() => mockApiClient.post('entries-create', data: any(named: 'data')))

@@ -13,15 +13,17 @@ class EntriesRemoteDataSource {
 
   final ApiClient _apiClient;
 
-  /// Sends `{content, source}` plus `mediaDurationSeconds` only when
-  /// non-null (spec-3-2's `source: audio` entries) — this story still
-  /// never passes `chatMessageId`/`occurredAt` (Boundaries: no `Entry`
-  /// field beyond the modeled 9; those two are optional in the contract
-  /// and belong to later stories/epics).
+  /// Sends `{content, source}` plus `mediaDurationSeconds`/`chatMessageId`
+  /// only when non-null (spec-3-2's `source: audio` entries;
+  /// spec-6-4/RF10's `source: chat` entries, mirroring the exact same
+  /// optional-field convention) — `occurredAt` still never sent (Boundaries:
+  /// no `Entry` field beyond the modeled 9; that one belongs to a later
+  /// epic).
   Future<Either<Failure, EntryDto>> create({
     required String content,
     required EntrySource source,
     int? mediaDurationSeconds,
+    String? chatMessageId,
   }) async {
     final result = await _apiClient.post(
       'entries-create',
@@ -29,6 +31,7 @@ class EntriesRemoteDataSource {
         'content': content,
         'source': source.name,
         'mediaDurationSeconds': ?mediaDurationSeconds,
+        'chatMessageId': ?chatMessageId,
       },
     );
     return result.flatMap((json) {
