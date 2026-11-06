@@ -7,7 +7,9 @@ import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/features/chat/data/datasources/chat_remote_data_source.dart';
 import 'package:cerne/features/chat/data/models/chat_message_dto.dart';
 import 'package:cerne/features/chat/data/models/chat_session_dto.dart';
+import 'package:cerne/features/chat/data/models/insight_dto.dart';
 import 'package:cerne/features/chat/data/repositories/chat_repository_impl.dart';
+import 'package:cerne/features/chat/domain/entities/chat_insight.dart';
 import 'package:cerne/features/chat/domain/entities/chat_message.dart';
 import 'package:cerne/features/chat/domain/entities/chat_session.dart';
 import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
@@ -24,6 +26,22 @@ ChatSessionDto _sessionDto(String id, String updatedAt) => ChatSessionDto(
   lastUserMessageAt: updatedAt,
   createdAt: updatedAt,
   updatedAt: updatedAt,
+);
+
+InsightDto _insightDto({
+  String id = 'ins-1',
+  String status = 'ready',
+  String? content = 'conteúdo do insight',
+  String? errorCode,
+}) => InsightDto(
+  id: id,
+  sessionId: 's1',
+  triggerType: 'message_count',
+  status: status,
+  errorCode: errorCode,
+  content: content,
+  dismissedAt: null,
+  createdAt: '2026-01-01T00:00:00Z',
 );
 
 ChatMessageDto _messageDto(String id, String sessionId, int seq) =>
@@ -303,6 +321,163 @@ void main() {
       expect(repository.retryMessage('s1', 'srv-user-1'), stream);
       verifyNever(() => mockMessagesBox.put(any(), any()));
       verifyNever(() => mockMessagesBox.putAll(any()));
+    });
+  });
+
+  group('generateInsight — spec-6-5', () {
+    test(
+      'wireValue strings reach the datasource, never the enum\'s own name',
+      () async {
+        when(
+          () => mockRemoteDataSource.generateInsight(
+            's1',
+            triggerType: 'message_count',
+            triggerKey: 'key-1',
+          ),
+        ).thenAnswer((_) async => right(_insightDto()));
+
+        await repository.generateInsight(
+          's1',
+          triggerType: InsightTriggerType.messageCount,
+          triggerKey: 'key-1',
+        );
+
+        verify(
+          () => mockRemoteDataSource.generateInsight(
+            's1',
+            triggerType: 'message_count',
+            triggerKey: 'key-1',
+          ),
+        ).called(1);
+      },
+    );
+
+    test('inactivity maps to its own wire string too', () async {
+      when(
+        () => mockRemoteDataSource.generateInsight(
+          's1',
+          triggerType: 'inactivity',
+          triggerKey: 'key-2',
+        ),
+      ).thenAnswer((_) async => right(_insightDto()));
+
+      await repository.generateInsight(
+        's1',
+        triggerType: InsightTriggerType.inactivity,
+        triggerKey: 'key-2',
+      );
+
+      verify(
+        () => mockRemoteDataSource.generateInsight(
+          's1',
+          triggerType: 'inactivity',
+          triggerKey: 'key-2',
+        ),
+      ).called(1);
+    });
+
+    test(
+      'a ready status with content maps to Right(ChatInsight) — no Hive '
+      'write (pure passthrough)',
+      () async {
+        when(() => mockRemoteDataSource.generateInsight(
+          any(),
+          triggerType: any(named: 'triggerType'),
+          triggerKey: any(named: 'triggerKey'),
+        )).thenAnswer(
+          (_) async => right(
+            _insightDto(id: 'ins-9', status: 'ready', content: 'olá'),
+          ),
+        );
+
+        final result = await repository.generateInsight(
+          's1',
+          triggerType: InsightTriggerType.messageCount,
+          triggerKey: 'key-1',
+        );
+
+        expect(result.isRight(), isTrue);
+        result.match((_) => fail('expected Right'), (insight) {
+          expect(insight, const ChatInsight(id: 'ins-9', content: 'olá'));
+        });
+        verifyNever(() => mockSessionsBox.put(any(), any()));
+        verifyNever(() => mockMessagesBox.put(any(), any()));
+      },
+    );
+
+    for (final status in ['generating', 'failed', 'dismissed']) {
+      test(
+        'a non-ready status ($status) maps to Right(null) — RF08: never '
+        'surfaced as a Failure',
+        () async {
+          when(() => mockRemoteDataSource.generateInsight(
+            any(),
+            triggerType: any(named: 'triggerType'),
+            triggerKey: any(named: 'triggerKey'),
+          )).thenAnswer((_) async => right(_insightDto(status: status)));
+
+          final result = await repository.generateInsight(
+            's1',
+            triggerType: InsightTriggerType.messageCount,
+            triggerKey: 'key-1',
+          );
+
+          expect(result.isRight(), isTrue);
+          result.match(
+            (_) => fail('expected Right'),
+            (insight) => expect(insight, isNull),
+          );
+        },
+      );
+    }
+
+    test(
+      'a ready status with null content still maps to Right(null) '
+      '(defensive — shouldn\'t happen per the contract)',
+      () async {
+        when(() => mockRemoteDataSource.generateInsight(
+          any(),
+          triggerType: any(named: 'triggerType'),
+          triggerKey: any(named: 'triggerKey'),
+        )).thenAnswer(
+          (_) async => right(_insightDto(status: 'ready', content: null)),
+        );
+
+        final result = await repository.generateInsight(
+          's1',
+          triggerType: InsightTriggerType.messageCount,
+          triggerKey: 'key-1',
+        );
+
+        expect(result.isRight(), isTrue);
+        result.match(
+          (_) => fail('expected Right'),
+          (insight) => expect(insight, isNull),
+        );
+      },
+    );
+
+    test('a transport Left propagates unchanged, unmapped', () async {
+      when(() => mockRemoteDataSource.generateInsight(
+        any(),
+        triggerType: any(named: 'triggerType'),
+        triggerKey: any(named: 'triggerKey'),
+      )).thenAnswer(
+        (_) async =>
+            left(const Failure.networkOffline(message: 'offline')),
+      );
+
+      final result = await repository.generateInsight(
+        's1',
+        triggerType: InsightTriggerType.messageCount,
+        triggerKey: 'key-1',
+      );
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<NetworkOffline>()),
+        (_) => fail('expected Left'),
+      );
     });
   });
 }

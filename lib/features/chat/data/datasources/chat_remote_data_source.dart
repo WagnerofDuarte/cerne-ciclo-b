@@ -7,6 +7,7 @@ import '../../../../core/network/api_client.dart';
 import '../../domain/entities/chat_stream_event.dart';
 import '../models/chat_message_dto.dart';
 import '../models/chat_session_dto.dart';
+import '../models/insight_dto.dart';
 
 /// The chat feature's one remote data source — non-streaming calls go
 /// through `ApiClient`'s plain JSON methods exactly like
@@ -163,6 +164,30 @@ class ChatRemoteDataSource {
       data: const {},
     ),
   );
+
+  /// spec-6-5 — calls `chat-insight-create` (`ApiClient.post`,
+  /// [sessionId] appended as the one trailing path segment) with
+  /// `{triggerType, triggerKey}`, same try/catch-to-`malformedResponse`
+  /// shape as [createSession] above.
+  Future<Either<Failure, InsightDto>> generateInsight(
+    String sessionId, {
+    required String triggerType,
+    required String triggerKey,
+  }) async {
+    final result = await _apiClient.post(
+      'chat-insight-create',
+      pathParams: [sessionId],
+      data: {'triggerType': triggerType, 'triggerKey': triggerKey},
+    );
+    return result.flatMap((json) {
+      try {
+        final data = json['data'] as Map<String, dynamic>;
+        return right(InsightDto.fromJson(data));
+      } catch (error) {
+        return left(Failure.malformedResponse(message: error.toString()));
+      }
+    });
+  }
 
   /// The shared SSE-consumption step behind [sendMessage]/[retryMessage]
   /// (Code Map: "extract shared SSE buffer/parse helper") — buffers raw

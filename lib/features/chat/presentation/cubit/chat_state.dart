@@ -1,5 +1,6 @@
 import '../../../../core/failure/failure.dart';
 import '../../domain/entities/bookmark_state.dart';
+import '../../domain/entities/chat_insight.dart';
 import '../../domain/entities/chat_message.dart';
 import '../../domain/entities/chat_session.dart';
 
@@ -47,6 +48,7 @@ class ChatReady extends ChatState {
     this.isSending = false,
     this.restoreScrollOffset,
     this.isOffline = false,
+    this.activeInsight,
   });
 
   final String sessionId;
@@ -96,12 +98,25 @@ class ChatReady extends ChatState {
   /// `Failure.networkOffline` handling.
   final bool isOffline;
 
+  /// spec-6-5 — the one proactive-insight overlay value (Intent: "a
+  /// single nullable `activeInsight` value ... never a second state
+  /// container"), rendered as the ochre-spine "INSIGHT" card at the end
+  /// of `ChatScreen`'s own message list whenever non-`null`. `null` by
+  /// default — the 3 existing direct `ChatReady(...)` constructions
+  /// (`_bootstrap`/`switchSession`/`startNewSession`) already start it
+  /// that way, never passing this field at all. Cleared only via
+  /// `ChatCubit.dismissInsight`'s own direct `ChatReady(...)`
+  /// construction, never through [copyWith] (its `??` pattern can't
+  /// express "set to null" — see [dismissInsight]'s own doc).
+  final ChatInsight? activeInsight;
+
   ChatReady copyWith({
     List<ChatUiMessage>? messages,
     List<ChatSession>? sessions,
     bool? isSending,
     double? restoreScrollOffset,
     bool? isOffline,
+    ChatInsight? activeInsight,
   }) => ChatReady(
     sessionId: sessionId,
     messages: messages ?? this.messages,
@@ -109,6 +124,7 @@ class ChatReady extends ChatState {
     isSending: isSending ?? this.isSending,
     restoreScrollOffset: restoreScrollOffset ?? this.restoreScrollOffset,
     isOffline: isOffline ?? this.isOffline,
+    activeInsight: activeInsight ?? this.activeInsight,
   );
 }
 

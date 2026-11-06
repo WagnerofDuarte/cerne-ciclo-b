@@ -1,6 +1,7 @@
 import 'package:fpdart/fpdart.dart';
 
 import '../../../../core/failure/failure.dart';
+import '../entities/chat_insight.dart';
 import '../entities/chat_message.dart';
 import '../entities/chat_session.dart';
 import '../entities/chat_stream_event.dart';
@@ -70,4 +71,22 @@ abstract class ChatRepository {
     String sessionId,
     String userMessageId,
   );
+
+  /// spec-6-5 — calls `chat-insight-create` (`ApiClient.post`, [sessionId]
+  /// appended as the one trailing path segment) with `{triggerType:
+  /// triggerType.wireValue, triggerKey}`. `ChatCubit` fires this
+  /// fire-and-forget, unawaited, through `isolatedSideEffect` — its first
+  /// unawaited caller (Boundaries). `null` means "no insight to show": a
+  /// successful (200) response whose `status` isn't `'ready'` — RF08:
+  /// "never an HTTP error; a failure becomes status='failed'", so a
+  /// genuine backend-side generation failure still arrives as a `Right`
+  /// here, just carrying `null`. Only a transport-level problem (offline,
+  /// timeout, malformed shape, etc.) surfaces as `Left`, unmapped
+  /// (RNF09) — `ChatCubit` drops both cases silently either way
+  /// (Boundaries).
+  Future<Either<Failure, ChatInsight?>> generateInsight(
+    String sessionId, {
+    required InsightTriggerType triggerType,
+    required String triggerKey,
+  });
 }

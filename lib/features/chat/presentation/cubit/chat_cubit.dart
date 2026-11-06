@@ -8,9 +8,11 @@ import '../../../../core/isolated_side_effect.dart';
 import '../../../entries/domain/entities/entry.dart';
 import '../../../entries/domain/usecases/save_chat_message_as_entry_use_case.dart';
 import '../../domain/entities/bookmark_state.dart';
+import '../../domain/entities/chat_insight.dart';
 import '../../domain/entities/chat_message.dart';
 import '../../domain/entities/chat_session.dart';
 import '../../domain/entities/chat_stream_event.dart';
+import '../../domain/insight_trigger_config.dart';
 import '../../domain/repositories/chat_repository.dart';
 import '../../domain/services/connectivity_watcher.dart';
 import 'chat_state.dart';
@@ -23,8 +25,15 @@ class ChatCubit extends Cubit<ChatState> {
   ChatCubit(
     this._repository,
     this._connectivityWatcher,
-    this._saveChatMessageAsEntryUseCase,
-  ) : super(const ChatBootstrapLoading()) {
+    this._saveChatMessageAsEntryUseCase, {
+    // spec-6-5 Design Notes: "the inactivity Duration is constructor-
+    // overridable purely for test speed (no fake_async dependency exists
+    // in this project)" — production never passes this, so the default
+    // (the real 2-minute constant) is always what runs; no
+    // `chat_injection.dart` change needed.
+    Duration insightInactivityTimeout = defaultInsightInactivityTimeout,
+  }) : _insightTimeout = insightInactivityTimeout,
+       super(const ChatBootstrapLoading()) {
     // spec-6-3 — subscribes immediately (not gated on bootstrap), so the
     // very first connectivity read is never missed while a slow
     // `init()` is still in flight; `_handleConnectivityChange` itself is
@@ -117,6 +126,49 @@ class ChatCubit extends Cubit<ChatState> {
   /// lifetime as [_scrollOffsets] above (Boundaries).
   final Map<String, BookmarkState> _bookmarkStateByServerId = {};
 
+  /// spec-6-5 — the per-session trigger-window timeout racing
+  /// [insightMessageCountThreshold] (Boundaries); overridable only via
+  /// the constructor's own test seam (Design Notes).
+  final Duration _insightTimeout;
+
+  /// spec-6-5 — user messages sent via [sendMessage] only (never
+  /// [retryMessage], Boundaries) since the current trigger window
+  /// opened. Reset to `0` every time a window closes, by either trigger.
+  int _insightMessagesSinceWindowStart = 0;
+
+  /// spec-6-5 — the current window's own inactivity side of the race;
+  /// cancelled/restarted on every [sendMessage] call and every window
+  /// close (Boundaries) — a single field, never a per-session map,
+  /// because only one session is ever active/racing at a time
+  /// ([switchSession]/[startNewSession] always reopen a fresh window for
+  /// whichever session becomes active, Boundaries: "never let the
+  /// counter/timer leak across sessions").
+  Timer? _insightInactivityTimer;
+
+  /// spec-6-5 — the current window's own client-generated key, echoed to
+  /// `chat-insight-create` as `triggerKey` (Design Notes: "the contract
+  /// only requires minLength: 1 with no documented semantics beyond
+  /// echoing it back").
+  String _insightTriggerKey = '';
+
+  /// spec-6-5 — monotonic counter behind every freshly generated
+  /// [_insightTriggerKey], mirrors [_localIdCounter]/[_nextLocalId].
+  int _insightWindowCounter = 0;
+
+  /// Review fix: a monotonic counter bumped once per [_fireInsightTrigger]
+  /// call, so [_applyInsightResult] can tell whether the result it just
+  /// received still belongs to the most recently fired request. A window
+  /// reopens (and can fire again) immediately after the previous one
+  /// fires, before that previous call's own response has necessarily
+  /// arrived — without this guard, two overlapping in-flight calls for
+  /// the *same* session could resolve out of order, letting a stale
+  /// (older) result overwrite a newer `activeInsight`, or resurrect one
+  /// the user already dismissed. Unlike [_insightTriggerKey] (which
+  /// identifies *which window* a request was for for the backend's own
+  /// idempotency), this identifies *recency* across overlapping requests
+  /// for the cubit's own purposes — the backend is never told about it.
+  int _insightRequestSeq = 0;
+
   /// Boundaries: "On opening Home/Chat, silently ensure one Chat Session
   /// exists (reuse the most recent from `chat-sessions-list`, else
   /// `chat-sessions-create` with no title)". A no-op once already
@@ -184,14 +236,19 @@ class ChatCubit extends Cubit<ChatState> {
         }
         messagesResult.match(
           (failure) => emit(ChatBootstrapError(failure)),
-          (messages) => emit(
-            ChatReady(
-              sessionId: session.id,
-              messages: messages.map(_fromDomain).toList(),
-              sessions: sessions,
-              isOffline: _isOffline,
-            ),
-          ),
+          (messages) {
+            // spec-6-5 — opens this cubit's very first trigger window,
+            // tied to the session this bootstrap settled on.
+            _resetInsightWindow(session.id);
+            emit(
+              ChatReady(
+                sessionId: session.id,
+                messages: messages.map(_fromDomain).toList(),
+                sessions: sessions,
+                isOffline: _isOffline,
+              ),
+            );
+          },
         );
       },
     );
@@ -248,6 +305,10 @@ class ChatCubit extends Cubit<ChatState> {
       },
       (messages) {
         if (!isClosed) {
+          // spec-6-5 — reopens a fresh trigger window for the session
+          // becoming active, so the previous session's own window
+          // (counter/timer) never leaks across the switch (Boundaries).
+          _resetInsightWindow(sessionId);
           emit(
             ChatReady(
               sessionId: sessionId,
@@ -299,6 +360,9 @@ class ChatCubit extends Cubit<ChatState> {
       },
       (session) {
         if (!isClosed) {
+          // spec-6-5 — same rationale as [switchSession] above: a brand
+          // new session always needs its own fresh trigger window.
+          _resetInsightWindow(session.id);
           emit(
             ChatReady(
               sessionId: session.id,
@@ -364,6 +428,21 @@ class ChatCubit extends Cubit<ChatState> {
       return;
     }
     _isSending = true;
+
+    // spec-6-5 — counts only a genuine sendMessage() call (never
+    // retryMessage, Boundaries: "a counter ... never retryMessage").
+    // Whichever of the two trigger conditions is satisfied first wins
+    // the race for this window; reaching the threshold here fires
+    // immediately rather than waiting for the inactivity timer to also
+    // elapse.
+    _insightMessagesSinceWindowStart++;
+    if (_insightMessagesSinceWindowStart >= insightMessageCountThreshold) {
+      _fireInsightTrigger(current.sessionId, InsightTriggerType.messageCount);
+    } else {
+      // Counter/key untouched (Code Map) — only the inactivity side of
+      // the race restarts, so the window itself stays open.
+      _restartInsightInactivityTimer(current.sessionId);
+    }
 
     final userMessage = ChatUiMessage(
       id: _nextLocalId(),
@@ -745,6 +824,141 @@ class ChatCubit extends Cubit<ChatState> {
 
   String _nextLocalId() => 'local-${_localIdCounter++}';
 
+  /// spec-6-5 — opens a fresh trigger window for [sessionId]: zeroes the
+  /// message counter, generates a new [_insightTriggerKey] (mirrors
+  /// [_nextLocalId]'s own counter-based shape), then restarts the
+  /// inactivity side of the race via [_restartInsightInactivityTimer].
+  /// Called from every one of the 3 existing direct `ChatReady(...)`
+  /// constructions ([_bootstrap]/[switchSession]/[startNewSession]) and
+  /// from [_fireInsightTrigger] itself, immediately after firing
+  /// (Boundaries: "resets the counter ... before the network call
+  /// resolves, so the window closes structurally and the other
+  /// condition can never also fire for it").
+  void _resetInsightWindow(String sessionId) {
+    _insightMessagesSinceWindowStart = 0;
+    _insightTriggerKey = 'insight-${_insightWindowCounter++}';
+    _restartInsightInactivityTimer(sessionId);
+  }
+
+  /// spec-6-5 — [sendMessage]'s own "else" branch (below threshold):
+  /// cancels/restarts the inactivity timer alone, leaving the message
+  /// counter/[_insightTriggerKey] untouched (Code Map) — also the tail
+  /// end of [_resetInsightWindow] above, which touches all three.
+  void _restartInsightInactivityTimer(String sessionId) {
+    _insightInactivityTimer?.cancel();
+    _insightInactivityTimer = Timer(_insightTimeout, () {
+      _fireInsightTrigger(sessionId, InsightTriggerType.inactivity);
+    });
+  }
+
+  /// spec-6-5 — fires whichever trigger condition won the race
+  /// ([triggerType]): captures the current [_insightTriggerKey], reopens
+  /// the *next* window immediately via [_resetInsightWindow] (Boundaries:
+  /// "before the network call resolves"), then calls
+  /// `ChatRepository.generateInsight` through [isolatedSideEffect],
+  /// **unawaited** (Boundaries: "never await the insight
+  /// isolatedSideEffect call" — this story's first unawaited caller, per
+  /// the epic's own Technical Decisions). The result, whenever it
+  /// resolves, is routed through [_applyInsightResult].
+  void _fireInsightTrigger(String sessionId, InsightTriggerType triggerType) {
+    final triggerKey = _insightTriggerKey;
+    // Review fix: captured *before* the call resolves, so a later-fired
+    // request (which bumps this same counter again) can be told apart
+    // from this one when both are still in flight.
+    final requestSeq = ++_insightRequestSeq;
+    _resetInsightWindow(sessionId);
+    unawaited(
+      isolatedSideEffect(
+        () => _generateInsight(
+          sessionId,
+          triggerType: triggerType,
+          triggerKey: triggerKey,
+        ),
+      ).then((result) => _applyInsightResult(sessionId, requestSeq, result)),
+    );
+  }
+
+  /// [_fireInsightTrigger]'s own call — forwards to
+  /// [ChatRepository.generateInsight] verbatim, wrapped by
+  /// [isolatedSideEffect] at the call site above (never here), same
+  /// double-`Either` shape [_saveChatMessageAsEntry] already uses for
+  /// [bookmarkMessage].
+  Future<Either<Failure, ChatInsight?>> _generateInsight(
+    String sessionId, {
+    required InsightTriggerType triggerType,
+    required String triggerKey,
+  }) => _repository.generateInsight(
+    sessionId,
+    triggerType: triggerType,
+    triggerKey: triggerKey,
+  );
+
+  /// Flattens [isolatedSideEffect]'s own outer `Either` (`Left` only on a
+  /// thrown exception) with [ChatRepository.generateInsight]'s own inner
+  /// `Either` (`Left` on a transport failure; `Right(null)` on a
+  /// successful call whose `status` wasn't `'ready'`) into one plain
+  /// `Either<Failure, ChatInsight?>` — same flattening shape
+  /// [bookmarkMessage] already uses for its own side effect. Any `Left`,
+  /// or a `null` insight either way, is a fully silent no-op (Boundaries:
+  /// "no card, no overlay, no retry affordance"). On a real insight,
+  /// guards [isClosed], that [requestSeq] is still the *most recently
+  /// fired* request (review fix: discards a stale result from a request
+  /// a later one has since superseded, so it can never overwrite a newer
+  /// `activeInsight` or resurrect one the user already dismissed), and
+  /// that [state] is still [ChatReady] for this exact [sessionId] — an
+  /// insight resolving after [switchSession]/[startNewSession] moved away
+  /// is dropped (Boundaries/I/O matrix: "Session switched mid-flight").
+  void _applyInsightResult(
+    String sessionId,
+    int requestSeq,
+    Either<Failure, Either<Failure, ChatInsight?>> result,
+  ) {
+    final flattened = result.match(
+      (failure) => left(failure),
+      (inner) => inner,
+    );
+    final insight = flattened.match((_) => null, (insight) => insight);
+    if (insight == null || isClosed || requestSeq != _insightRequestSeq) {
+      return;
+    }
+    final current = state;
+    if (current is! ChatReady || current.sessionId != sessionId) {
+      return;
+    }
+    emit(current.copyWith(activeInsight: insight));
+  }
+
+  /// spec-6-5 — Boundaries: clears [ChatReady.activeInsight] via a direct
+  /// `ChatReady(...)` construction, every other field carried forward
+  /// unchanged — `copyWith`'s own `??` pattern can never express "set to
+  /// null" (same reason [switchSession]/[startNewSession]/[_bootstrap]
+  /// already build a fresh `ChatReady` directly instead of through
+  /// `copyWith` whenever a field needs to go to `null`/be replaced
+  /// wholesale). Never calls the backend — no dismiss endpoint exists in
+  /// the contract (Boundaries) — and never touches any other field,
+  /// including scroll position (Acceptance Criteria). A no-op while
+  /// [state] isn't [ChatReady], or while [ChatReady.activeInsight] is
+  /// already `null` (I/O matrix: "Dismiss with none active").
+  void dismissInsight() {
+    if (isClosed) {
+      return;
+    }
+    final current = state;
+    if (current is! ChatReady || current.activeInsight == null) {
+      return;
+    }
+    emit(
+      ChatReady(
+        sessionId: current.sessionId,
+        messages: current.messages,
+        sessions: current.sessions,
+        isSending: current.isSending,
+        restoreScrollOffset: current.restoreScrollOffset,
+        isOffline: current.isOffline,
+      ),
+    );
+  }
+
   /// spec-6-3 — [_connectivityWatcher]'s own listener: [isOnline] `true`
   /// means the device currently has connectivity. Always updates
   /// [_isOffline] (even outside [ChatReady] — see [_isOffline]'s own doc),
@@ -789,6 +1003,9 @@ class ChatCubit extends Cubit<ChatState> {
   Future<void> close() {
     _connectivitySubscription?.cancel();
     _sendSubscription?.cancel();
+    // spec-6-5 — a closed cubit must never let a pending trigger fire
+    // into a dead instance.
+    _insightInactivityTimer?.cancel();
     final completer = _sendCompleter;
     if (completer != null && !completer.isCompleted) {
       completer.complete();

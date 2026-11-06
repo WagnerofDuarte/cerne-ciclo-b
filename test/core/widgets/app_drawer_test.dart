@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:fpdart/fpdart.dart' hide State;
 import 'package:go_router/go_router.dart';
 
 import 'package:cerne/core/design_tokens.dart';
 import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/core/widgets/app_drawer.dart';
+import 'package:cerne/features/chat/domain/entities/chat_insight.dart';
 import 'package:cerne/features/chat/domain/entities/chat_message.dart';
 import 'package:cerne/features/chat/domain/entities/chat_session.dart';
 import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
@@ -15,6 +16,7 @@ import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_state.dart';
 
 import '../../support/fake_connectivity_watcher.dart';
+import '../../support/testwidgets_with_cleanup.dart';
 import '../../support/unused_save_chat_message_as_entry_use_case.dart';
 
 const _sessionA = ChatSession(
@@ -78,6 +80,13 @@ class _FakeChatRepository implements ChatRepository {
     String sessionId,
     String userMessageId,
   ) => const Stream.empty();
+
+  @override
+  Future<Either<Failure, ChatInsight?>> generateInsight(
+    String sessionId, {
+    required InsightTriggerType triggerType,
+    required String triggerKey,
+  }) async => throw UnimplementedError('not expected to be called');
 }
 
 /// Tiny standalone `GoRouter` — [AppDrawer] needs *some* router ancestor
@@ -119,6 +128,34 @@ Future<void> _openDrawer(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// spec-6-5 — every [ChatCubit] this suite constructs (the shared one
+/// from `setUp()`, plus any test-local one) is tracked here and closed
+/// from the local `testWidgets` override below, right after each test's
+/// own body completes. A bootstrapped `ChatCubit` now always starts a
+/// real `_insightInactivityTimer`; the ordinary `addTearDown`/group-level
+/// `tearDown()` pattern this suite already uses for other cleanup runs
+/// too late to satisfy `testWidgets`' own `!timersPending` invariant
+/// check — that check runs *inside* the test's own callback execution,
+/// before any `addTearDown`/`tearDown` callback ever fires, regardless of
+/// whether the cubit (and its Timer) was created in `setUp()` or mid-test
+/// (`close()` cancels either way, so tracking covers both).
+final List<ChatCubit> _cubitsPendingClose = [];
+
+/// Wraps the real `testWidgets` so every test in this file automatically
+/// closes every cubit [_cubitsPendingClose] collected during it.
+void testWidgets(String description, WidgetTesterCallback callback) {
+  testWidgetsWithCleanup(
+    description,
+    callback,
+    cleanup: () async {
+      for (final cubit in _cubitsPendingClose) {
+        await cubit.close();
+      }
+      _cubitsPendingClose.clear();
+    },
+  );
+}
+
 /// Tela 3 — Menu lateral. Covers the static chrome (header, nav items,
 /// width token — unchanged since Story 1.6) plus spec-6-2's "CONVERSAS"
 /// section and its two entry points (`switchSession`/`startNewSession`),
@@ -138,10 +175,20 @@ void main() {
       UnusedSaveChatMessageAsEntryUseCase(),
     );
     await cubit.init();
+    _cubitsPendingClose.add(cubit);
   });
 
   tearDown(() async {
-    await cubit.close();
+    // spec-6-5 — `cubit` is already closed by this file's own `testWidgets`
+    // override above, which has to run before this `tearDown` (see that
+    // override's doc). Calling `Cubit.close()` a second time on an
+    // already-closed instance never resolves inside `flutter_test`'s
+    // fake-async zone — its `await` depends on a microtask that's only
+    // flushed by a later `pump()`, and none happens once the test body has
+    // already returned — which froze this entire suite until guarded here.
+    if (!cubit.isClosed) {
+      await cubit.close();
+    }
     await fakeConnectivityWatcher.close();
   });
 
@@ -195,7 +242,7 @@ void main() {
         FakeConnectivityWatcher(),
         UnusedSaveChatMessageAsEntryUseCase(),
       );
-      addTearDown(crashCubit.close);
+      _cubitsPendingClose.add(crashCubit);
       await crashCubit.init();
 
       final router = _buildTestRouter(crashCubit);
@@ -323,7 +370,7 @@ void main() {
         UnusedSaveChatMessageAsEntryUseCase(),
       );
       await localCubit.init();
-      addTearDown(localCubit.close);
+      _cubitsPendingClose.add(localCubit);
       addTearDown(watcher.close);
 
       final router = _buildTestRouter(localCubit);

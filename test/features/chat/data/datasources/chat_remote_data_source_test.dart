@@ -585,4 +585,138 @@ void main() {
       },
     );
   });
+
+  group('generateInsight — spec-6-5', () {
+    test(
+      'sends triggerType/triggerKey with sessionId as the one trailing '
+      'path segment, and decodes a ready insight',
+      () async {
+        when(
+          () => mockApiClient.post(
+            'chat-insight-create',
+            pathParams: ['s1'],
+            data: {'triggerType': 'message_count', 'triggerKey': 'key-1'},
+          ),
+        ).thenAnswer(
+          (_) async => right({
+            'data': {
+              'id': 'ins-1',
+              'sessionId': 's1',
+              'triggerType': 'message_count',
+              'triggerKey': 'key-1',
+              'status': 'ready',
+              'content': 'Você mencionou gratidão 3 vezes esta semana.',
+              'errorCode': null,
+              'dismissedAt': null,
+              'createdAt': '2026-01-01T00:00:00Z',
+            },
+          }),
+        );
+
+        final result = await dataSource.generateInsight(
+          's1',
+          triggerType: 'message_count',
+          triggerKey: 'key-1',
+        );
+
+        expect(result.isRight(), isTrue);
+        result.match((_) => fail('expected Right'), (dto) {
+          expect(dto.id, 'ins-1');
+          expect(dto.status, 'ready');
+          expect(
+            dto.content,
+            'Você mencionou gratidão 3 vezes esta semana.',
+          );
+        });
+      },
+    );
+
+    test(
+      'a non-ready status still decodes (errorCode/content carried as-is)',
+      () async {
+        when(
+          () => mockApiClient.post(
+            'chat-insight-create',
+            pathParams: ['s1'],
+            data: any(named: 'data'),
+          ),
+        ).thenAnswer(
+          (_) async => right({
+            'data': {
+              'id': 'ins-2',
+              'sessionId': 's1',
+              'triggerType': 'inactivity',
+              'triggerKey': 'key-2',
+              'status': 'failed',
+              'content': null,
+              'errorCode': 'AI_GENERATION_TIMEOUT',
+              'dismissedAt': null,
+              'createdAt': '2026-01-01T00:00:00Z',
+            },
+          }),
+        );
+
+        final result = await dataSource.generateInsight(
+          's1',
+          triggerType: 'inactivity',
+          triggerKey: 'key-2',
+        );
+
+        expect(result.isRight(), isTrue);
+        result.match((_) => fail('expected Right'), (dto) {
+          expect(dto.status, 'failed');
+          expect(dto.content, isNull);
+          expect(dto.errorCode, 'AI_GENERATION_TIMEOUT');
+        });
+      },
+    );
+
+    test('a shape mismatch maps to Left(MalformedResponse), never throws', () async {
+      when(
+        () => mockApiClient.post(
+          'chat-insight-create',
+          pathParams: ['s1'],
+          data: any(named: 'data'),
+        ),
+      ).thenAnswer((_) async => right({'data': 'not-a-map'}));
+
+      final result = await dataSource.generateInsight(
+        's1',
+        triggerType: 'message_count',
+        triggerKey: 'key-1',
+      );
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
+
+    test('an upstream Failure propagates unchanged — RF08: never an HTTP '
+        'error for an in-payload failure, so this only covers a genuine '
+        'transport problem', () async {
+      when(
+        () => mockApiClient.post(
+          'chat-insight-create',
+          pathParams: ['s1'],
+          data: any(named: 'data'),
+        ),
+      ).thenAnswer(
+        (_) async => left(const Failure.networkTimeout(message: 'timeout')),
+      );
+
+      final result = await dataSource.generateInsight(
+        's1',
+        triggerType: 'message_count',
+        triggerKey: 'key-1',
+      );
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<NetworkTimeout>()),
+        (_) => fail('expected Left'),
+      );
+    });
+  });
 }

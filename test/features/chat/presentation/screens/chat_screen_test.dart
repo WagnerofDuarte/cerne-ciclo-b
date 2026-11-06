@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:fpdart/fpdart.dart' hide State;
 
 import 'package:cerne/core/di/injection_container.dart';
@@ -16,6 +16,7 @@ import 'package:cerne/features/capture/presentation/cubit/audio_entry_cubit.dart
 import 'package:cerne/features/capture/presentation/cubit/photo_entry_cubit.dart';
 import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart';
 import 'package:cerne/features/chat/domain/entities/bookmark_state.dart';
+import 'package:cerne/features/chat/domain/entities/chat_insight.dart';
 import 'package:cerne/features/chat/domain/entities/chat_message.dart';
 import 'package:cerne/features/chat/domain/entities/chat_session.dart';
 import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
@@ -24,12 +25,14 @@ import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_state.dart';
 import 'package:cerne/features/chat/presentation/screens/chat_screen.dart';
 import 'package:cerne/features/chat/presentation/widgets/chat_bubble.dart';
+import 'package:cerne/features/chat/presentation/widgets/insight_card.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 import 'package:cerne/features/entries/domain/usecases/save_chat_message_as_entry_use_case.dart';
 
 import '../../../../support/fake_connectivity_watcher.dart';
+import '../../../../support/testwidgets_with_cleanup.dart';
 
 const _session = ChatSession(
   id: 's1',
@@ -86,6 +89,24 @@ class _FakeChatRepository implements ChatRepository {
     final controller = StreamController<Either<Failure, ChatStreamEvent>>();
     lastRetryController = controller;
     return controller.stream;
+  }
+
+  /// spec-6-5 — a plain (non-`Completer`) immediate result, same
+  /// rationale `_FakeSaveChatMessageAsEntryUseCase.result` already uses
+  /// below: this suite is about `ChatScreen`'s own rendering/wiring, not
+  /// the trigger-window timing `chat_cubit_test.dart` already covers.
+  Either<Failure, ChatInsight?> generateInsightResult =
+      right<Failure, ChatInsight?>(null);
+  final List<String> generateInsightCalls = [];
+
+  @override
+  Future<Either<Failure, ChatInsight?>> generateInsight(
+    String sessionId, {
+    required InsightTriggerType triggerType,
+    required String triggerKey,
+  }) async {
+    generateInsightCalls.add(sessionId);
+    return generateInsightResult;
   }
 }
 
@@ -192,6 +213,35 @@ class _UnusedMediaRepository implements MediaRepository {
   }) async => throw UnimplementedError('not expected to be called');
 }
 
+/// spec-6-5 — every [ChatCubit] [pumpScreen] creates, awaiting [close] on
+/// each one once the current test's own body finishes (via the local
+/// [testWidgets] override below). A bootstrapped `ChatCubit` now always
+/// starts a real `_insightInactivityTimer`; the ordinary `addTearDown`
+/// pattern this suite used before runs too late to satisfy
+/// `testWidgets`' own `!timersPending` invariant check — that check runs
+/// *inside* the test's own callback execution, before any `addTearDown`/
+/// `tearDown` callback ever fires — so cleanup has to happen here
+/// instead, still inside the callback.
+final List<ChatCubit> _cubitsPendingClose = [];
+
+/// Wraps the real `testWidgets` so every test in this file automatically
+/// closes whatever [ChatCubit](s) [pumpScreen] created during it, right
+/// after the test's own body completes (success or failure) but still
+/// before the framework's pending-Timer check — see
+/// [_cubitsPendingClose]'s own doc.
+void testWidgets(String description, WidgetTesterCallback callback) {
+  testWidgetsWithCleanup(
+    description,
+    callback,
+    cleanup: () async {
+      for (final cubit in _cubitsPendingClose) {
+        await cubit.close();
+      }
+      _cubitsPendingClose.clear();
+    },
+  );
+}
+
 void main() {
   setUp(() {
     sl.registerFactory<TextEntryCubit>(
@@ -227,7 +277,9 @@ void main() {
       watcher,
       saveChatMessageAsEntryUseCase ?? _FakeSaveChatMessageAsEntryUseCase(),
     );
-    addTearDown(cubit.close);
+    // spec-6-5 — closed by the local `testWidgets` override above, not
+    // `addTearDown` (see `_cubitsPendingClose`'s own doc for why).
+    _cubitsPendingClose.add(cubit);
     addTearDown(watcher.close);
     await tester.pumpWidget(MaterialApp(home: ChatScreen(cubit: cubit)));
     return cubit;
@@ -731,6 +783,85 @@ void main() {
         ),
         findsOneWidget,
       );
+    },
+  );
+
+  /// spec-6-5 — drives 5 real sends through the composer, each completing
+  /// via `done`, so the message_count trigger fires through the real
+  /// `ChatCubit` flow rather than a shortcut — `chat_cubit_test.dart` is
+  /// where the trigger-window *timing* itself is covered; this suite only
+  /// needs one realistic way to get `ChatReady.activeInsight` populated.
+  Future<void> sendFiveMessages(
+    WidgetTester tester,
+    _FakeChatRepository repository,
+  ) async {
+    for (var i = 0; i < 5; i++) {
+      await tester.enterText(find.byType(TextField), 'mensagem $i');
+      await tester.tap(find.byIcon(Icons.send_outlined));
+      await tester.pump();
+      repository.lastSendController?.add(right(const ChatDoneEvent()));
+      await repository.lastSendController?.close();
+      await tester.pumpAndSettle();
+    }
+  }
+
+  testWidgets(
+    'spec-6-5 — the Insight card renders as the trailing item of the '
+    'message list once ChatReady.activeInsight is set (the message_count '
+    'trigger, driven through 5 real sends)',
+    (tester) async {
+      final repository = _FakeChatRepository()
+        ..generateInsightResult = right(
+          const ChatInsight(id: 'ins-1', content: 'Você mencionou calma 3x.'),
+        );
+      final cubit = await pumpScreen(tester, repository);
+      await tester.pumpAndSettle();
+
+      await sendFiveMessages(tester, repository);
+
+      expect(repository.generateInsightCalls, hasLength(1));
+      expect(find.byType(InsightCard), findsOneWidget);
+      expect(find.text('INSIGHT'), findsOneWidget);
+      expect(find.text('Você mencionou calma 3x.'), findsOneWidget);
+
+      // Interleaved as the trailing item of the same ListView — never a
+      // second, independently scrollable surface.
+      final listView = tester.widget<ListView>(find.byType(ListView));
+      expect(
+        listView.childrenDelegate.estimatedChildCount,
+        (cubit.state as ChatReady).messages.length + 1,
+      );
+    },
+  );
+
+  testWidgets(
+    'spec-6-5 — tapping the Insight card\'s dismiss icon wires through to '
+    'ChatCubit.dismissInsight(), clearing activeInsight without affecting '
+    'the rest of the conversation',
+    (tester) async {
+      final repository = _FakeChatRepository()
+        ..generateInsightResult = right(
+          const ChatInsight(id: 'ins-1', content: 'um padrão notado'),
+        );
+      final cubit = await pumpScreen(tester, repository);
+      await tester.pumpAndSettle();
+
+      await sendFiveMessages(tester, repository);
+      expect(find.byType(InsightCard), findsOneWidget);
+      final messagesBeforeDismiss = (cubit.state as ChatReady).messages;
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(InsightCard),
+          matching: find.byIcon(Icons.close),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(InsightCard), findsNothing);
+      final after = cubit.state as ChatReady;
+      expect(after.activeInsight, isNull);
+      expect(after.messages, messagesBeforeDismiss);
     },
   );
 }

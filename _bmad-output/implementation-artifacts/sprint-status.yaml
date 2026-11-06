@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-26-2026 00:00
-last_updated: 11-06-2026 04:00
+last_updated: 11-06-2026 06:00
 project: cerne-ciclo-b
 project_key: NOKEY
 tracking_system: file-system
@@ -76,7 +76,7 @@ development_status:
   6-2-multi-session-chat-history-new-conversation: done
   6-3-dropped-stream-resilience-offline-composer-lock: done
   6-4-bookmark-a-chat-message-into-an-entry: done
-  6-5-proactive-insight-injection-failure-isolation: backlog
+  6-5-proactive-insight-injection-failure-isolation: review
   epic-6-retrospective: optional
 
   epic-7: backlog

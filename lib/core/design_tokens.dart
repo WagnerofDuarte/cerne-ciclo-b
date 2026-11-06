@@ -686,4 +686,42 @@ class DesignTokens {
   /// at any reasonable text-scale factor, and `TextOverflow.ellipsis`
   /// covers the rest.
   static const double chatBookmarkSavingLabelMaxWidth = 64.0;
+
+  // ---------------------------------------------------------------------
+  // spec-6-5 — proactive Insight card. UX & Interaction Patterns: "ochre
+  // left spine, mono 'INSIGHT' label, dismiss 'x' — the spine is the
+  // only accent-colored element inside the chat stream itself." No pixel
+  // values exist in `prototype-extract.md` §3 for this card specifically
+  // (decided here, Design Notes: "decide and proceed", RNF08).
+  // ---------------------------------------------------------------------
+
+  /// The ochre spine's own width — a `Container`-as-bar flush against the
+  /// card's rounded left edge (`InsightCard`'s own `Clip.antiAlias`
+  /// implementation choice), never a `BoxDecoration.border` (mixing a
+  /// single-sided border with `borderRadius` renders unreliably in
+  /// Flutter).
+  static const double chatInsightSpineWidth = 3.0;
+
+  /// The card's own internal padding — the literal pixel values from the
+  /// frozen prototype's own insight-card markup (`cerne-prototype.html`:
+  /// `padding:14px 16px 14px 20px`), not a derived/aliased value; the
+  /// extra 4px on the left (beyond the 16px right/vertical) clears the
+  /// spine, same convention `kanbanCardPadding` already uses for its own
+  /// spine.
+  static const EdgeInsets chatInsightCardPadding = EdgeInsets.fromLTRB(
+    20,
+    14,
+    16,
+    14,
+  );
+
+  /// Vertical gap between the mono "INSIGHT" label and the insight's own
+  /// [ChatInsight.content] text below it.
+  static const double chatInsightLabelSpacing = 6.0;
+
+  /// The dismiss "x" glyph's own size — smaller than
+  /// [chatBookmarkIconSize] (a secondary, less frequently tapped
+  /// affordance), still sitting inside a ≥44pt tap target
+  /// ([insertionModalTapTargetMin], reused rather than duplicated).
+  static const double chatInsightDismissIconSize = 14.0;
 }

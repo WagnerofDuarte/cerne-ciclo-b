@@ -6,6 +6,7 @@ import 'package:fpdart/fpdart.dart';
 import 'package:hive_ce/hive_ce.dart';
 
 import '../../../../core/failure/failure.dart';
+import '../../domain/entities/chat_insight.dart';
 import '../../domain/entities/chat_message.dart';
 import '../../domain/entities/chat_session.dart';
 import '../../domain/entities/chat_stream_event.dart';
@@ -128,6 +129,33 @@ class ChatRepositoryImpl implements ChatRepository {
   ) =>
       // spec-6-3 — same pure-passthrough rationale as [sendMessage] above.
       _remoteDataSource.retryMessage(sessionId, userMessageId);
+
+  @override
+  Future<Either<Failure, ChatInsight?>> generateInsight(
+    String sessionId, {
+    required InsightTriggerType triggerType,
+    required String triggerKey,
+  }) async {
+    // spec-6-5 — pure passthrough (no Hive, mirrors [sendMessage]/
+    // [retryMessage] above): [Left] is unmapped; a [Right] is only ever
+    // turned into a real [ChatInsight] when the backend's own `status`
+    // is `'ready'` (RF08) — anything else (`generating`/`failed`/
+    // `dismissed`), or a `'ready'` response with no `content` (shouldn't
+    // happen, defensive), maps to `Right(null)` instead of a [Failure].
+    final result = await _remoteDataSource.generateInsight(
+      sessionId,
+      triggerType: triggerType.wireValue,
+      triggerKey: triggerKey,
+    );
+    return result.match(
+      (failure) => left(failure),
+      (dto) => right(
+        dto.status == 'ready' && dto.content != null
+            ? ChatInsight(id: dto.id, content: dto.content!)
+            : null,
+      ),
+    );
+  }
 
   /// [listSessions]'s own offline/timeout fallback — a full `chat_
   /// sessions` Hive box dump, sorted `updatedAt` desc (so `ChatCubit.

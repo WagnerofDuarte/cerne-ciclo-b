@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:fpdart/fpdart.dart' hide State;
 import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
@@ -18,6 +18,7 @@ import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
 import 'package:cerne/features/auth/domain/repositories/session_repository.dart';
 import 'package:cerne/features/auth/presentation/cubit/auth_cubit.dart';
 import 'package:cerne/features/auth/presentation/screens/auth_screen.dart';
+import 'package:cerne/features/chat/domain/entities/chat_insight.dart';
 import 'package:cerne/features/chat/domain/entities/chat_message.dart';
 import 'package:cerne/features/chat/domain/entities/chat_session.dart';
 import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
@@ -39,6 +40,7 @@ import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 import 'package:cerne/features/vault/presentation/screens/vault_lock_screen.dart';
 
 import '../../support/fake_connectivity_watcher.dart';
+import '../../support/testwidgets_with_cleanup.dart';
 import '../../support/unused_save_chat_message_as_entry_use_case.dart';
 
 class MockAuthRepository extends Mock implements AuthRepository {}
@@ -163,6 +165,13 @@ class _FakeChatRepository implements ChatRepository {
     String sessionId,
     String userMessageId,
   ) => const Stream.empty();
+
+  @override
+  Future<Either<Failure, ChatInsight?>> generateInsight(
+    String sessionId, {
+    required InsightTriggerType triggerType,
+    required String triggerKey,
+  }) async => throw UnimplementedError('not expected to be called');
 }
 
 /// A plain (non-mocktail) fake — the redirect matrix needs [currentStatus]
@@ -276,6 +285,29 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
   }
 }
 
+/// spec-6-5 — wraps the real `testWidgets` so every test in this file
+/// automatically closes `sl<ChatCubit>()` right after its own body
+/// completes (success or failure). A bootstrapped `ChatCubit` now always
+/// starts a real `_insightInactivityTimer`; the ordinary `addTearDown`/
+/// group-level `tearDown()` pattern this suite already uses for other
+/// cleanup runs too late to satisfy `testWidgets`' own `!timersPending`
+/// invariant check — that check runs *inside* the test's own callback
+/// execution, before any `addTearDown`/`tearDown` callback ever fires.
+/// Resolving the lazy singleton here is harmless even for a test that
+/// never reaches `/` at all: resolving it alone never calls `init()`, so
+/// no bootstrap/timer ever started in that case either.
+void testWidgets(String description, WidgetTesterCallback callback) {
+  testWidgetsWithCleanup(
+    description,
+    callback,
+    cleanup: () async {
+      if (sl.isRegistered<ChatCubit>()) {
+        await sl<ChatCubit>().close();
+      }
+    },
+  );
+}
+
 /// Proves the epic's ONE `GoRouter`/`redirect` (Boundaries) resolves the
 /// I/O & Edge-Case Matrix from spec-1-6/spec-2-1 exactly — composing
 /// [VaultStatus] first, then [SessionStatus] (AD-14), never a hardcoded
@@ -337,6 +369,10 @@ void main() {
     // spec-6-1 — `/`'s `GoRoute.builder` resolves `sl<ChatCubit>()`; same
     // trivial-fake rationale as `MeusRegistrosCubit`/`EntriesSearchCubit`
     // above — this suite never exercises a real chat session.
+    // spec-6-5 — bootstrapping a ChatCubit now starts a real
+    // `_insightInactivityTimer`; closed by the local `testWidgets`
+    // override at the bottom of this file, not `addTearDown`/`tearDown`
+    // (see that override's own doc for why those run too late).
     sl.registerLazySingleton<ChatCubit>(
       () => ChatCubit(
         _FakeChatRepository(),

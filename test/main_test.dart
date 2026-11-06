@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart' hide testWidgets;
 import 'package:fpdart/fpdart.dart' hide State;
 import 'package:hive_ce/hive_ce.dart';
 import 'package:mocktail/mocktail.dart';
@@ -16,6 +16,7 @@ import 'package:cerne/features/auth/domain/entities/authenticated_user.dart';
 import 'package:cerne/features/auth/domain/entities/session_status.dart';
 import 'package:cerne/features/auth/domain/repositories/auth_repository.dart';
 import 'package:cerne/features/auth/domain/repositories/session_repository.dart';
+import 'package:cerne/features/chat/domain/entities/chat_insight.dart';
 import 'package:cerne/features/chat/domain/entities/chat_message.dart';
 import 'package:cerne/features/chat/domain/entities/chat_session.dart';
 import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
@@ -29,6 +30,7 @@ import 'package:cerne/main.dart';
 
 import 'support/fake_connectivity_watcher.dart';
 import 'support/fake_path_provider_platform.dart';
+import 'support/testwidgets_with_cleanup.dart';
 import 'support/unused_save_chat_message_as_entry_use_case.dart';
 
 class MockAuthRepository extends Mock implements AuthRepository {}
@@ -213,6 +215,32 @@ class _FakeChatRepository implements ChatRepository {
     String sessionId,
     String userMessageId,
   ) => const Stream.empty();
+
+  @override
+  Future<Either<Failure, ChatInsight?>> generateInsight(
+    String sessionId, {
+    required InsightTriggerType triggerType,
+    required String triggerKey,
+  }) async => throw UnimplementedError('not expected to be called');
+}
+
+/// spec-6-5 — wraps the real `testWidgets` so every test in this file
+/// automatically closes `sl<ChatCubit>()` right after its own body
+/// completes. See the identical override in `app_router_test.dart` for
+/// the full rationale: `testWidgets`' own `!timersPending` invariant
+/// check runs *inside* the test's own callback, before any
+/// `addTearDown`/`tearDown` callback (including this registration's own
+/// `dispose`, run via `resetCoreDependencies()` below) ever fires.
+void testWidgets(String description, WidgetTesterCallback callback) {
+  testWidgetsWithCleanup(
+    description,
+    callback,
+    cleanup: () async {
+      if (sl.isRegistered<ChatCubit>()) {
+        await sl<ChatCubit>().close();
+      }
+    },
+  );
 }
 
 /// Proves the one real production composition root — `CerneApp` resolving
@@ -291,13 +319,30 @@ void main() {
     // `ChatRepositoryImpl`/`ApiClient`/`Dio` pipeline), swapped for one backed
     // by `_FakeChatRepository` so reaching Home/Chat never hits the network.
     sl.unregister<ChatCubit>();
+    // spec-6-5 — this registration's own `dispose` only runs via
+    // `resetCoreDependencies()` in `tearDown()` below, which fires too
+    // late to satisfy `testWidgets`' own `!timersPending` invariant check
+    // (a bootstrapped ChatCubit now always starts a real
+    // `_insightInactivityTimer`) — closed instead by the local
+    // `testWidgets` override at the bottom of this file, which runs
+    // before that check (see its own doc for why `addTearDown`/
+    // `tearDown` can't).
     sl.registerLazySingleton<ChatCubit>(
       () => ChatCubit(
         _FakeChatRepository(),
         FakeConnectivityWatcher(),
         UnusedSaveChatMessageAsEntryUseCase(),
       ),
-      dispose: (cubit) => cubit.close(),
+      // spec-6-5 — this file's own `testWidgets` override below already
+      // closes `sl<ChatCubit>()` right after each test's body, before
+      // `resetCoreDependencies()` (`sl.reset()`) in `tearDown()` would
+      // otherwise dispose it a second time via this callback. Guarded
+      // here (not just left to run twice) because a second `close()` on
+      // an already-closed `Cubit` never resolves inside `flutter_test`'s
+      // fake-async zone — its `await` needs a microtask flush that only
+      // happens on a later `pump()`, and none happens once a test's body
+      // has already returned — which froze every test in this file.
+      dispose: (cubit) => cubit.isClosed ? null : cubit.close(),
     );
     // `ConfirmationDialog.isOpen` is a static single-overlay guard (shared
     // across every instance by design, Story 1.5) — reset it so one test's

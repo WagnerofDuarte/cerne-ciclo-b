@@ -12,6 +12,7 @@ import '../../../capture/presentation/widgets/insertion_modal.dart';
 import '../cubit/chat_cubit.dart';
 import '../cubit/chat_state.dart';
 import '../widgets/chat_bubble.dart';
+import '../widgets/insight_card.dart';
 
 /// Tela 1 — Home/Chat, RF04's first real (non-placeholder) screen: the
 /// same dark-green header + drawer chrome the deleted
@@ -188,27 +189,45 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                   ChatBootstrapError(failure: final failure) =>
                     _ChatBootstrapErrorView(failure: failure),
-                  ChatReady(messages: final messages) => ListView.builder(
-                    controller: _scrollController,
-                    padding: DesignTokens.screenPadding,
-                    itemCount: messages.length,
-                    itemBuilder: (context, index) => ChatBubble(
-                      key: ValueKey(messages[index].id),
-                      message: messages[index],
-                      // spec-6-3 — only a `failed` AI bubble ever renders
-                      // the tap-to-retry copy at all (`ChatBubble`'s own
-                      // guard), so wiring this unconditionally on every
-                      // bubble is harmless.
-                      onRetry: () =>
-                          widget.cubit.retryMessage(messages[index].id),
-                      // spec-6-4 — only a user bubble ever renders the
-                      // bookmark affordance at all (`ChatBubble`'s own
-                      // guard), so wiring this unconditionally on every
-                      // bubble is harmless, same rationale `onRetry`
-                      // above already documents.
-                      onBookmark: (id) => widget.cubit.bookmarkMessage(id),
+                  ChatReady(
+                    messages: final messages,
+                    activeInsight: final activeInsight,
+                  ) =>
+                    ListView.builder(
+                      controller: _scrollController,
+                      padding: DesignTokens.screenPadding,
+                      // spec-6-5 — one extra trailing slot for the Insight
+                      // card whenever `ChatReady.activeInsight` is set
+                      // (Code Map); interleaved into the same list as the
+                      // message bubbles, never a second scrollable surface.
+                      itemCount:
+                          messages.length + (activeInsight != null ? 1 : 0),
+                      itemBuilder: (context, index) {
+                        if (index == messages.length) {
+                          return InsightCard(
+                            key: const ValueKey('active-insight'),
+                            insight: activeInsight!,
+                            onDismiss: widget.cubit.dismissInsight,
+                          );
+                        }
+                        return ChatBubble(
+                          key: ValueKey(messages[index].id),
+                          message: messages[index],
+                          // spec-6-3 — only a `failed` AI bubble ever renders
+                          // the tap-to-retry copy at all (`ChatBubble`'s own
+                          // guard), so wiring this unconditionally on every
+                          // bubble is harmless.
+                          onRetry: () =>
+                              widget.cubit.retryMessage(messages[index].id),
+                          // spec-6-4 — only a user bubble ever renders the
+                          // bookmark affordance at all (`ChatBubble`'s own
+                          // guard), so wiring this unconditionally on every
+                          // bubble is harmless, same rationale `onRetry`
+                          // above already documents.
+                          onBookmark: (id) => widget.cubit.bookmarkMessage(id),
+                        );
+                      },
                     ),
-                  ),
                 },
               ),
             ),
