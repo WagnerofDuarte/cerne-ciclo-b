@@ -31,6 +31,17 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
+  final _composerFocusNode = FocusNode();
+
+  /// The last [ChatReady.sessionId] this screen has already reacted to —
+  /// `null` until the very first [ChatReady] (bootstrap). Distinguishes
+  /// "the active session just changed" (spec-6-2: `switchSession`/
+  /// `startNewSession`, or the initial bootstrap) from an ordinary
+  /// in-session update (a streamed token, a bookmark state change) that
+  /// happens to carry the same [ChatReady.restoreScrollOffset] value
+  /// forward via `copyWith` — only the former should ever trigger a
+  /// scroll jump or request composer focus.
+  String? _lastSessionId;
 
   @override
   void initState() {
@@ -38,13 +49,29 @@ class _ChatScreenState extends State<ChatScreen> {
     // `ChatCubit.init()`'s own no-op guard makes this safe to call on
     // every mount (Boundaries: "silently ensure one Chat Session exists").
     widget.cubit.init();
+    _scrollController.addListener(_recordScrollOffset);
   }
 
   @override
   void dispose() {
+    _scrollController.removeListener(_recordScrollOffset);
     _textController.dispose();
     _scrollController.dispose();
+    _composerFocusNode.dispose();
     super.dispose();
+  }
+
+  /// Boundaries: "Scroll-offset restore is in-memory only, keyed by
+  /// `sessionId`, on `ChatCubit`" — this is the one listener that keeps
+  /// it current, firing on every scroll update while a session is active.
+  void _recordScrollOffset() {
+    final state = widget.cubit.state;
+    if (state is ChatReady && _scrollController.hasClients) {
+      widget.cubit.recordScrollOffset(
+        state.sessionId,
+        _scrollController.position.pixels,
+      );
+    }
   }
 
   void _send() {
@@ -78,6 +105,35 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  /// I/O matrix: "Switch session" — jumps to [offset] once the just-built
+  /// history has attached to a scrollable, clamped to the actual
+  /// `maxScrollExtent` in case the recorded offset no longer fits (a
+  /// shorter history than when it was recorded).
+  void _jumpToOffset(double offset) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        final maxExtent = _scrollController.position.maxScrollExtent;
+        _scrollController.jumpTo(offset.clamp(0, maxExtent));
+      }
+    });
+  }
+
+  /// Acceptance Criteria: "Given I tap 'Novo Chat' ... it opens empty,
+  /// composer focused" — called whenever a session switch (new or past)
+  /// lands on zero messages, per the listener's own `state.messages.
+  /// isEmpty` guard below; a brand new session is always empty, so this
+  /// satisfies the AC, but an empty *past* session switched back into
+  /// would trigger it too (harmless — focusing the composer on an empty
+  /// conversation is never wrong, just not the literal scenario the AC
+  /// names).
+  void _focusComposerSoon() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _composerFocusNode.requestFocus();
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return BlocProvider<ChatCubit>.value(
@@ -95,8 +151,23 @@ class _ChatScreenState extends State<ChatScreen> {
             Expanded(
               child: BlocConsumer<ChatCubit, ChatState>(
                 listener: (context, state) {
-                  if (state is ChatReady) {
+                  if (state is! ChatReady) {
+                    return;
+                  }
+                  final isNewSession = state.sessionId != _lastSessionId;
+                  _lastSessionId = state.sessionId;
+                  if (!isNewSession) {
                     _scrollToBottomSoon();
+                    return;
+                  }
+                  final restoreScrollOffset = state.restoreScrollOffset;
+                  if (restoreScrollOffset != null) {
+                    _jumpToOffset(restoreScrollOffset);
+                  } else {
+                    _scrollToBottomSoon();
+                  }
+                  if (state.messages.isEmpty) {
+                    _focusComposerSoon();
                   }
                 },
                 builder: (context, state) => switch (state) {
@@ -119,7 +190,11 @@ class _ChatScreenState extends State<ChatScreen> {
                 },
               ),
             ),
-            _ChatComposer(controller: _textController, onSend: _send),
+            _ChatComposer(
+              controller: _textController,
+              focusNode: _composerFocusNode,
+              onSend: _send,
+            ),
           ],
         ),
       ),
@@ -204,15 +279,22 @@ class _ChatBootstrapErrorView extends StatelessWidget {
 }
 
 /// The composer row — "+" (`InsertionModal.show`, unchanged), a text
-/// field (placeholder "Escreva uma mensagem...") and a send icon.
-/// Disabled as a whole while the bootstrap hasn't resolved yet or while
-/// an AI bubble is still `streaming` (Code Map/`ChatCubit.sendMessage`'s
-/// own same-shaped guard) — never a dedicated offline banner/lock, that's
+/// field (placeholder "Escreva uma mensagem...") and a send icon. The
+/// text field and send icon are disabled while the bootstrap hasn't
+/// resolved yet or while an AI bubble is still `streaming` (Code
+/// Map/`ChatCubit.sendMessage`'s own same-shaped guard); the "+" stays
+/// tappable regardless, same as the deleted placeholder's own
+/// always-tappable "+" — never a dedicated offline banner/lock, that's
 /// Story 6.3's job (Boundaries).
 class _ChatComposer extends StatelessWidget {
-  const _ChatComposer({required this.controller, required this.onSend});
+  const _ChatComposer({
+    required this.controller,
+    required this.focusNode,
+    required this.onSend,
+  });
 
   final TextEditingController controller;
+  final FocusNode focusNode;
   final VoidCallback onSend;
 
   @override
@@ -243,6 +325,7 @@ class _ChatComposer extends StatelessWidget {
                 Expanded(
                   child: TextField(
                     controller: controller,
+                    focusNode: focusNode,
                     enabled: canSend,
                     // `chat-messages-send`'s own request schema caps
                     // `content` at 8000 characters (openapi.yaml) — a

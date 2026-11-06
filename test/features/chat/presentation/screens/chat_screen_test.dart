@@ -20,6 +20,7 @@ import 'package:cerne/features/chat/domain/entities/chat_session.dart';
 import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
 import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
+import 'package:cerne/features/chat/presentation/cubit/chat_state.dart';
 import 'package:cerne/features/chat/presentation/screens/chat_screen.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
@@ -41,6 +42,7 @@ const _session = ChatSession(
 class _FakeChatRepository implements ChatRepository {
   Either<Failure, List<ChatSession>> listSessionsResult = right([_session]);
   Either<Failure, List<ChatMessage>> listMessagesResult = right(const []);
+  Either<Failure, ChatSession> createSessionResult = right(_session);
   final List<String> sendMessageCalls = [];
   StreamController<Either<Failure, ChatStreamEvent>>? lastSendController;
 
@@ -49,7 +51,8 @@ class _FakeChatRepository implements ChatRepository {
       listSessionsResult;
 
   @override
-  Future<Either<Failure, ChatSession>> createSession() async => right(_session);
+  Future<Either<Failure, ChatSession>> createSession() async =>
+      createSessionResult;
 
   @override
   Future<Either<Failure, List<ChatMessage>>> listMessages(
@@ -277,6 +280,109 @@ void main() {
       expect(find.text('Texto'), findsOneWidget);
       expect(find.text('Áudio'), findsOneWidget);
       expect(find.text('Foto'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'review finding: a real ChatScreen focuses the composer once '
+    'ChatCubit.startNewSession() lands on a new, empty session (AC2 — '
+    '"it opens empty, composer focused")',
+    (tester) async {
+      // A non-empty bootstrap history (the guard this screen's own
+      // listener actually uses is `state.messages.isEmpty`, not "brand
+      // new session" — Design Notes) so the initial load does *not*
+      // itself focus the composer, isolating `startNewSession()`'s own
+      // empty-session landing as the thing under test.
+      final repository = _FakeChatRepository()
+        ..listMessagesResult = right([
+          const ChatMessage(
+            id: 'm0',
+            sessionId: 's1',
+            role: ChatMessageRole.user,
+            content: 'oi',
+            seq: 0,
+            status: ChatMessageStatus.complete,
+            retryCount: 0,
+            createdAt: '2026-01-01T00:00:00Z',
+          ),
+        ]);
+      final cubit = await pumpScreen(tester, repository);
+      await tester.pumpAndSettle();
+
+      var textField = tester.widget<TextField>(find.byType(TextField));
+      expect(textField.focusNode!.hasFocus, isFalse);
+
+      repository.createSessionResult = right(
+        const ChatSession(
+          id: 's2',
+          title: '',
+          persona: ChatPersona.analitico,
+          userMessageCount: 0,
+          lastUserMessageAt: null,
+          createdAt: '2026-01-02T00:00:00Z',
+          updatedAt: '2026-01-02T00:00:00Z',
+        ),
+      );
+
+      final result = await cubit.startNewSession();
+      await tester.pumpAndSettle();
+
+      expect(result.isRight(), isTrue);
+      expect((cubit.state as ChatReady).sessionId, 's2');
+      textField = tester.widget<TextField>(find.byType(TextField));
+      expect(textField.focusNode!.hasFocus, isTrue);
+    },
+  );
+
+  testWidgets(
+    'review finding: a real ChatScreen restores the scroll offset it '
+    'was left at when switching back to a session, instead of jumping '
+    'to the bottom (AC4)',
+    (tester) async {
+      final manyMessages = List.generate(
+        30,
+        (i) => ChatMessage(
+          id: 'm$i',
+          sessionId: 's1',
+          role: ChatMessageRole.user,
+          content:
+              'mensagem numero $i, bem mais longa para garantir altura '
+              'suficiente e permitir rolagem dentro da lista de mensagens',
+          seq: i,
+          status: ChatMessageStatus.complete,
+          retryCount: 0,
+          createdAt: '2026-01-01T00:00:00Z',
+        ),
+      );
+      final repository = _FakeChatRepository()
+        ..listMessagesResult = right(manyMessages);
+      final cubit = await pumpScreen(tester, repository);
+      await tester.pumpAndSettle();
+
+      ScrollController controller() =>
+          tester.widget<ListView>(find.byType(ListView)).controller!;
+
+      // Bootstrap jumps to the bottom by default (`_scrollToBottomSoon`)
+      // — drag up so this session is left scrolled somewhere in the
+      // middle instead, the scenario AC4 actually describes.
+      await tester.drag(find.byType(ListView), const Offset(0, 300));
+      await tester.pumpAndSettle();
+
+      final recordedOffset = controller().position.pixels;
+      expect(recordedOffset, greaterThan(0));
+
+      // Switch away to a different, empty session.
+      repository.listMessagesResult = right(const []);
+      await cubit.switchSession('s2');
+      await tester.pumpAndSettle();
+
+      // ... and back, with the same history (and therefore the same
+      // scrollable extent) restored.
+      repository.listMessagesResult = right(manyMessages);
+      await cubit.switchSession('s1');
+      await tester.pumpAndSettle();
+
+      expect(controller().position.pixels, closeTo(recordedOffset, 1.0));
     },
   );
 }

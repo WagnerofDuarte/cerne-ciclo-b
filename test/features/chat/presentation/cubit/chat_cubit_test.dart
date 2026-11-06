@@ -207,6 +207,228 @@ void main() {
     );
   });
 
+  group('switchSession()/startNewSession() — spec-6-2', () {
+    // Deliberately *older* than `_session` (updatedAt 2026-01-01) so
+    // `_bootstrap`'s own "reuse the most recent" rule settles on
+    // `_session` — every test below then genuinely switches *to*
+    // `otherSession`, rather than a no-op (it would otherwise already be
+    // the active one).
+    const otherSession = ChatSession(
+      id: 's2',
+      title: 'Outra conversa',
+      persona: ChatPersona.analitico,
+      userMessageCount: 1,
+      lastUserMessageAt: '2025-12-31T00:00:00Z',
+      createdAt: '2025-12-31T00:00:00Z',
+      updatedAt: '2025-12-31T00:00:00Z',
+    );
+
+    setUp(() async {
+      fakeRepository.listSessionsResult = right([_session, otherSession]);
+      await cubit.init();
+    });
+
+    test(
+      'I/O matrix "Switch session": fetches the target session\'s own '
+      'history via listMessages and makes it active',
+      () async {
+        fakeRepository.listMessagesResult = right([
+          const ChatMessage(
+            id: 'm-s2',
+            sessionId: 's2',
+            role: ChatMessageRole.user,
+            content: 'oi de novo',
+            seq: 0,
+            status: ChatMessageStatus.complete,
+            retryCount: 0,
+            createdAt: '2026-01-02T00:00:00Z',
+          ),
+        ]);
+
+        final result = await cubit.switchSession('s2');
+
+        expect(result.isRight(), isTrue);
+        final ready = cubit.state as ChatReady;
+        expect(ready.sessionId, 's2');
+        expect(ready.messages, hasLength(1));
+        expect(ready.messages.single.content, 'oi de novo');
+        // The bootstrapped session list is carried over untouched.
+        expect(ready.sessions, [_session, otherSession]);
+      },
+    );
+
+    test(
+      'I/O matrix "Switch to already-active session": a no-op Right, no '
+      're-fetch, state object unchanged',
+      () async {
+        final before = cubit.state as ChatReady;
+
+        final result = await cubit.switchSession(before.sessionId);
+
+        expect(result.isRight(), isTrue);
+        expect(cubit.state, same(before));
+      },
+    );
+
+    test(
+      'a switchSession failure surfaces as Left, current session stays '
+      'active',
+      () async {
+        fakeRepository.listMessagesResult = left(
+          const Failure.networkTimeout(message: 'timeout'),
+        );
+        final before = cubit.state as ChatReady;
+
+        final result = await cubit.switchSession('s2');
+
+        expect(result.isLeft(), isTrue);
+        expect((cubit.state as ChatReady).sessionId, before.sessionId);
+      },
+    );
+
+    test(
+      'Design Notes/Boundaries: switching to a session restores the '
+      'scroll offset last recorded for it via recordScrollOffset, or '
+      'null (ChatScreen\'s own cue to jump to the bottom) if none was '
+      'ever recorded',
+      () async {
+        cubit.recordScrollOffset('s2', 123.0);
+
+        final result = await cubit.switchSession('s2');
+
+        expect(result.isRight(), isTrue);
+        expect((cubit.state as ChatReady).restoreScrollOffset, 123.0);
+
+        // Switching back to 's1' (never recorded) falls back to null.
+        final backResult = await cubit.switchSession('s1');
+        expect(backResult.isRight(), isTrue);
+        expect((cubit.state as ChatReady).restoreScrollOffset, isNull);
+      },
+    );
+
+    test(
+      'I/O matrix "New session online": createSession() succeeds -> a '
+      'new, empty session becomes active, prepended to sessions',
+      () async {
+        const created = ChatSession(
+          id: 's3',
+          title: '',
+          persona: ChatPersona.analitico,
+          userMessageCount: 0,
+          lastUserMessageAt: null,
+          createdAt: '2026-01-03T00:00:00Z',
+          updatedAt: '2026-01-03T00:00:00Z',
+        );
+        fakeRepository.createSessionResult = right(created);
+        final before = cubit.state as ChatReady;
+
+        final result = await cubit.startNewSession();
+
+        expect(result.isRight(), isTrue);
+        final ready = cubit.state as ChatReady;
+        expect(ready.sessionId, 's3');
+        expect(ready.messages, isEmpty);
+        expect(ready.sessions, [created, ...before.sessions]);
+      },
+    );
+
+    test(
+      'I/O matrix "New session offline": createSession() resolves '
+      'Left(networkOffline) -> surfaced as Left, current session (and '
+      'its sessions list) left completely untouched',
+      () async {
+        final before = cubit.state as ChatReady;
+        fakeRepository.createSessionResult = left(
+          const Failure.networkOffline(message: 'offline'),
+        );
+
+        final result = await cubit.startNewSession();
+
+        expect(result.isLeft(), isTrue);
+        result.match(
+          (failure) => expect(failure, isA<NetworkOffline>()),
+          (_) => fail('expected a Left'),
+        );
+        expect(cubit.state, same(before));
+      },
+    );
+
+    test(
+      'review finding "Cross-session stream leakage": switchSession '
+      'cancels an in-flight send\'s subscription first, so the old '
+      'sendMessage() call resolves promptly and a late event from the '
+      'now-orphaned stream never reaches the cubit at all',
+      () async {
+        final sendFuture = cubit.sendMessage('oi');
+        await Future<void>.delayed(Duration.zero);
+        expect((cubit.state as ChatReady).isSending, isTrue);
+        final oldController = fakeRepository.lastSendController!;
+
+        fakeRepository.listMessagesResult = right(const []);
+        await cubit.switchSession('s2');
+
+        // Without the fix, nothing cancels `_sendSubscription`/completes
+        // `_sendCompleter`, so this would hang until `oldController` is
+        // closed (which this test deliberately never does) — the
+        // `timeout` turns that hang into a clear failure instead of a
+        // stuck test run.
+        await sendFuture.timeout(const Duration(milliseconds: 500));
+
+        final afterSwitch = cubit.state as ChatReady;
+        expect(afterSwitch.sessionId, 's2');
+        expect(afterSwitch.isSending, isFalse);
+
+        // A genuinely cancelled subscription never delivers another
+        // callback at all (Dart's own `StreamSubscription.cancel()`
+        // contract) — `same()` (identity, not equality) catches even a
+        // content-equivalent spurious re-emit, which `_applyStreamEvent`/
+        // `_finishSending` would otherwise still produce via `copyWith`
+        // despite the orphaned event's id never matching anything in the
+        // newly active session.
+        final beforeLateEvent = cubit.state;
+        oldController.add(right(const ChatTokenEvent('late token')));
+        oldController.add(right(const ChatDoneEvent()));
+        await Future<void>.delayed(Duration.zero);
+
+        expect(cubit.state, same(beforeLateEvent));
+      },
+    );
+
+    test(
+      'review finding "Cross-session stream leakage": startNewSession '
+      'cancels an in-flight send\'s subscription too, before creating '
+      'the new session',
+      () async {
+        final sendFuture = cubit.sendMessage('oi');
+        await Future<void>.delayed(Duration.zero);
+        final oldController = fakeRepository.lastSendController!;
+
+        const created = ChatSession(
+          id: 's3',
+          title: '',
+          persona: ChatPersona.analitico,
+          userMessageCount: 0,
+          lastUserMessageAt: null,
+          createdAt: '2026-01-03T00:00:00Z',
+          updatedAt: '2026-01-03T00:00:00Z',
+        );
+        fakeRepository.createSessionResult = right(created);
+
+        await cubit.startNewSession();
+        await sendFuture.timeout(const Duration(milliseconds: 500));
+
+        expect((cubit.state as ChatReady).sessionId, 's3');
+        final beforeLateEvent = cubit.state;
+        oldController.add(right(const ChatTokenEvent('late token')));
+        oldController.add(right(const ChatDoneEvent()));
+        await Future<void>.delayed(Duration.zero);
+
+        expect(cubit.state, same(beforeLateEvent));
+        expect((cubit.state as ChatReady).sessionId, 's3');
+      },
+    );
+  });
+
   group('sendMessage() — the 3 visible message states', () {
     setUp(() async {
       await cubit.init();

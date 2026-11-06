@@ -140,7 +140,9 @@ class ChatRepositoryImpl implements ChatRepository {
         // Skip this one corrupt entry — see doc above.
       }
     }
-    sessions.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    sessions.sort(
+      (a, b) => DateTime.parse(b.updatedAt).compareTo(DateTime.parse(a.updatedAt)),
+    );
     return right(sessions);
   }
 

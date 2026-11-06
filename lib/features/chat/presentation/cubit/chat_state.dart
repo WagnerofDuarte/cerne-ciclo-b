@@ -1,5 +1,6 @@
 import '../../../../core/failure/failure.dart';
 import '../../domain/entities/chat_message.dart';
+import '../../domain/entities/chat_session.dart';
 
 /// `ChatCubit`'s own sealed state — AD-12: "Chat's state is its own sealed
 /// class, never forced into `Resource<T>`", because it isn't a single
@@ -41,7 +42,9 @@ class ChatReady extends ChatState {
   const ChatReady({
     required this.sessionId,
     required this.messages,
+    required this.sessions,
     this.isSending = false,
+    this.restoreScrollOffset,
   });
 
   final String sessionId;
@@ -50,6 +53,14 @@ class ChatReady extends ChatState {
   /// ever only added to the end, or mutated in place by id (a streaming
   /// AI bubble's own `content`/`status`), never removed or reordered.
   final List<ChatUiMessage> messages;
+
+  /// Every Chat Session the drawer's own "CONVERSAS" section renders
+  /// (spec-6-2 Code Map) — populated once by `ChatCubit._bootstrap`'s own
+  /// `listSessions()`/`createSession()` call, then kept current by
+  /// `ChatCubit.startNewSession` prepending its own result. Never
+  /// re-fetched/paginated past that first page (Boundaries: "Never:
+  /// paginating past the backend's default first page").
+  final List<ChatSession> sessions;
 
   /// Whether `ChatCubit.sendMessage`'s own send is actively in flight —
   /// the composer's one enable/disable signal (`_ChatComposer`). Kept as
@@ -60,12 +71,31 @@ class ChatReady extends ChatState {
   /// disable the composer.
   final bool isSending;
 
-  ChatReady copyWith({List<ChatUiMessage>? messages, bool? isSending}) =>
-      ChatReady(
-        sessionId: sessionId,
-        messages: messages ?? this.messages,
-        isSending: isSending ?? this.isSending,
-      );
+  /// The scroll offset `ChatScreen` should jump to the moment this exact
+  /// [ChatReady] becomes the active session (spec-6-2 I/O matrix: "Switch
+  /// session") — `ChatCubit._scrollOffsets[sessionId]`'s own last
+  /// recorded value, or `null` when none was ever recorded (a brand new
+  /// session, or a session visited for the first time this app run),
+  /// which `ChatScreen` reads as "jump to bottom instead" (Code Map).
+  /// Deliberately never cleared by the cubit itself once set — `ChatScreen`
+  /// only consults it the instant [sessionId] changes from the previous
+  /// state it observed, so a later unrelated emit (e.g. a streamed token)
+  /// carrying the same value forward via [copyWith] is harmless (Design
+  /// Notes).
+  final double? restoreScrollOffset;
+
+  ChatReady copyWith({
+    List<ChatUiMessage>? messages,
+    List<ChatSession>? sessions,
+    bool? isSending,
+    double? restoreScrollOffset,
+  }) => ChatReady(
+    sessionId: sessionId,
+    messages: messages ?? this.messages,
+    sessions: sessions ?? this.sessions,
+    isSending: isSending ?? this.isSending,
+    restoreScrollOffset: restoreScrollOffset ?? this.restoreScrollOffset,
+  );
 }
 
 /// One bubble's own presentation-layer shape — distinct from the domain

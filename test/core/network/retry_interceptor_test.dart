@@ -171,6 +171,24 @@ void main() {
           );
           expect(RetryInterceptor.shouldRetry(err, 0), isTrue);
         });
+
+        test(
+          'review finding: the exclusion still applies against the real '
+          'request-path shape, which always carries a trailing '
+          'pathParams segment (e.g. the session id) — '
+          '`HeaderInterceptor.functionNameOf` only reads the first path '
+          'segment, so this must behave identically to the bare-path '
+          'cases above',
+          () {
+            final err = DioException(
+              requestOptions: RequestOptions(
+                path: '/chat-messages-send/session-1',
+              ),
+              type: DioExceptionType.connectionTimeout,
+            );
+            expect(RetryInterceptor.shouldRetry(err, 0), isFalse);
+          },
+        );
       },
     );
   });

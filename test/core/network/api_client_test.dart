@@ -579,6 +579,60 @@ void main() {
     );
 
     test(
+      'review finding: an in-band AUTH_EXPIRED on the stream path notifies '
+      'SessionExpiryNotifier exactly once, same as the non-stream '
+      '_mapDioException path (Story 1.5)',
+      () async {
+        final bearerRequestOptions = RequestOptions(
+          path: '$baseUrl/chat-messages-send/session-1',
+        );
+        final errorBodyStream = Stream<Uint8List>.fromIterable([
+          Uint8List.fromList(
+            utf8.encode(
+              jsonEncode({
+                'code': 'AUTH_EXPIRED',
+                'message': 'Session expired',
+                'retryable': false,
+              }),
+            ),
+          ),
+        ]);
+        final errorResponse = Response<ResponseBody>(
+          requestOptions: bearerRequestOptions,
+          statusCode: 401,
+          data: ResponseBody(errorBodyStream, 401),
+        );
+        final dioError = DioException(
+          requestOptions: bearerRequestOptions,
+          response: errorResponse,
+          type: DioExceptionType.badResponse,
+        );
+        when(
+          () => mockDio.post<ResponseBody>(
+            any(),
+            data: any(named: 'data'),
+            options: any(named: 'options'),
+          ),
+        ).thenThrow(dioError);
+
+        final chunks = await apiClient
+            .postStream(
+              'chat-messages-send',
+              pathParams: ['session-1'],
+              data: {'content': 'hi'},
+            )
+            .toList();
+
+        expect(chunks, hasLength(1));
+        chunks.single.match(
+          (failure) => expect(failure, isA<AuthExpired>()),
+          (_) => fail('expected Left'),
+        );
+        verify(() => mockSessionExpiryNotifier.notifyExpired()).called(1);
+      },
+    );
+
+    test(
       'a non-2xx response whose body cannot be decoded as {code, message} '
       'falls back to the generic mapping, never throwing',
       () async {

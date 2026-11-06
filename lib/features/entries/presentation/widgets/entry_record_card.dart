@@ -15,9 +15,11 @@ import 'sync_badge.dart';
 /// `DesignTokens.dialogIconSize`'s doc already gives), each already used
 /// elsewhere in the app for the same origin: `Icons.mic`
 /// (`insertion_modal.dart`'s Áudio tab), `Icons.image_outlined`
-/// (its Foto tab), `Icons.chat_bubble_outline`
-/// (the deleted `HomeChatPlaceholderScreen`'s own chat icon, now
-/// `ChatScreen`'s own `_ChatBootstrapErrorView`).
+/// (its Foto tab), `Icons.chat_bubble_outline` (this card's own chat
+/// marker alone now — the deleted `HomeChatPlaceholderScreen` used to
+/// share it, but its replacement `ChatScreen` doesn't reuse the glyph
+/// anywhere, including its own `_ChatBootstrapErrorView`, which uses
+/// `Icons.error_outline`).
 class _SourceMeta {
   const _SourceMeta(this.icon, this.color);
 

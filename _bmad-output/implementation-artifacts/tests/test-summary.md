@@ -32,3 +32,33 @@ Both mirror the serialization convention already proven for `list()` in `entries
 
 - Only remaining self-disclosed test gap in `deferred-work.md` is the source-chip "x" removal bridge while a date-range chip is also active (widget-tier, not e2e — out of this workflow's scope).
 - No device/simulator or CI exists yet; revisit true on-device E2E once one is introduced (per `AGENTS.md`).
+
+---
+
+## Target (2026-11-05)
+
+`_bmad-output/implementation-artifacts/spec-6-1-send-message-receive-rag-grounded-streaming-response.md` — chat's first vertical slice had no `*_flow_e2e_test.dart` at all (every other feature with an e2e-covered story does), and none of its existing mocked tests (`chat_cubit_test.dart` against a fake `ChatRepository`; `chat_repository_impl_test.dart`/`chat_remote_data_source_test.dart` against a mocked `ApiClient`) drove a real SSE byte stream through the real `ApiClient.postStream` → `ChatRemoteDataSource` buffering → `ChatCubit` token-append pipeline together, the way the app does on every real send.
+
+## Generated Tests
+
+### E2E Tests (real pipeline, faked HTTP transport only)
+
+- [x] `test/features/chat/chat_flow_e2e_test.dart` — new file, 3 cases, driven directly against the real DI-resolved `ChatCubit` (`init()`/`sendMessage()`), with only `HttpClientAdapter` and the native secure-storage/path_provider channels faked:
+  - "happy path" — no existing session → bootstrap creates one via a genuine `chat-sessions-create` call, then `sendMessage()` fires a genuine multi-chunk SSE POST to `chat-messages-send/{sessionId}`, with one `token` event deliberately split mid-event across two network chunks to prove the real `\n\n`-boundary buffer joins it correctly; asserts the final `ChatReady` state (both bubbles `complete`, joined AI text) and the real `chat_sessions` Hive write-through.
+  - "mid-stream drop" — a queued SSE stream that ends with no `done`/`error` event; asserts the AI bubble's partial text is kept (never cleared) and marked `failed`, with no exception escaping the cubit.
+  - "in-band error event" — a queued `error` SSE event with a taxonomy code (`RATE_LIMITED`); asserts the bubble is marked `failed` and exactly one POST fires (`chat-messages-send` is excluded from `RetryInterceptor`'s transparent retry).
+
+## Verification
+
+- `fvm flutter analyze` — zero issues (project-wide)
+- `fvm flutter test` — 906/906 passed (full suite, including the 3 new cases)
+
+## Coverage
+
+- Story 6.1's 3 visible message states (streaming→complete, mid-stream-drop→failed, in-band-error→failed) are now each proven once at the real-pipeline tier, on top of the existing mocked-tier coverage of the full I/O matrix.
+- Session bootstrap's "create when none exists" branch is exercised through the real `chat-sessions-create` call; the "reuse most recent existing session" branch is exercised in the other two cases.
+
+## Next Steps
+
+- Not covered here (out of scope for this run, no gap self-disclosed for it): the bootstrap-failure path (`chat-sessions-list`/`create` erroring on screen open) and the offline-cache fallback for `listSessions`/`listMessages` — both already have dedicated mocked-tier coverage, and no deferred-work entry flags a real-pipeline gap for them.
+- No device/simulator or CI exists yet; revisit true on-device E2E once one is introduced (per `AGENTS.md`).

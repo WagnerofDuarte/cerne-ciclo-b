@@ -26,17 +26,23 @@ class ChatRemoteDataSource {
     return result.flatMap((json) {
       try {
         final data = json['data'] as List<dynamic>;
-        return right(
-          data
-              .map(
-                (item) => ChatSessionDto.fromJson(item as Map<String, dynamic>),
-              )
-              .toList(),
-        );
+        // Review fix: one malformed item is skipped rather than
+        // discarding every other valid session in the response — same
+        // per-item isolation the offline-cache fallback already applies.
+        final dtos = <ChatSessionDto>[];
+        for (final item in data) {
+          try {
+            dtos.add(ChatSessionDto.fromJson(item as Map<String, dynamic>));
+          } catch (_) {
+            // Skip this one malformed item.
+          }
+        }
+        return right(dtos);
       } catch (error) {
-        // A 200 response that doesn't match the expected shape is a
-        // client-side parse failure, never a backend-sent code — same
-        // RNF09 rationale `EntriesRemoteDataSource`'s own calls document.
+        // A 200 response that doesn't match the expected shape at all
+        // (e.g. `data` itself isn't a list) is a client-side parse
+        // failure, never a backend-sent code — same RNF09 rationale
+        // `EntriesRemoteDataSource`'s own calls document.
         return left(Failure.malformedResponse(message: error.toString()));
       }
     });
@@ -67,13 +73,18 @@ class ChatRemoteDataSource {
     return result.flatMap((json) {
       try {
         final data = json['data'] as List<dynamic>;
-        return right(
-          data
-              .map(
-                (item) => ChatMessageDto.fromJson(item as Map<String, dynamic>),
-              )
-              .toList(),
-        );
+        // Review fix: one malformed item is skipped rather than
+        // discarding every other valid message in the response — same
+        // per-item isolation the offline-cache fallback already applies.
+        final dtos = <ChatMessageDto>[];
+        for (final item in data) {
+          try {
+            dtos.add(ChatMessageDto.fromJson(item as Map<String, dynamic>));
+          } catch (_) {
+            // Skip this one malformed item.
+          }
+        }
+        return right(dtos);
       } catch (error) {
         return left(Failure.malformedResponse(message: error.toString()));
       }
@@ -116,7 +127,10 @@ class ChatRemoteDataSource {
         return;
       }
       final chunk = chunkResult.fold((_) => '', (s) => s);
-      buffer += chunk.replaceAll('\r\n', '\n');
+      // Normalize after concatenation, not per-chunk — a `\r\n` line
+      // ending split exactly across two chunks (one ends `\r`, the next
+      // starts `\n`) would otherwise survive unnormalized in `buffer`.
+      buffer = (buffer + chunk).replaceAll('\r\n', '\n');
 
       var separatorIndex = buffer.indexOf('\n\n');
       while (separatorIndex != -1) {
