@@ -54,4 +54,20 @@ abstract class ChatRepository {
     String sessionId,
     String content,
   );
+
+  /// spec-6-3 — calls `chat-messages-retry` (`ApiClient.postStream`,
+  /// [sessionId] then [userMessageId] appended as the two trailing path
+  /// segments, `data: const {}`) — regenerates the AI response for an
+  /// already-persisted user message without re-sending its content
+  /// (Boundaries: "never a duplicate question"). Same streaming shape and
+  /// terminal handling as [sendMessage] (SSE events via
+  /// `ChatRemoteDataSource`'s shared buffer/parse helper); [userMessageId]
+  /// must be a real, already-persisted user message id — `ChatCubit`
+  /// itself never calls this with one that's `null` (Boundaries: "Never
+  /// calling `chat-messages-retry` with no `serverId`"), falling back to
+  /// [sendMessage] instead in that case.
+  Stream<Either<Failure, ChatStreamEvent>> retryMessage(
+    String sessionId,
+    String userMessageId,
+  );
 }

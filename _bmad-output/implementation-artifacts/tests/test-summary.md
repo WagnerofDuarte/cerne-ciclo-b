@@ -62,3 +62,46 @@ Both mirror the serialization convention already proven for `list()` in `entries
 
 - Not covered here (out of scope for this run, no gap self-disclosed for it): the bootstrap-failure path (`chat-sessions-list`/`create` erroring on screen open) and the offline-cache fallback for `listSessions`/`listMessages` — both already have dedicated mocked-tier coverage, and no deferred-work entry flags a real-pipeline gap for them.
 - No device/simulator or CI exists yet; revisit true on-device E2E once one is introduced (per `AGENTS.md`).
+
+---
+
+## Target (2026-11-05, second pass)
+
+Working-tree diff at the start of this run held 3 uncommitted "round-2 review fix" changes to story 6.2's chat feature, none of them yet covered by any test:
+
+1. `chat_remote_data_source.dart` `listSessions()`/`listMessages()` — a non-empty response where *every* item fails to decode now maps to `Left(MalformedResponse)` instead of `Right([])` (previously indistinguishable from "zero sessions/messages", which would make `ChatCubit._bootstrap()` spuriously `createSession()` and hide the user's real sessions, or silently render a session's history as empty).
+2. `chat_repository_impl.dart` `_cachedSessions()` — the offline-cache sort now uses `DateTime.tryParse` (falling back to `DateTime(0)`) instead of `DateTime.parse`, so one cached entry with a malformed `updatedAt` can no longer throw out of the whole offline fallback.
+3. `chat_cubit.dart` `switchSession()`/`startNewSession()` — on failure, a stale `ChatReady.isSending: true` (left behind by `_cancelInFlightSend()`, which resets the internal guard but never emits) is now explicitly flipped back to `false`; previously a failed switch/new-session call during an in-flight send left the composer disabled for the rest of the app run.
+
+API-tier tests are the right altitude for all three (pure response-shape/state-transition logic, no real SSE byte-stream or transport-timing concern) — not e2e, which this project reserves for proving the real transport/serialization boundary.
+
+## Generated Tests
+
+### API Tests (mocked `ApiClient`/`ChatRepository`, existing project convention)
+
+- [x] `test/features/chat/data/datasources/chat_remote_data_source_test.dart` — 6 new cases:
+  - `listSessions`: "one malformed item is skipped, valid items still decode"
+  - `listSessions`: "review fix: a non-empty response where every item fails to decode maps to Left(MalformedResponse), never Right([])"
+  - `listMessages`: "a shape mismatch maps to Left(MalformedResponse), never throws" (this case existed for `listSessions` already but was missing entirely for `listMessages`)
+  - `listMessages`: "one malformed item is skipped, valid items still decode"
+  - `listMessages`: "review fix: a non-empty response where every item fails to decode maps to Left(MalformedResponse), never Right([])"
+- [x] `test/features/chat/data/repositories/chat_repository_impl_test.dart` — 1 new case:
+  - `listSessions`: "review fix: a malformed cached updatedAt never throws — DateTime.tryParse falls back to DateTime(0), sorting that entry last rather than crashing the whole offline-cache fallback"
+- [x] `test/features/chat/presentation/cubit/chat_cubit_test.dart` — 2 new cases (under the existing `switchSession()/startNewSession() — spec-6-2` group):
+  - "review fix: a switchSession failure while a send was in flight flips the stale isSending flag back to false, so the composer isn't left disabled for the rest of the app run"
+  - "review fix: a startNewSession failure while a send was in flight flips the stale isSending flag back to false too"
+
+## Verification
+
+- `fvm flutter analyze` — zero issues (project-wide)
+- `fvm flutter test` — 928/928 passed (full suite, including all 9 new cases)
+
+## Coverage
+
+- All 3 uncommitted round-2 review fixes now have a regression test that fails without the fix and passes with it (verified by reading each fix's diff against its corresponding new test, not just running green).
+- `listMessages()` now has parity with `listSessions()` on malformed-response handling (shape-mismatch, per-item-skip, and all-items-malformed cases), closing an asymmetry that predates this run.
+
+## Next Steps
+
+- No e2e-tier test was added for the `isSending` stuck-flag fix: reproducing it at the real-pipeline tier would require extending `chat_flow_e2e_test.dart`'s fake `HttpClientAdapter` to hold an SSE response open mid-stream (via a `StreamController` instead of its current pre-baked chunk list) purely to interleave a concurrent `switchSession()`/`startNewSession()` call — nontrivial plumbing for a mechanism (a `Left` branch flipping a boolean in cubit state) that has no interaction with real SSE parsing. The cubit-level fake-repository test already gives precise control over that interleaving.
+- No device/simulator or CI exists yet; revisit true on-device E2E once one is introduced (per `AGENTS.md`).

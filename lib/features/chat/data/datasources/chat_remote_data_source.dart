@@ -10,12 +10,13 @@ import '../models/chat_session_dto.dart';
 
 /// The chat feature's one remote data source — non-streaming calls go
 /// through `ApiClient`'s plain JSON methods exactly like
-/// `EntriesRemoteDataSource`'s own `create`/`list`/`get`; [sendMessage]
-/// alone goes through `ApiClient.postStream` and owns the one piece of
-/// SSE-specific logic this story introduces: splitting the raw byte
-/// stream into `event:`/`data:` blocks and mapping each into a
-/// [ChatStreamEvent] (or an in-band [Failure]) — kept feature-local per
-/// the Code Map, `ApiClient` itself knows nothing about the SSE grammar.
+/// `EntriesRemoteDataSource`'s own `create`/`list`/`get`; [sendMessage]/
+/// [retryMessage] alone go through `ApiClient.postStream`, sharing the one
+/// piece of SSE-specific logic this story introduces (`_consumeSse`):
+/// splitting the raw byte stream into `event:`/`data:` blocks and mapping
+/// each into a [ChatStreamEvent] (or an in-band [Failure]) — kept
+/// feature-local per the Code Map, `ApiClient` itself knows nothing about
+/// the SSE grammar.
 class ChatRemoteDataSource {
   ChatRemoteDataSource(this._apiClient);
 
@@ -36,6 +37,18 @@ class ChatRemoteDataSource {
           } catch (_) {
             // Skip this one malformed item.
           }
+        }
+        // Review fix: a non-empty response where every item failed to
+        // decode is a parse failure, not "zero sessions" — returning
+        // `right([])` here would make `ChatCubit._bootstrap()` believe
+        // none exist and spuriously `createSession()`, hiding the user's
+        // real sessions behind a new empty one.
+        if (data.isNotEmpty && dtos.isEmpty) {
+          return left(
+            Failure.malformedResponse(
+              message: 'All items in listSessions() response failed to decode',
+            ),
+          );
         }
         return right(dtos);
       } catch (error) {
@@ -84,6 +97,17 @@ class ChatRemoteDataSource {
             // Skip this one malformed item.
           }
         }
+        // Review fix: same "all items malformed" rationale as
+        // listSessions() above — a non-empty response that fully fails
+        // to decode must never be mistaken for "no messages", or a
+        // session's whole history would silently render empty.
+        if (data.isNotEmpty && dtos.isEmpty) {
+          return left(
+            Failure.malformedResponse(
+              message: 'All items in listMessages() response failed to decode',
+            ),
+          );
+        }
         return right(dtos);
       } catch (error) {
         return left(Failure.malformedResponse(message: error.toString()));
@@ -114,13 +138,57 @@ class ChatRemoteDataSource {
   Stream<Either<Failure, ChatStreamEvent>> sendMessage(
     String sessionId,
     String content,
-  ) async* {
-    var buffer = '';
-    await for (final chunkResult in _apiClient.postStream(
+  ) => _consumeSse(
+    _apiClient.postStream(
       'chat-messages-send',
       pathParams: [sessionId],
       data: {'content': content},
-    )) {
+    ),
+  );
+
+  /// spec-6-3 — regenerates the AI response for an already-persisted user
+  /// message ([userMessageId]), via `chat-messages-retry`
+  /// ([sessionId]/[userMessageId] appended as the two trailing path
+  /// segments, Code Map) — same SSE buffering/parsing as [sendMessage]
+  /// above, via the shared [_consumeSse] helper; see
+  /// `ChatRepository.retryMessage`'s own doc for the terminal-handling
+  /// contract both share.
+  Stream<Either<Failure, ChatStreamEvent>> retryMessage(
+    String sessionId,
+    String userMessageId,
+  ) => _consumeSse(
+    _apiClient.postStream(
+      'chat-messages-retry',
+      pathParams: [sessionId, userMessageId],
+      data: const {},
+    ),
+  );
+
+  /// The shared SSE-consumption step behind [sendMessage]/[retryMessage]
+  /// (Code Map: "extract shared SSE buffer/parse helper") — buffers raw
+  /// text from [chunks] until a full `\n\n`-terminated SSE event block is
+  /// available, then hands each complete block to [_parseEvent].
+  ///
+  /// Terminal handling (Design Notes/I/O matrix):
+  /// - An upstream `Left` (an offline/timeout/etc. failure from the
+  ///   underlying HTTP call itself, surfaced by `ApiClient.postStream`) is
+  ///   forwarded as-is and ends the stream immediately — covers "Send
+  ///   while offline" (an immediate `Left(Failure.networkOffline)`, never
+  ///   queued) and any other transport-level failure.
+  /// - A parsed `done` event or an in-band `error` event (mapped via
+  ///   [Failure.fromCode]) both end the stream right after being emitted
+  ///   — the backend's own SSE ordering guarantees neither is followed by
+  ///   anything else worth reading.
+  /// - If the underlying byte stream simply ends (no exception, no
+  ///   `done`/`error` event ever parsed) — a mid-stream drop — a single
+  ///   trailing `Left(Failure.networkTimeout)` is emitted, since the
+  ///   closed, 13-code taxonomy has no dedicated "dropped stream" code
+  ///   (Design Notes).
+  Stream<Either<Failure, ChatStreamEvent>> _consumeSse(
+    Stream<Either<Failure, String>> chunks,
+  ) async* {
+    var buffer = '';
+    await for (final chunkResult in chunks) {
       final upstreamFailure = chunkResult.fold((f) => f, (_) => null);
       if (upstreamFailure != null) {
         yield left(upstreamFailure);

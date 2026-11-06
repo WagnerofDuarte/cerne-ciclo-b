@@ -27,6 +27,7 @@ import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 import 'package:cerne/features/vault/presentation/screens/vault_lock_screen.dart';
 import 'package:cerne/main.dart';
 
+import 'support/fake_connectivity_watcher.dart';
 import 'support/fake_path_provider_platform.dart';
 
 class MockAuthRepository extends Mock implements AuthRepository {}
@@ -205,6 +206,12 @@ class _FakeChatRepository implements ChatRepository {
     String sessionId,
     String content,
   ) => const Stream.empty();
+
+  @override
+  Stream<Either<Failure, ChatStreamEvent>> retryMessage(
+    String sessionId,
+    String userMessageId,
+  ) => const Stream.empty();
 }
 
 /// Proves the one real production composition root — `CerneApp` resolving
@@ -284,7 +291,7 @@ void main() {
     // by `_FakeChatRepository` so reaching Home/Chat never hits the network.
     sl.unregister<ChatCubit>();
     sl.registerLazySingleton<ChatCubit>(
-      () => ChatCubit(_FakeChatRepository()),
+      () => ChatCubit(_FakeChatRepository(), FakeConnectivityWatcher()),
       dispose: (cubit) => cubit.close(),
     );
     // `ConfirmationDialog.isOpen` is a static single-overlay guard (shared

@@ -10,6 +10,7 @@ Future<void> _pump(
   WidgetTester tester,
   ChatUiMessage message, {
   bool disableAnimations = false,
+  VoidCallback? onRetry,
 }) async {
   await tester.pumpWidget(
     Builder(
@@ -18,7 +19,9 @@ Future<void> _pump(
           disableAnimations: disableAnimations,
         ),
         child: MaterialApp(
-          home: Scaffold(body: ChatBubble(message: message)),
+          home: Scaffold(
+            body: ChatBubble(message: message, onRetry: onRetry),
+          ),
         ),
       ),
     ),
@@ -139,9 +142,8 @@ void main() {
     );
 
     testWidgets(
-      'failed state: the generic error indicator replaces the timestamp '
-      'slot, text is never cleared, and the copy is never the tap-to-retry '
-      'copy (that action belongs to a later story)',
+      'spec-6-3: failed state shows the tap-to-retry copy in place of the '
+      'timestamp slot, text is never cleared',
       (tester) async {
         await _pump(
           tester,
@@ -154,14 +156,85 @@ void main() {
         );
 
         expect(find.textContaining('resposta parcial'), findsOneWidget);
-        expect(find.text('Falha ao gerar resposta'), findsOneWidget);
         expect(
-          find.textContaining('toque para tentar novamente'),
-          findsNothing,
+          find.text('Falha ao gerar resposta — toque para tentar novamente'),
+          findsOneWidget,
         );
         // No cursor either — streaming and failed are mutually exclusive
         // visible states.
         expect(find.text('▏'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'spec-6-3: tapping the retry copy invokes onRetry — tap target is '
+      '44pt min and exposed as Semantics(button: true)',
+      (tester) async {
+        var tapped = false;
+        await _pump(
+          tester,
+          const ChatUiMessage(
+            id: '1',
+            role: ChatMessageRole.assistant,
+            content: 'resposta parcial',
+            status: ChatMessageStatus.failed,
+          ),
+          onRetry: () => tapped = true,
+        );
+
+        await tester.tap(
+          find.text('Falha ao gerar resposta — toque para tentar novamente'),
+        );
+        await tester.pump();
+        expect(tapped, isTrue);
+
+        final semantics = tester.getSemantics(
+          find.ancestor(
+            of: find.text(
+              'Falha ao gerar resposta — toque para tentar novamente',
+            ),
+            matching: find.byWidgetPredicate((w) => w is Semantics),
+          ).first,
+        );
+        expect(
+          semantics.flagsCollection.isButton,
+          isTrue,
+        );
+
+        final constrainedBoxes = tester.widgetList<ConstrainedBox>(
+          find.ancestor(
+            of: find.text(
+              'Falha ao gerar resposta — toque para tentar novamente',
+            ),
+            matching: find.byType(ConstrainedBox),
+          ),
+        );
+        expect(
+          constrainedBoxes.map((c) => c.constraints.minHeight),
+          contains(DesignTokens.insertionModalTapTargetMin),
+        );
+      },
+    );
+
+    testWidgets(
+      'a non-failed bubble never renders the retry copy, regardless of '
+      'onRetry being set',
+      (tester) async {
+        await _pump(
+          tester,
+          const ChatUiMessage(
+            id: '1',
+            role: ChatMessageRole.assistant,
+            content: 'Pronto',
+            status: ChatMessageStatus.complete,
+          ),
+          onRetry: () {},
+        );
+
+        expect(
+          find.textContaining('toque para tentar novamente'),
+          findsNothing,
+        );
       },
     );
   });

@@ -416,3 +416,39 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-2-multi-session-chat-history-new-conversation.md`
   summary: The new `chat_flow_e2e_test.dart`'s "in-band error event" test comment claims no retry fires because `chat-messages-send` is excluded from `RetryInterceptor`'s transparent retry, but the error in that test arrives as a well-formed in-band SSE `error` event inside a 200 response, which never surfaces as a `DioException` and so would never reach `RetryInterceptor` regardless of the exclusion list — the comment misattributes the mechanism actually being exercised.
   evidence: `test/features/chat/chat_flow_e2e_test.dart`, "in-band error event" test. Review finding (blind-hunter layer). Pre-existing from story 6.1's own round-2 work (this test file was added there), not introduced by story 6.2; a documentation accuracy nit, not a functional bug.
+
+## Deferred from: code review of story-6-2-multi-session-chat-history-new-conversation, round 2 (2026-11-05)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-multi-session-chat-history-new-conversation.md`
+  summary: Unsent composer draft text carries over verbatim into whatever session becomes active after `switchSession`/`startNewSession` — `_textController` is only cleared on send, never on a session change.
+  evidence: `lib/features/chat/presentation/screens/chat_screen.dart` (`_send`). Review finding (blind-hunter layer). No acceptance criterion or Design Note covers draft handling across session switches.
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-multi-session-chat-history-new-conversation.md`
+  summary: The drawer's "CONVERSAS" `BlocBuilder<ChatCubit, ChatState>` has no `buildWhen`, so it re-sorts and rebuilds every session row on every `ChatReady` emission — including once per streamed AI token — even while the drawer is closed and off-screen (`Scaffold.drawer` keeps it mounted).
+  evidence: `lib/core/widgets/app_drawer.dart`. Review finding (blind-hunter layer). Harmless today given small session counts; same unthrottled-rebuild class already deferred for `ChatScreen._scrollToBottomSoon` from story 6.1's own deferred-work entry above.
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-multi-session-chat-history-new-conversation.md`
+  summary: Switching the active conversation (`switchSession`/`startNewSession`) replaces the whole message list with no `Semantics` announcement or focus-traversal reset communicating "the conversation changed" to a screen-reader user.
+  evidence: `lib/core/widgets/app_drawer.dart`, `lib/features/chat/presentation/screens/chat_screen.dart`. Review finding (blind-hunter layer). No accessibility requirement is scoped for this story; matches the existing deferred a11y-debt pattern already recorded elsewhere in this file (e.g. the streaming bubble's missing live region, story 6.1).
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-multi-session-chat-history-new-conversation.md`
+  summary: `ChatRemoteDataSource.sendMessage()`'s `\r\n`-split-across-chunks fix re-scans and reallocates the entire accumulated buffer on every incoming chunk (`buffer = (buffer + chunk).replaceAll('\r\n', '\n')`) rather than normalizing only the newly appended tail.
+  evidence: `lib/features/chat/data/datasources/chat_remote_data_source.dart` (`sendMessage`). Review finding (blind-hunter layer). Functionally correct; negligible real cost given per-chunk buffer sizes; no test or comment acknowledges the trade-off was deliberate.
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-multi-session-chat-history-new-conversation.md`
+  summary: `_jumpToOffset`'s `addPostFrameCallback` checks `_scrollController.hasClients` but not `mounted`, unlike `_focusComposerSoon` right beside it which does.
+  evidence: `lib/features/chat/presentation/screens/chat_screen.dart`. Review finding (blind-hunter + edge-case-hunter layers). Mirrors the same unguarded pattern already present in the pre-existing sibling `_scrollToBottomSoon` since story 6.1 — not a new regression class introduced here.
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-2-multi-session-chat-history-new-conversation.md`
+  summary: `ChatScreen._recordScrollOffset`'s scroll listener has no awareness of an in-progress session transition — during the frame that rebuilds the list for a newly switched-to session (before `_jumpToOffset`'s post-frame callback runs), an automatic scroll-position clamp can fire this listener and record a transient, incorrect offset under the new session's id.
+  evidence: `lib/features/chat/presentation/screens/chat_screen.dart`. Review finding (blind-hunter layer). Self-corrects moments later once `_jumpToOffset` runs; untested latent fragility, no observed visual glitch.
+
+## Deferred from: code review of story-6-3-dropped-stream-resilience-offline-composer-lock (2026-11-06)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-3-dropped-stream-resilience-offline-composer-lock.md`
+  summary: Two new `BlocBuilder<ChatCubit, ChatState>`s — `AppDrawer`'s "Novo Chat" disable and `ChatScreen`'s offline banner — have no `buildWhen`, so both rebuild on every `ChatReady` emission, including once per streamed AI token, even though each only cares about one boolean.
+  evidence: `lib/core/widgets/app_drawer.dart`, `lib/features/chat/presentation/screens/chat_screen.dart`. Review finding (blind-hunter + verification-gap layers). Same unthrottled-rebuild class already deferred twice before — `ChatScreen._scrollToBottomSoon` (story 6.1) and the drawer's own "CONVERSAS" `BlocBuilder` (story 6.2) — now a third/fourth instance in the same screens.
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-3-dropped-stream-resilience-offline-composer-lock.md`
+  summary: `ChatCubit.retryMessage()`'s no-`serverId` fallback (the stream dropped before `message_created` ever arrived) silently resends via `sendMessage`, which mints a genuinely new `chat-messages-send` call server-side — but the UI gives no indication that "retry" quietly sent a new message rather than regenerating the original one.
+  evidence: `lib/features/chat/presentation/cubit/chat_cubit.dart` (`retryMessage`). Review finding (blind-hunter layer). Explicitly sanctioned by the spec's own Boundaries/Never section as the intended fallback behavior; no acceptance criterion or Design Note calls for a distinguishing UI treatment, and introducing new user-facing copy wasn't authorized by the spec.
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-3-dropped-stream-resilience-offline-composer-lock.md`
+  summary: `ChatReady.isOffline` defaults to `false` until `ConnectivityWatcher`'s first reading arrives; if `ChatCubit._bootstrap()` resolves first, the very first emitted `ChatReady` can briefly show the composer enabled on a device that's actually offline at launch, correcting itself only once the real reading lands.
+  evidence: `lib/features/chat/presentation/cubit/chat_cubit.dart`. Review finding (blind-hunter layer). `chat_cubit_test.dart` already covers the opposite race ("a connectivity reading that arrives before bootstrap resolves") but not this direction; self-corrects moments later, no observed glitch — same latent-race pattern already deferred for `ChatScreen._recordScrollOffset` above.
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-3-dropped-stream-resilience-offline-composer-lock.md`
+  summary: The new offline banner only renders while `state is ChatReady`; `ChatBootstrapLoading`/`ChatBootstrapError` never surface the offline cue even when `ChatCubit._isOffline` is already known `true` at that point.
+  evidence: `lib/features/chat/presentation/screens/chat_screen.dart`. Review finding (edge-case-hunter layer). Brief, self-correcting window (bootstrap normally resolves quickly); no acceptance criterion scopes the bootstrap states' offline treatment.

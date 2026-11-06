@@ -45,6 +45,7 @@ class ChatReady extends ChatState {
     required this.sessions,
     this.isSending = false,
     this.restoreScrollOffset,
+    this.isOffline = false,
   });
 
   final String sessionId;
@@ -84,17 +85,29 @@ class ChatReady extends ChatState {
   /// Notes).
   final double? restoreScrollOffset;
 
+  /// spec-6-3 — whether the device currently has no connectivity
+  /// (`ChatCubit`'s own `ConnectivityWatcher` subscription), `false` by
+  /// default (bootstrap's own first guess, before any connectivity
+  /// reading has ever arrived). Drives `_ChatComposer.canSend`, the
+  /// offline banner between `_ChatHeader` and the message list, and
+  /// `AppDrawer`'s "Novo Chat" gate — additive only (Boundaries): never
+  /// changes `ChatRepositoryImpl`'s own existing reactive
+  /// `Failure.networkOffline` handling.
+  final bool isOffline;
+
   ChatReady copyWith({
     List<ChatUiMessage>? messages,
     List<ChatSession>? sessions,
     bool? isSending,
     double? restoreScrollOffset,
+    bool? isOffline,
   }) => ChatReady(
     sessionId: sessionId,
     messages: messages ?? this.messages,
     sessions: sessions ?? this.sessions,
     isSending: isSending ?? this.isSending,
     restoreScrollOffset: restoreScrollOffset ?? this.restoreScrollOffset,
+    isOffline: isOffline ?? this.isOffline,
   );
 }
 
@@ -111,6 +124,7 @@ class ChatUiMessage {
     required this.role,
     required this.content,
     required this.status,
+    this.serverId,
   });
 
   final String id;
@@ -118,13 +132,30 @@ class ChatUiMessage {
   final String content;
   final ChatMessageStatus status;
 
-  ChatUiMessage copyWith({String? content, ChatMessageStatus? status}) =>
-      ChatUiMessage(
-        id: id,
-        role: role,
-        content: content ?? this.content,
-        status: status ?? this.status,
-      );
+  /// spec-6-3 Design Notes: "`serverId` (not reusing `id`) avoids ever
+  /// swapping a `ChatUiMessage.id` mid-stream" — the backend-assigned id
+  /// this message is persisted under, known from the moment it's loaded
+  /// from history/cache (`ChatCubit._fromDomain`), or captured mid-session
+  /// off the SSE `message_created` event once/if it arrives
+  /// (`ChatCubit._applyStreamEvent`). `null` for a just-sent message whose
+  /// stream hasn't delivered `message_created` yet (or ever, on a very
+  /// early drop) — the one value [ChatCubit.retryMessage] reads off the
+  /// user message preceding a `failed` AI bubble to decide whether it can
+  /// call `chat-messages-retry` at all (Boundaries: "Never calling
+  /// `chat-messages-retry` with no `serverId`").
+  final String? serverId;
+
+  ChatUiMessage copyWith({
+    String? content,
+    ChatMessageStatus? status,
+    String? serverId,
+  }) => ChatUiMessage(
+    id: id,
+    role: role,
+    content: content ?? this.content,
+    status: status ?? this.status,
+    serverId: serverId ?? this.serverId,
+  );
 
   @override
   bool operator ==(Object other) =>
@@ -133,13 +164,14 @@ class ChatUiMessage {
           other.id == id &&
           other.role == role &&
           other.content == content &&
-          other.status == status);
+          other.status == status &&
+          other.serverId == serverId);
 
   @override
-  int get hashCode => Object.hash(id, role, content, status);
+  int get hashCode => Object.hash(id, role, content, status, serverId);
 
   @override
   String toString() =>
       'ChatUiMessage(id: $id, role: $role, content: $content, '
-      'status: $status)';
+      'status: $status, serverId: $serverId)';
 }

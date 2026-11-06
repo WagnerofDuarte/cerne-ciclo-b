@@ -26,6 +26,8 @@ import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 
+import '../../../../support/fake_connectivity_watcher.dart';
+
 const _session = ChatSession(
   id: 's1',
   title: '',
@@ -45,6 +47,8 @@ class _FakeChatRepository implements ChatRepository {
   Either<Failure, ChatSession> createSessionResult = right(_session);
   final List<String> sendMessageCalls = [];
   StreamController<Either<Failure, ChatStreamEvent>>? lastSendController;
+  final List<String> retryMessageCalls = [];
+  StreamController<Either<Failure, ChatStreamEvent>>? lastRetryController;
 
   @override
   Future<Either<Failure, List<ChatSession>>> listSessions() async =>
@@ -67,6 +71,17 @@ class _FakeChatRepository implements ChatRepository {
     sendMessageCalls.add(content);
     final controller = StreamController<Either<Failure, ChatStreamEvent>>();
     lastSendController = controller;
+    return controller.stream;
+  }
+
+  @override
+  Stream<Either<Failure, ChatStreamEvent>> retryMessage(
+    String sessionId,
+    String userMessageId,
+  ) {
+    retryMessageCalls.add(userMessageId);
+    final controller = StreamController<Either<Failure, ChatStreamEvent>>();
+    lastRetryController = controller;
     return controller.stream;
   }
 }
@@ -166,10 +181,13 @@ void main() {
 
   Future<ChatCubit> pumpScreen(
     WidgetTester tester,
-    _FakeChatRepository repository,
-  ) async {
-    final cubit = ChatCubit(repository);
+    _FakeChatRepository repository, {
+    FakeConnectivityWatcher? connectivityWatcher,
+  }) async {
+    final watcher = connectivityWatcher ?? FakeConnectivityWatcher();
+    final cubit = ChatCubit(repository, watcher);
     addTearDown(cubit.close);
+    addTearDown(watcher.close);
     await tester.pumpWidget(MaterialApp(home: ChatScreen(cubit: cubit)));
     return cubit;
   }
@@ -383,6 +401,212 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(controller().position.pixels, closeTo(recordedOffset, 1.0));
+    },
+  );
+
+  group('spec-6-3 — offline composer lock + banner', () {
+    testWidgets(
+      'I/O matrix "Goes offline mid-session": the composer disables and '
+      'the offline banner appears, while history stays visible',
+      (tester) async {
+        final watcher = FakeConnectivityWatcher();
+        await pumpScreen(
+          tester,
+          _FakeChatRepository(),
+          connectivityWatcher: watcher,
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text(
+            'Sem conexão — histórico disponível, novas mensagens '
+            'bloqueadas',
+          ),
+          findsNothing,
+        );
+        var textField = tester.widget<TextField>(find.byType(TextField));
+        expect(textField.enabled, isTrue);
+
+        watcher.emit(false);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text(
+            'Sem conexão — histórico disponível, novas mensagens '
+            'bloqueadas',
+          ),
+          findsOneWidget,
+        );
+        textField = tester.widget<TextField>(find.byType(TextField));
+        expect(textField.enabled, isFalse);
+        // The "+" stays tappable (Boundaries: never disabled offline).
+        expect(
+          tester.widget<IconButton>(
+            find.ancestor(
+              of: find.byIcon(Icons.add),
+              matching: find.byType(IconButton),
+            ),
+          ).onPressed,
+          isNotNull,
+        );
+      },
+    );
+
+    testWidgets(
+      'I/O matrix "Comes back online": the banner disappears and the '
+      'composer re-enables automatically',
+      (tester) async {
+        final watcher = FakeConnectivityWatcher();
+        await pumpScreen(
+          tester,
+          _FakeChatRepository(),
+          connectivityWatcher: watcher,
+        );
+        await tester.pumpAndSettle();
+
+        watcher.emit(false);
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).enabled,
+          isFalse,
+        );
+
+        watcher.emit(true);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text(
+            'Sem conexão — histórico disponível, novas mensagens '
+            'bloqueadas',
+          ),
+          findsNothing,
+        );
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).enabled,
+          isTrue,
+        );
+      },
+    );
+  });
+
+  testWidgets(
+    'spec-6-3 — I/O matrix "Tap retry, no serverId": tapping a failed AI '
+    'bubble\'s retry copy, when message_created never arrived, falls back '
+    'to a sendMessage resend (ChatCubit.retryMessage is still the call '
+    'site, keyed off the bubble\'s own id)',
+    (tester) async {
+      final repository = _FakeChatRepository();
+      final cubit = await pumpScreen(tester, repository);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'oi');
+      await tester.tap(find.byIcon(Icons.send));
+      await tester.pump();
+
+      // A mid-stream drop — same shape `chat_cubit_test.dart`'s own
+      // "mid-stream drop" case uses, marking the AI bubble failed.
+      repository.lastSendController?.add(
+        left(const Failure.networkTimeout(message: 'drop')),
+      );
+      await repository.lastSendController?.close();
+      await tester.pumpAndSettle();
+
+      final failedAiId = (cubit.state as ChatReady).messages[1].id;
+      expect(
+        find.text('Falha ao gerar resposta — toque para tentar novamente'),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.text('Falha ao gerar resposta — toque para tentar novamente'),
+      );
+      await tester.pump();
+
+      expect(repository.retryMessageCalls, isEmpty);
+      // No serverId was ever captured (message_created never arrived) —
+      // the fallback path resends via sendMessage instead.
+      expect(repository.sendMessageCalls, ['oi', 'oi']);
+
+      // Finalize the retried bubble before pumpAndSettle — a bubble left
+      // `streaming` keeps its cursor animation ticking forever (by
+      // design), which would otherwise hang pumpAndSettle().
+      repository.lastSendController?.add(right(const ChatDoneEvent()));
+      await repository.lastSendController?.close();
+      await tester.pumpAndSettle();
+      expect((cubit.state as ChatReady).messages[1].id, failedAiId);
+    },
+  );
+
+  testWidgets(
+    'spec-6-3 — I/O matrix "Tap retry, normal": tapping a failed AI '
+    'bubble\'s retry copy, when the preceding user message already has a '
+    'serverId (message_created arrived before the drop), calls '
+    'chat-messages-retry — never the sendMessage fallback — and resolves '
+    'the same bubble in place',
+    (tester) async {
+      final repository = _FakeChatRepository();
+      final cubit = await pumpScreen(tester, repository);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'oi');
+      await tester.tap(find.byIcon(Icons.send));
+      await tester.pump();
+
+      // message_created arrives (capturing the user bubble's own
+      // serverId) before the stream drops mid-response.
+      repository.lastSendController?.add(
+        right(const ChatMessageCreatedEvent('srv-user-1')),
+      );
+      repository.lastSendController?.add(
+        right(const ChatTokenEvent('resposta parcial')),
+      );
+      repository.lastSendController?.add(
+        left(const Failure.networkTimeout(message: 'drop')),
+      );
+      await repository.lastSendController?.close();
+      await tester.pumpAndSettle();
+
+      final ready = cubit.state as ChatReady;
+      expect(ready.messages[0].serverId, 'srv-user-1');
+      final failedAiId = ready.messages[1].id;
+      expect(
+        find.text('Falha ao gerar resposta — toque para tentar novamente'),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.text('Falha ao gerar resposta — toque para tentar novamente'),
+      );
+      await tester.pump();
+
+      // chat-messages-retry was called, keyed by the preceding user
+      // message's serverId — never a full sendMessage resend.
+      expect(repository.retryMessageCalls, ['srv-user-1']);
+      expect(repository.sendMessageCalls, ['oi']);
+
+      // The same bubble (id unchanged) reset to streaming/empty, then
+      // filled via the retry's own stream.
+      var afterTap = cubit.state as ChatReady;
+      expect(afterTap.messages[1].id, failedAiId);
+      expect(afterTap.messages[1].content, '');
+      expect(afterTap.messages[1].status, ChatMessageStatus.streaming);
+
+      repository.lastRetryController?.add(
+        right(const ChatTokenEvent('nova resposta')),
+      );
+      await tester.pump();
+      afterTap = cubit.state as ChatReady;
+      expect(afterTap.messages[1].content, 'nova resposta');
+
+      repository.lastRetryController?.add(right(const ChatDoneEvent()));
+      await repository.lastRetryController?.close();
+      await tester.pumpAndSettle();
+
+      final finalState = cubit.state as ChatReady;
+      expect(finalState.messages, hasLength(2));
+      expect(finalState.messages[1].id, failedAiId);
+      expect(finalState.messages[1].content, 'nova resposta');
+      expect(finalState.messages[1].status, ChatMessageStatus.complete);
     },
   );
 }

@@ -76,6 +76,23 @@ void main() {
   // returns `null`, mirroring the secure-storage fake's own `default`.
   const recordChannel = MethodChannel('com.llfbandit.record/messages');
 
+  // spec-6-3 — `ChatCubit`'s own constructor subscribes to
+  // `ConnectivityWatcher.watch()` immediately, and `registerChatFeature()`
+  // wires it to the real `connectivity_plus`-backed `ConnectivityPlusWatcher`
+  // (`Connectivity()`); this test force-resolves the real `ChatCubit` below
+  // (`sl<ChatCubit>()`), which would otherwise hit these two platform
+  // channels with nothing registered to answer them — same rationale as
+  // `recordChannel` above. The event channel is faked via its own
+  // `MethodChannel` wrapper (its `listen`/`cancel` invocations use the same
+  // method-call wire format), acknowledging every call with `null` since no
+  // test here drives an actual connectivity change.
+  const connectivityMethodChannel = MethodChannel(
+    'dev.fluttercommunity.plus/connectivity',
+  );
+  const connectivityEventChannel = MethodChannel(
+    'dev.fluttercommunity.plus/connectivity_status',
+  );
+
   late FakePathProviderPlatform fakePathProvider;
 
   setUp(() async {
@@ -86,6 +103,13 @@ void main() {
         );
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(recordChannel, (_) async => null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          connectivityMethodChannel,
+          (call) async => call.method == 'check' ? <String>['wifi'] : null,
+        );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(connectivityEventChannel, (_) async => null);
     // Story 3.1 — `setupCoreDependencies()` now also calls
     // `Hive.initFlutter()` (transitively via `hive_ce_flutter`), which
     // asks `path_provider` for the documents directory; faked the same
@@ -102,6 +126,10 @@ void main() {
         .setMockMethodCallHandler(secureStorageChannel, null);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(recordChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(connectivityMethodChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(connectivityEventChannel, null);
     fakeNativeStorage.clear();
     // Closes the `entries` Hive box opened above — `resetCoreDependencies()`
     // only resets `get_it`'s registrations, not Hive's own global box

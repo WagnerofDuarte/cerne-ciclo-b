@@ -123,6 +123,18 @@ void main() {
   );
   final fakeNativeStorage = <String, String>{};
 
+  // spec-6-3 — `sl<ChatCubit>()` below resolves the *real* `ChatCubit`,
+  // whose constructor subscribes to the real `connectivity_plus`-backed
+  // `ConnectivityWatcher` immediately; faked the same way
+  // `bootstrap_integration_test.dart` fakes it, since no device/simulator
+  // exists yet (AGENTS.md) to answer these channels for real.
+  const connectivityMethodChannel = MethodChannel(
+    'dev.fluttercommunity.plus/connectivity',
+  );
+  const connectivityEventChannel = MethodChannel(
+    'dev.fluttercommunity.plus/connectivity_status',
+  );
+
   Future<dynamic> handleSecureStorageCall(MethodCall call) async {
     final args = call.arguments as Map<dynamic, dynamic>;
     switch (call.method) {
@@ -147,6 +159,13 @@ void main() {
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(secureStorageChannel, handleSecureStorageCall);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          connectivityMethodChannel,
+          (call) async => call.method == 'check' ? <String>['wifi'] : null,
+        );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(connectivityEventChannel, (_) async => null);
     fakePathProvider = FakePathProviderPlatform();
     PathProviderPlatform.instance = fakePathProvider;
 
@@ -165,6 +184,10 @@ void main() {
   tearDown(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(secureStorageChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(connectivityMethodChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(connectivityEventChannel, null);
     fakeNativeStorage.clear();
     await Hive.close();
     await resetCoreDependencies();

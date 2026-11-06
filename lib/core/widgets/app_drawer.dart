@@ -70,10 +70,22 @@ class _AppDrawerState extends State<AppDrawer> {
               ),
             ),
             const SizedBox(height: DesignTokens.spacingMd),
-            _DrawerPrimaryAction(
-              icon: Icons.add,
-              label: 'Novo Chat',
-              onTap: () => _startNewSession(context),
+            // spec-6-3 — "Novo Chat" disables (+ dims) while
+            // `ChatReady.isOffline`, same `BlocBuilder<ChatCubit,
+            // ChatState>` source the "CONVERSAS" section below already
+            // reads from; `_startNewSession`'s own offline `SnackBar`
+            // (spec-6-2) stays as a defense-in-depth fallback for the
+            // brief window between a tap and the drawer actually
+            // disabling (Boundaries: "never removing it").
+            BlocBuilder<ChatCubit, ChatState>(
+              builder: (context, state) {
+                final isOffline = state is ChatReady && state.isOffline;
+                return _DrawerPrimaryAction(
+                  icon: Icons.add,
+                  label: 'Novo Chat',
+                  onTap: isOffline ? null : () => _startNewSession(context),
+                );
+              },
             ),
             const SizedBox(height: DesignTokens.spacingSm),
             // The rest of the drawer scrolls as one unit (CONVERSAS plus
@@ -223,38 +235,46 @@ class _DrawerPrimaryAction extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+
+  /// spec-6-3 — `null` renders disabled + dimmed (Boundaries), same
+  /// "disable by passing a null callback" convention `_ChatComposer`'s
+  /// own send button already uses.
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: const BorderRadius.all(
-        Radius.circular(DesignTokens.radiusSm),
-      ),
-      child: Container(
-        padding: DesignTokens.drawerPrimaryActionPadding,
-        decoration: const BoxDecoration(
-          color: DesignTokens.colorPrimary,
-          borderRadius: BorderRadius.all(
-            Radius.circular(DesignTokens.radiusSm),
-          ),
+    final disabled = onTap == null;
+    return Opacity(
+      opacity: disabled ? 0.5 : 1,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: const BorderRadius.all(
+          Radius.circular(DesignTokens.radiusSm),
         ),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: DesignTokens.drawerItemIconSize,
-              color: DesignTokens.colorOnPrimary,
+        child: Container(
+          padding: DesignTokens.drawerPrimaryActionPadding,
+          decoration: const BoxDecoration(
+            color: DesignTokens.colorPrimary,
+            borderRadius: BorderRadius.all(
+              Radius.circular(DesignTokens.radiusSm),
             ),
-            const SizedBox(width: DesignTokens.navHeaderGap),
-            Text(
-              label,
-              style: DesignTokens.textLabelMd.copyWith(
+          ),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                size: DesignTokens.drawerItemIconSize,
                 color: DesignTokens.colorOnPrimary,
               ),
-            ),
-          ],
+              const SizedBox(width: DesignTokens.navHeaderGap),
+              Text(
+                label,
+                style: DesignTokens.textLabelMd.copyWith(
+                  color: DesignTokens.colorOnPrimary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

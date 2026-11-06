@@ -121,6 +121,14 @@ class ChatRepositoryImpl implements ChatRepository {
       // passthrough, no Hive persistence of sent messages for this story.
       _remoteDataSource.sendMessage(sessionId, content);
 
+  @override
+  Stream<Either<Failure, ChatStreamEvent>> retryMessage(
+    String sessionId,
+    String userMessageId,
+  ) =>
+      // spec-6-3 — same pure-passthrough rationale as [sendMessage] above.
+      _remoteDataSource.retryMessage(sessionId, userMessageId);
+
   /// [listSessions]'s own offline/timeout fallback — a full `chat_
   /// sessions` Hive box dump, sorted `updatedAt` desc (so `ChatCubit.
   /// init()`'s own "reuse the most recent session" pick is already
@@ -140,8 +148,14 @@ class ChatRepositoryImpl implements ChatRepository {
         // Skip this one corrupt entry — see doc above.
       }
     }
+    // Review fix: `tryParse` (never `parse`) — same crash-safe pattern as
+    // the sibling "most recent session" sorts in `ChatCubit._bootstrap`
+    // and `_ConversasSection`; a malformed cached `updatedAt` must never
+    // throw out of this offline-cache fallback (RNF09).
     sessions.sort(
-      (a, b) => DateTime.parse(b.updatedAt).compareTo(DateTime.parse(a.updatedAt)),
+      (a, b) => (DateTime.tryParse(b.updatedAt) ?? DateTime(0)).compareTo(
+        DateTime.tryParse(a.updatedAt) ?? DateTime(0),
+      ),
     );
     return right(sessions);
   }

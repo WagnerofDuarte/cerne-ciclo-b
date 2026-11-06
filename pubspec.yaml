@@ -59,6 +59,13 @@ dependencies:
   # a direct dependency for that.
   path_provider: ^2.1.6
 
+  # spec-6-3 — backs the chat feature's own `ConnectivityWatcher` port
+  # (`ConnectivityPlusWatcher`, `chat/data/services/`), driving
+  # `ChatReady.isOffline` for the offline composer lock/banner and
+  # "Novo Chat" gate. Feature-local, never imported outside that one
+  # wrapper class.
+  connectivity_plus: ^7.3.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

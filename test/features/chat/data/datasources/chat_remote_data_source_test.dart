@@ -28,6 +28,16 @@ void main() {
     ).thenAnswer((_) => stream);
   }
 
+  void stubRetryPostStream(Stream<Either<Failure, String>> stream) {
+    when(
+      () => mockApiClient.postStream(
+        'chat-messages-retry',
+        pathParams: any(named: 'pathParams'),
+        data: any(named: 'data'),
+      ),
+    ).thenAnswer((_) => stream);
+  }
+
   group('listSessions', () {
     test('a valid data array decodes into ChatSessionDtos', () async {
       when(() => mockApiClient.get('chat-sessions-list')).thenAnswer(
@@ -83,6 +93,60 @@ void main() {
         (_) => fail('expected Left'),
       );
     });
+
+    test(
+      'one malformed item is skipped, valid items still decode',
+      () async {
+        when(() => mockApiClient.get('chat-sessions-list')).thenAnswer(
+          (_) async => right({
+            'data': [
+              {
+                'id': 's1',
+                'title': 'Sessão 1',
+                'personaSnapshot': 'analitico',
+                'userMessageCount': 2,
+                'lastUserMessageAt': '2026-01-01T00:00:00Z',
+                'createdAt': '2026-01-01T00:00:00Z',
+                'updatedAt': '2026-01-01T00:00:00Z',
+              },
+              {'this': 'is not a valid session shape'},
+            ],
+          }),
+        );
+
+        final result = await dataSource.listSessions();
+
+        expect(result.isRight(), isTrue);
+        result.match(
+          (_) => fail('expected Right'),
+          (dtos) => expect(dtos.map((d) => d.id).toList(), ['s1']),
+        );
+      },
+    );
+
+    test(
+      'review fix: a non-empty response where every item fails to decode '
+      'maps to Left(MalformedResponse), never Right([]) — the latter '
+      'would make ChatCubit._bootstrap() believe no sessions exist and '
+      'spuriously create one, hiding the user\'s real sessions',
+      () async {
+        when(() => mockApiClient.get('chat-sessions-list')).thenAnswer(
+          (_) async => right({
+            'data': [
+              {'this': 'is not a valid session shape'},
+            ],
+          }),
+        );
+
+        final result = await dataSource.listSessions();
+
+        expect(result.isLeft(), isTrue);
+        result.match(
+          (failure) => expect(failure, isA<MalformedResponse>()),
+          (_) => fail('expected Left'),
+        );
+      },
+    );
   });
 
   group('createSession', () {
@@ -129,6 +193,78 @@ void main() {
         () => mockApiClient.get('chat-messages-list', pathParams: ['s1']),
       ).called(1);
     });
+
+    test('a shape mismatch maps to Left(MalformedResponse), never throws', () async {
+      when(
+        () => mockApiClient.get('chat-messages-list', pathParams: ['s1']),
+      ).thenAnswer((_) async => right({'data': 'not-a-list'}));
+
+      final result = await dataSource.listMessages('s1');
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
+
+    test(
+      'one malformed item is skipped, valid items still decode',
+      () async {
+        when(
+          () => mockApiClient.get('chat-messages-list', pathParams: ['s1']),
+        ).thenAnswer(
+          (_) async => right({
+            'data': [
+              {
+                'id': 'm1',
+                'sessionId': 's1',
+                'role': 'user',
+                'content': 'oi',
+                'seq': 1,
+                'status': 'complete',
+                'retryCount': 0,
+                'createdAt': '2026-01-01T00:00:00Z',
+              },
+              {'this': 'is not a valid message shape'},
+            ],
+          }),
+        );
+
+        final result = await dataSource.listMessages('s1');
+
+        expect(result.isRight(), isTrue);
+        result.match(
+          (_) => fail('expected Right'),
+          (dtos) => expect(dtos.map((d) => d.id).toList(), ['m1']),
+        );
+      },
+    );
+
+    test(
+      'review fix: a non-empty response where every item fails to decode '
+      'maps to Left(MalformedResponse), never Right([]) — the latter '
+      'would render a session\'s whole history as silently empty',
+      () async {
+        when(
+          () => mockApiClient.get('chat-messages-list', pathParams: ['s1']),
+        ).thenAnswer(
+          (_) async => right({
+            'data': [
+              {'this': 'is not a valid message shape'},
+            ],
+          }),
+        );
+
+        final result = await dataSource.listMessages('s1');
+
+        expect(result.isLeft(), isTrue);
+        result.match(
+          (failure) => expect(failure, isA<MalformedResponse>()),
+          (_) => fail('expected Left'),
+        );
+      },
+    );
   });
 
   group('sendMessage — SSE parsing', () {
@@ -340,5 +476,79 @@ void main() {
         ]),
       );
     });
+  });
+
+  group('retryMessage — spec-6-3, shares _consumeSse with sendMessage', () {
+    test(
+      'calls chat-messages-retry with sessionId then userMessageId as the '
+      'two trailing path segments, and an empty body',
+      () async {
+        stubRetryPostStream(
+          Stream.fromIterable([right('event: done\ndata: {}\n\n')]),
+        );
+
+        final result = await dataSource
+            .retryMessage('s1', 'srv-user-1')
+            .toList();
+
+        expect(result.single.isRight(), isTrue);
+        verify(
+          () => mockApiClient.postStream(
+            'chat-messages-retry',
+            pathParams: ['s1', 'srv-user-1'],
+            data: const {},
+          ),
+        ).called(1);
+      },
+    );
+
+    test(
+      'same terminal handling as sendMessage: a mid-stream drop (no done/'
+      'error event) yields a trailing Left(NetworkTimeout)',
+      () {
+        stubRetryPostStream(
+          Stream.fromIterable([
+            right('event: token\ndata: {"delta":"partial"}\n\n'),
+          ]),
+        );
+
+        expect(
+          dataSource.retryMessage('s1', 'srv-user-1'),
+          emitsInOrder([
+            isA<Right<Failure, ChatStreamEvent>>(),
+            isA<Left<Failure, ChatStreamEvent>>().having(
+              (l) => l.value,
+              'failure',
+              isA<NetworkTimeout>(),
+            ),
+            emitsDone,
+          ]),
+        );
+      },
+    );
+
+    test(
+      'an upstream Left (e.g. offline) is forwarded immediately and ends '
+      'the stream',
+      () {
+        stubRetryPostStream(
+          Stream.fromIterable([
+            left(const Failure.networkOffline(message: 'offline')),
+          ]),
+        );
+
+        expect(
+          dataSource.retryMessage('s1', 'srv-user-1'),
+          emitsInOrder([
+            isA<Left<Failure, ChatStreamEvent>>().having(
+              (l) => l.value,
+              'failure',
+              isA<NetworkOffline>(),
+            ),
+            emitsDone,
+          ]),
+        );
+      },
+    );
   });
 }

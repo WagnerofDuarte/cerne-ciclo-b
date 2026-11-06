@@ -148,6 +148,16 @@ class _ChatScreenState extends State<ChatScreen> {
         body: Column(
           children: [
             const _ChatHeader(),
+            // spec-6-3 — the offline banner, visible for the lifetime of
+            // `ChatReady.isOffline`; renders nothing otherwise. Sits
+            // between the header and the message list (Code Map) so
+            // history stays fully visible/scrollable underneath it
+            // (Boundaries).
+            BlocBuilder<ChatCubit, ChatState>(
+              builder: (context, state) => state is ChatReady && state.isOffline
+                  ? const _OfflineBanner()
+                  : const SizedBox.shrink(),
+            ),
             Expanded(
               child: BlocConsumer<ChatCubit, ChatState>(
                 listener: (context, state) {
@@ -185,6 +195,12 @@ class _ChatScreenState extends State<ChatScreen> {
                     itemBuilder: (context, index) => ChatBubble(
                       key: ValueKey(messages[index].id),
                       message: messages[index],
+                      // spec-6-3 — only a `failed` AI bubble ever renders
+                      // the tap-to-retry copy at all (`ChatBubble`'s own
+                      // guard), so wiring this unconditionally on every
+                      // bubble is harmless.
+                      onRetry: () =>
+                          widget.cubit.retryMessage(messages[index].id),
                     ),
                   ),
                 },
@@ -278,14 +294,54 @@ class _ChatBootstrapErrorView extends StatelessWidget {
   }
 }
 
+/// spec-6-3 Boundaries — a full-width band between `_ChatHeader` and the
+/// message list, `Icons.wifi_off` + `colorInfoOffline`/`colorOnPrimary`
+/// (both pre-existing tokens, `colorInfoOffline`'s own doc: "Offline
+/// banner — single use"). Disables sending only — the message list
+/// underneath it stays fully visible/scrollable (Boundaries).
+class _OfflineBanner extends StatelessWidget {
+  const _OfflineBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      color: DesignTokens.colorInfoOffline,
+      padding: const EdgeInsets.symmetric(
+        horizontal: DesignTokens.spacingMd,
+        vertical: DesignTokens.spacingSm,
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.wifi_off,
+            size: DesignTokens.dialogIconSize,
+            color: DesignTokens.colorOnPrimary,
+          ),
+          const SizedBox(width: DesignTokens.spacingSm),
+          Expanded(
+            child: Text(
+              'Sem conexão — histórico disponível, novas mensagens '
+              'bloqueadas',
+              style: DesignTokens.textCaptionSm.copyWith(
+                color: DesignTokens.colorOnPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// The composer row — "+" (`InsertionModal.show`, unchanged), a text
 /// field (placeholder "Escreva uma mensagem...") and a send icon. The
 /// text field and send icon are disabled while the bootstrap hasn't
-/// resolved yet or while an AI bubble is still `streaming` (Code
-/// Map/`ChatCubit.sendMessage`'s own same-shaped guard); the "+" stays
-/// tappable regardless, same as the deleted placeholder's own
-/// always-tappable "+" — never a dedicated offline banner/lock, that's
-/// Story 6.3's job (Boundaries).
+/// resolved yet, while an AI bubble is still `streaming` (Code
+/// Map/`ChatCubit.sendMessage`'s own same-shaped guard), or while offline
+/// (spec-6-3: `ChatReady.isOffline`); the "+" stays tappable regardless,
+/// same as the deleted placeholder's own always-tappable "+" and
+/// Boundaries: "Disabling the '+' when offline ... [stays]".
 class _ChatComposer extends StatelessWidget {
   const _ChatComposer({
     required this.controller,
@@ -301,7 +357,8 @@ class _ChatComposer extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocBuilder<ChatCubit, ChatState>(
       builder: (context, state) {
-        final canSend = state is ChatReady && !state.isSending;
+        final canSend =
+            state is ChatReady && !state.isSending && !state.isOffline;
         return SafeArea(
           top: false,
           child: Padding(

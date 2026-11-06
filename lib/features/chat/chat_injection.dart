@@ -1,10 +1,13 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:hive_ce/hive_ce.dart';
 
 import '../../core/di/injection_container.dart';
 import '../../core/network/api_client.dart';
 import 'data/datasources/chat_remote_data_source.dart';
 import 'data/repositories/chat_repository_impl.dart';
+import 'data/services/connectivity_plus_watcher.dart';
 import 'domain/repositories/chat_repository.dart';
+import 'domain/services/connectivity_watcher.dart';
 import 'presentation/cubit/chat_cubit.dart';
 
 /// The `chat_sessions`/`chat_messages` Hive box names — two boxes (Code
@@ -41,6 +44,14 @@ Future<void> registerChatFeature() async {
     ),
   );
 
+  // spec-6-3 — one real `Connectivity`/`ConnectivityWatcher` for the
+  // app's lifetime, mirroring `capture_injection.dart`'s own
+  // `record_pkg.AudioRecorder`/`MicRecorder` registration shape.
+  sl.registerLazySingleton<Connectivity>(Connectivity.new);
+  sl.registerLazySingleton<ConnectivityWatcher>(
+    () => ConnectivityPlusWatcher(connectivity: sl<Connectivity>()),
+  );
+
   // A `lazySingleton`, not a factory (Code Map), mirroring
   // `MeusRegistrosCubit`: long-lived, so a session bootstrapped on one
   // visit to Home/Chat survives leaving and returning within the same app
@@ -48,7 +59,7 @@ Future<void> registerChatFeature() async {
   // `close()` into `get_it`'s own reset lifecycle, same convention every
   // other long-lived cubit in this codebase already uses.
   sl.registerLazySingleton<ChatCubit>(
-    () => ChatCubit(sl<ChatRepository>()),
+    () => ChatCubit(sl<ChatRepository>(), sl<ConnectivityWatcher>()),
     dispose: (cubit) => cubit.close(),
   );
 }

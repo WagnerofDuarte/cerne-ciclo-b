@@ -4,20 +4,29 @@ import '../../../../core/design_tokens.dart';
 import '../../domain/entities/chat_message.dart';
 import '../cubit/chat_state.dart';
 
+/// Review finding: shared by the `Semantics.label` and the visible `Text`
+/// below so a future copy edit can't desync the spoken label from what's
+/// actually on screen.
+const _retryCopy = 'Falha ao gerar resposta — toque para tentar novamente';
+
 /// One message bubble — user (Boundaries: `colorChatBubbleUser`, squared
 /// bottom-right corner) vs AI (`colorSurfaceElevated`, squared bottom-left
 /// corner, resting [DesignTokens.elevation1]). Exactly the 3 visible
 /// states RF04's Acceptance Criteria names render here, driven by
 /// [ChatUiMessage.status]: `streaming` (progressive text + blinking
-/// cursor), `failed` (a generic error indicator replaces the timestamp
-/// slot — never the tap-to-retry copy, Boundaries: "generic error
-/// indicator (not retry copy)" — Story 6.3's job), `complete` (plain
-/// text, nothing else). [ChatUiMessage.content] itself is rendered as-is
-/// in every state — never cleared on failure (I/O matrix).
+/// cursor), `failed` (spec-6-3: a tappable tap-to-retry indicator replaces
+/// the timestamp slot, invoking [onRetry]), `complete` (plain text,
+/// nothing else). [ChatUiMessage.content] itself is rendered as-is in
+/// every state — never cleared on failure (I/O matrix).
 class ChatBubble extends StatefulWidget {
-  const ChatBubble({required this.message, super.key});
+  const ChatBubble({required this.message, this.onRetry, super.key});
 
   final ChatUiMessage message;
+
+  /// spec-6-3 — invoked when the user taps a `failed` AI bubble's own
+  /// retry copy; `null` on a user bubble (never shown there, only an AI
+  /// response ever fails) or whenever a caller has nothing to wire it to.
+  final VoidCallback? onRetry;
 
   @override
   State<ChatBubble> createState() => _ChatBubbleState();
@@ -67,6 +76,7 @@ class _ChatBubbleState extends State<ChatBubble>
   @override
   Widget build(BuildContext context) {
     final message = widget.message;
+    final onRetry = widget.onRetry;
     final isUser = message.role == ChatMessageRole.user;
     // Boundaries: "cursor skipped under
     // `MediaQuery.of(context).disableAnimations`" — the real token text
@@ -76,6 +86,48 @@ class _ChatBubbleState extends State<ChatBubble>
     final reduceMotion = MediaQuery.of(context).disableAnimations;
     final showCursor =
         message.status == ChatMessageStatus.streaming && !reduceMotion;
+
+    // spec-6-3 Boundaries: tap-to-retry copy, tappable, 44pt min tap
+    // target — replaces the earlier generic (non-tappable) error
+    // indicator. The visible copy renders identically either way;
+    // `Semantics(button: true)` only wraps it when [onRetry] is actually
+    // supplied (review finding) — a bubble built with no retry callback
+    // must never be announced to a screen reader as a working button.
+    final retryIndicator = InkWell(
+      onTap: onRetry,
+      borderRadius: const BorderRadius.all(
+        Radius.circular(DesignTokens.radiusSm),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          minHeight: DesignTokens.insertionModalTapTargetMin,
+        ),
+        child: Container(
+          alignment: Alignment.centerLeft,
+          padding: DesignTokens.chatFailureIndicatorPadding,
+          decoration: const BoxDecoration(
+            color: DesignTokens.colorErrorBg,
+            borderRadius: BorderRadius.all(
+              Radius.circular(DesignTokens.radiusSm),
+            ),
+          ),
+          child: Text(
+            _retryCopy,
+            style: DesignTokens.textCaptionSm.copyWith(
+              color: DesignTokens.colorError,
+            ),
+          ),
+        ),
+      ),
+    );
+    final retryIndicatorWithSemantics = onRetry == null
+        ? retryIndicator
+        : Semantics(
+            button: true,
+            label: _retryCopy,
+            excludeSemantics: true,
+            child: retryIndicator,
+          );
 
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -125,21 +177,7 @@ class _ChatBubbleState extends State<ChatBubble>
             ),
             if (message.status == ChatMessageStatus.failed) ...[
               const SizedBox(height: DesignTokens.spacingXs),
-              Container(
-                padding: DesignTokens.chatFailureIndicatorPadding,
-                decoration: const BoxDecoration(
-                  color: DesignTokens.colorErrorBg,
-                  borderRadius: BorderRadius.all(
-                    Radius.circular(DesignTokens.radiusSm),
-                  ),
-                ),
-                child: Text(
-                  'Falha ao gerar resposta',
-                  style: DesignTokens.textCaptionSm.copyWith(
-                    color: DesignTokens.colorError,
-                  ),
-                ),
-              ),
+              retryIndicatorWithSemantics,
             ],
           ],
         ),

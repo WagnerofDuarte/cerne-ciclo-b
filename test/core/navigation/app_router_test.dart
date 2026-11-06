@@ -38,6 +38,8 @@ import 'package:cerne/features/vault/domain/entities/vault_status.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 import 'package:cerne/features/vault/presentation/screens/vault_lock_screen.dart';
 
+import '../../support/fake_connectivity_watcher.dart';
+
 class MockAuthRepository extends Mock implements AuthRepository {}
 
 class MockSessionRepository extends Mock implements SessionRepository {}
@@ -152,6 +154,12 @@ class _FakeChatRepository implements ChatRepository {
   Stream<Either<Failure, ChatStreamEvent>> sendMessage(
     String sessionId,
     String content,
+  ) => const Stream.empty();
+
+  @override
+  Stream<Either<Failure, ChatStreamEvent>> retryMessage(
+    String sessionId,
+    String userMessageId,
   ) => const Stream.empty();
 }
 
@@ -328,7 +336,7 @@ void main() {
     // trivial-fake rationale as `MeusRegistrosCubit`/`EntriesSearchCubit`
     // above — this suite never exercises a real chat session.
     sl.registerLazySingleton<ChatCubit>(
-      () => ChatCubit(_FakeChatRepository()),
+      () => ChatCubit(_FakeChatRepository(), FakeConnectivityWatcher()),
     );
   });
 

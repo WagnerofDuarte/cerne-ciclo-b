@@ -14,6 +14,8 @@ import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_state.dart';
 
+import '../../support/fake_connectivity_watcher.dart';
+
 const _sessionA = ChatSession(
   id: 'session-a',
   title: 'Primeira conversa',
@@ -69,6 +71,12 @@ class _FakeChatRepository implements ChatRepository {
     String sessionId,
     String content,
   ) => const Stream.empty();
+
+  @override
+  Stream<Either<Failure, ChatStreamEvent>> retryMessage(
+    String sessionId,
+    String userMessageId,
+  ) => const Stream.empty();
 }
 
 /// Tiny standalone `GoRouter` — [AppDrawer] needs *some* router ancestor
@@ -117,15 +125,20 @@ Future<void> _openDrawer(WidgetTester tester) async {
 /// `ChatScreen` would provide.
 void main() {
   late _FakeChatRepository fakeRepository;
+  late FakeConnectivityWatcher fakeConnectivityWatcher;
   late ChatCubit cubit;
 
   setUp(() async {
     fakeRepository = _FakeChatRepository();
-    cubit = ChatCubit(fakeRepository);
+    fakeConnectivityWatcher = FakeConnectivityWatcher();
+    cubit = ChatCubit(fakeRepository, fakeConnectivityWatcher);
     await cubit.init();
   });
 
-  tearDown(() => cubit.close());
+  tearDown(() async {
+    await cubit.close();
+    await fakeConnectivityWatcher.close();
+  });
 
   testWidgets(
     'header shows a generic avatar + static label, no real identity',
@@ -173,7 +186,10 @@ void main() {
           updatedAt: 'not-a-date',
         ),
       ]);
-      final crashCubit = ChatCubit(crashFakeRepository);
+      final crashCubit = ChatCubit(
+        crashFakeRepository,
+        FakeConnectivityWatcher(),
+      );
       addTearDown(crashCubit.close);
       await crashCubit.init();
 
@@ -282,6 +298,86 @@ void main() {
       expect(find.text('Sem conexão'), findsOneWidget);
     },
   );
+
+  group('spec-6-3 — "Novo Chat" disables while ChatReady.isOffline', () {
+    // Deliberately builds its own `ChatCubit`/`FakeConnectivityWatcher`
+    // pair inside each test body below, rather than reusing the shared
+    // `cubit`/`fakeConnectivityWatcher` the outer `setUp()` constructs —
+    // `ChatCubit`'s constructor subscribes to the watcher's stream
+    // immediately, and a subscription created inside an *async* `setUp()`
+    // callback is registered in a different zone than the one
+    // `tester.pumpAndSettle()` drains for a `testWidgets` body (a known
+    // `flutter_test` gotcha: `setUp()`'s own async work runs outside
+    // `TestWidgetsFlutterBinding`'s per-test zone), so a later
+    // `watcher.emit(...)` call's effect on the widget tree would never be
+    // observed by `pumpAndSettle()` within the test body. Constructing
+    // both inside the test body itself keeps everything in the one zone
+    // `pumpAndSettle()` actually watches.
+    Future<({ChatCubit cubit, FakeConnectivityWatcher watcher})> boot(
+      WidgetTester tester,
+    ) async {
+      final repository = _FakeChatRepository();
+      final watcher = FakeConnectivityWatcher();
+      final localCubit = ChatCubit(repository, watcher);
+      await localCubit.init();
+      addTearDown(localCubit.close);
+      addTearDown(watcher.close);
+
+      final router = _buildTestRouter(localCubit);
+      addTearDown(router.dispose);
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+      await _openDrawer(tester);
+      return (cubit: localCubit, watcher: watcher);
+    }
+
+    InkWell novoChatInkWell(WidgetTester tester) => tester.widget<InkWell>(
+      find.ancestor(of: find.text('Novo Chat'), matching: find.byType(InkWell)),
+    );
+
+    Opacity novoChatOpacity(WidgetTester tester) => tester.widget<Opacity>(
+      find.ancestor(of: find.text('Novo Chat'), matching: find.byType(Opacity)),
+    );
+
+    testWidgets(
+      '"Novo Chat" disables (dimmed, no tap handler) once the '
+      'ConnectivityWatcher reports offline',
+      (tester) async {
+        final booted = await boot(tester);
+        expect(novoChatOpacity(tester).opacity, 1);
+
+        booted.watcher.emit(false);
+        await tester.pumpAndSettle();
+
+        expect(novoChatOpacity(tester).opacity, lessThan(1));
+        expect(novoChatInkWell(tester).onTap, isNull);
+
+        // Tapping it while disabled does nothing — never reaches
+        // ChatCubit.startNewSession() at all.
+        final sessionIdBefore = (booted.cubit.state as ChatReady).sessionId;
+        await tester.tap(find.text('Novo Chat'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(AppDrawer), findsOneWidget);
+        expect((booted.cubit.state as ChatReady).sessionId, sessionIdBefore);
+      },
+    );
+
+    testWidgets(
+      '"Novo Chat" re-enables automatically once connectivity returns',
+      (tester) async {
+        final booted = await boot(tester);
+
+        booted.watcher.emit(false);
+        await tester.pumpAndSettle();
+        expect(novoChatInkWell(tester).onTap, isNull);
+
+        booted.watcher.emit(true);
+        await tester.pumpAndSettle();
+
+        expect(novoChatInkWell(tester).onTap, isNotNull);
+      },
+    );
+  });
 
   testWidgets(
     'tapping "Meus Registros" closes the drawer and navigates there',

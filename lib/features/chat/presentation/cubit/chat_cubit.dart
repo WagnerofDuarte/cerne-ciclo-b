@@ -8,6 +8,7 @@ import '../../domain/entities/chat_message.dart';
 import '../../domain/entities/chat_session.dart';
 import '../../domain/entities/chat_stream_event.dart';
 import '../../domain/repositories/chat_repository.dart';
+import '../../domain/services/connectivity_watcher.dart';
 import 'chat_state.dart';
 
 /// Drives `ChatScreen` — a DI `lazySingleton` (Code Map, mirroring
@@ -15,16 +16,39 @@ import 'chat_state.dart';
 /// same app session never re-bootstraps the session/history it already
 /// loaded (`init()`'s own no-op guard below).
 class ChatCubit extends Cubit<ChatState> {
-  ChatCubit(this._repository) : super(const ChatBootstrapLoading());
+  ChatCubit(this._repository, this._connectivityWatcher)
+    : super(const ChatBootstrapLoading()) {
+    // spec-6-3 — subscribes immediately (not gated on bootstrap), so the
+    // very first connectivity read is never missed while a slow
+    // `init()` is still in flight; `_handleConnectivityChange` itself is
+    // a no-op against anything but `ChatReady` until bootstrap resolves,
+    // `_isOffline` still being tracked below so a later `ChatReady`
+    // (bootstrap, `switchSession`, `startNewSession`) picks up whatever
+    // the device's status already was.
+    _connectivitySubscription = _connectivityWatcher.watch().listen(
+      _handleConnectivityChange,
+      onError: (Object _, StackTrace _) {
+        // RNF09: a connectivity-watch error (e.g. the platform channel
+        // being unavailable — no device/simulator exists yet, AGENTS.md)
+        // must never escape the cubit; `_isOffline` simply keeps
+        // whatever value it last had (`false` if this is the very first
+        // read) instead of crashing.
+      },
+    );
+  }
 
   final ChatRepository _repository;
+  final ConnectivityWatcher _connectivityWatcher;
+
+  StreamSubscription<bool>? _connectivitySubscription;
 
   StreamSubscription<Either<Failure, ChatStreamEvent>>? _sendSubscription;
 
-  /// The in-flight [sendMessage]'s own completer, if any — [close] must
-  /// complete it itself, since cancelling [_sendSubscription] never fires
-  /// `onDone`/`onError` (review fix: `cancel()` alone left `sendMessage()`'s
-  /// returned `Future` permanently unresolved when the cubit closed mid-send).
+  /// The in-flight [sendMessage]/[retryMessage]'s own completer, if any —
+  /// [close] must complete it itself, since cancelling [_sendSubscription]
+  /// alone never fires `onDone`/`onError` (review fix: `cancel()` alone
+  /// left `sendMessage()`'s returned `Future` permanently unresolved when
+  /// the cubit closed mid-send).
   Completer<void>? _sendCompleter;
 
   /// Monotonic counter behind every locally generated [ChatUiMessage.id]
@@ -32,13 +56,16 @@ class ChatCubit extends Cubit<ChatState> {
   /// own doc on why `message_created`'s id goes unused here).
   int _localIdCounter = 0;
 
-  /// Whether a send is actively in flight right now — tracked locally
-  /// rather than by scanning [ChatState.messages] for a persisted
+  /// Whether a send/retry is actively in flight right now — tracked
+  /// locally rather than by scanning [ChatState.messages] for a persisted
   /// `streaming` status, since a message loaded from history/cache can
   /// legitimately carry that same status (e.g. one left over from an
   /// earlier dropped response, the I/O matrix's own scenario) without a
   /// send actually being in progress; scanning for it would permanently
-  /// disable the composer in that case.
+  /// disable the composer in that case. [retryMessage] reuses this exact
+  /// guard verbatim (Boundaries: "a second retry while one is in flight —
+  /// reuses `_isSending` verbatim"), so a retry and a send can never race
+  /// each other either.
   bool _isSending = false;
 
   /// An in-flight bootstrap, if any — reused by a concurrent `init()` call
@@ -47,6 +74,16 @@ class ChatCubit extends Cubit<ChatState> {
   /// observe "no sessions" and both call `createSession()` (Boundaries:
   /// "silently ensure *one* Chat Session exists").
   Future<void>? _initFuture;
+
+  /// spec-6-3 — the device's last known online/offline status, as
+  /// reported by [_connectivityWatcher], `true` meaning offline. Tracked
+  /// independently of [ChatState] (unlike `_isSending`'s own UI-facing
+  /// twin, [ChatReady.isOffline]) so a status learned before bootstrap
+  /// resolves — or while the active session is being switched, neither of
+  /// which touches this field — is never lost; every place that emits a
+  /// fresh [ChatReady] (`_bootstrap`, [switchSession], [startNewSession])
+  /// carries it forward explicitly.
+  bool _isOffline = false;
 
   /// Boundaries: "Scroll-offset restore is in-memory only, keyed by
   /// `sessionId`, on `ChatCubit` (never Hive) — survives session switches
@@ -127,6 +164,7 @@ class ChatCubit extends Cubit<ChatState> {
               sessionId: session.id,
               messages: messages.map(_fromDomain).toList(),
               sessions: sessions,
+              isOffline: _isOffline,
             ),
           ),
         );
@@ -170,19 +208,34 @@ class ChatCubit extends Cubit<ChatState> {
     if (isClosed) {
       return right(unit);
     }
-    return messagesResult.match((failure) => left(failure), (messages) {
-      if (!isClosed) {
-        emit(
-          ChatReady(
-            sessionId: sessionId,
-            messages: messages.map(_fromDomain).toList(),
-            sessions: current.sessions,
-            restoreScrollOffset: _scrollOffsets[sessionId],
-          ),
-        );
-      }
-      return right(unit);
-    });
+    return messagesResult.match(
+      (failure) {
+        // Review fix: `_cancelInFlightSend()` above only resets the
+        // internal `_isSending` guard, not the `ChatReady.isSending` the
+        // composer gates on (`canSend = ... && !state.isSending`) — on a
+        // failed switch we're staying on `current`, so its stale
+        // `isSending: true` must be flipped back here or the composer
+        // would stay disabled for the rest of the app run.
+        if (!isClosed && current.isSending) {
+          emit(current.copyWith(isSending: false));
+        }
+        return left(failure);
+      },
+      (messages) {
+        if (!isClosed) {
+          emit(
+            ChatReady(
+              sessionId: sessionId,
+              messages: messages.map(_fromDomain).toList(),
+              sessions: current.sessions,
+              restoreScrollOffset: _scrollOffsets[sessionId],
+              isOffline: _isOffline,
+            ),
+          );
+        }
+        return right(unit);
+      },
+    );
   }
 
   /// I/O matrix: "New session online"/"New session offline" — calls
@@ -208,18 +261,31 @@ class ChatCubit extends Cubit<ChatState> {
     if (isClosed) {
       return right(unit);
     }
-    return result.match((failure) => left(failure), (session) {
-      if (!isClosed) {
-        emit(
-          ChatReady(
-            sessionId: session.id,
-            messages: const [],
-            sessions: [session, ...current.sessions],
-          ),
-        );
-      }
-      return right(unit);
-    });
+    return result.match(
+      (failure) {
+        // Review fix: same stuck-`isSending` risk as [switchSession] — a
+        // failed `createSession()` leaves `current` active, so its stale
+        // `isSending: true` (left behind by `_cancelInFlightSend()`
+        // above, which never emits) must be flipped back here.
+        if (!isClosed && current.isSending) {
+          emit(current.copyWith(isSending: false));
+        }
+        return left(failure);
+      },
+      (session) {
+        if (!isClosed) {
+          emit(
+            ChatReady(
+              sessionId: session.id,
+              messages: const [],
+              sessions: [session, ...current.sessions],
+              isOffline: _isOffline,
+            ),
+          );
+        }
+        return right(unit);
+      },
+    );
   }
 
   ChatUiMessage _fromDomain(ChatMessage message) => ChatUiMessage(
@@ -227,6 +293,12 @@ class ChatCubit extends Cubit<ChatState> {
     role: message.role,
     content: message.content,
     status: message.status,
+    // spec-6-3 — every message reloaded from `chat-messages-list`/the
+    // offline cache already has a persisted server id (unlike a message
+    // created locally mid-session, which only gains one once/if
+    // `message_created` arrives, Design Notes); [retryMessage] reads this
+    // off the *user* message immediately preceding a `failed` AI bubble.
+    serverId: message.id,
   );
 
   /// Boundaries: optimistic user bubble, then subscribes to
@@ -237,14 +309,16 @@ class ChatCubit extends Cubit<ChatState> {
   ///
   /// A no-op while [state] isn't [ChatReady] (bootstrap still in flight
   /// or failed — the composer is disabled in that case anyway), while
-  /// [content] is blank once trimmed, or while [_isSending] is already
+  /// [content] is blank once trimmed, while [_isSending] is already
   /// true — this story never races two concurrent sends against the one
-  /// in-memory session (Boundaries: no offline lock/composer-disable UI
-  /// of its own exists yet, Story 6.3's job, so this guard is the one
-  /// thing standing in for it here). Deliberately not keyed off any
-  /// loaded message's persisted `streaming` status — a message restored
-  /// from history/cache can legitimately carry that status without a
-  /// send actually being in flight (I/O matrix: mid-stream drop).
+  /// in-memory session — or while [ChatReady.isOffline] (review finding:
+  /// the offline lock was UI-only via `_ChatComposer.canSend`, but nothing
+  /// stopped a direct `sendMessage` caller from firing a real network call
+  /// while the offline banner's own "novas mensagens bloqueadas" copy says
+  /// otherwise). Deliberately not keyed off any loaded message's
+  /// persisted `streaming` status — a message restored from history/cache
+  /// can legitimately carry that status without a send actually being in
+  /// flight (I/O matrix: mid-stream drop).
   Future<void> sendMessage(String content) async {
     final trimmed = content.trim();
     if (trimmed.isEmpty) {
@@ -254,7 +328,7 @@ class ChatCubit extends Cubit<ChatState> {
     if (current is! ChatReady) {
       return;
     }
-    if (_isSending) {
+    if (_isSending || current.isOffline) {
       return;
     }
     _isSending = true;
@@ -278,39 +352,143 @@ class ChatCubit extends Cubit<ChatState> {
       ),
     );
 
+    await _consumeStream(
+      _repository.sendMessage(current.sessionId, trimmed),
+      userMessageId: userMessage.id,
+      aiMessageId: aiMessage.id,
+    );
+  }
+
+  /// spec-6-3 — Boundaries: "Retry resets the *same* bubble (id,
+  /// position) to `streaming`/empty, then reuses `_applyStreamEvent`/
+  /// `_markFailed` unchanged — never a second bubble, never a duplicate
+  /// question." [aiMessageId] must identify an existing `failed` AI
+  /// bubble; anything else (not found, not `failed`, no preceding user
+  /// message — shouldn't structurally happen) is a silent no-op, same
+  /// defensive shape [sendMessage]'s own guards use.
+  ///
+  /// Keyed by the preceding user message's [ChatUiMessage.serverId]
+  /// (Boundaries: "keyed by the user message's persisted id") — calls
+  /// `ChatRepository.retryMessage` when it's known, or falls back to a
+  /// full [ChatRepository.sendMessage] resend of that same user content
+  /// into this exact AI bubble slot when it's `null` (I/O matrix: "Tap
+  /// retry, no `serverId`" — the stream dropped before `message_created`
+  /// ever arrived, so the backend never actually persisted the question;
+  /// Boundaries: "Never calling `chat-messages-retry` with no `serverId`").
+  /// Reuses [_isSending] verbatim (Boundaries: "A second retry while one
+  /// is in flight"), so this is a no-op while a send/retry is already in
+  /// flight — and, like [sendMessage] (review finding), a no-op while
+  /// [ChatReady.isOffline] too: a failed bubble's retry tap is a separate
+  /// affordance from the composer, not covered by `_ChatComposer.canSend`
+  /// alone, so it needs this exact same guard to honor the offline banner.
+  Future<void> retryMessage(String aiMessageId) async {
+    final current = state;
+    if (current is! ChatReady) {
+      return;
+    }
+    if (_isSending || current.isOffline) {
+      return;
+    }
+    final messages = current.messages;
+    final aiIndex = messages.indexWhere((message) => message.id == aiMessageId);
+    // Review finding: defensively checks `role` too, even though only an
+    // assistant message ever reaches `failed` status today — matches this
+    // guard clause's own already-defensive shape (`aiIndex == -1`, a
+    // not-found/structurally-impossible case).
+    if (aiIndex == -1 ||
+        messages[aiIndex].role != ChatMessageRole.assistant ||
+        messages[aiIndex].status != ChatMessageStatus.failed) {
+      return;
+    }
+    ChatUiMessage? userMessage;
+    for (var i = aiIndex - 1; i >= 0; i--) {
+      if (messages[i].role == ChatMessageRole.user) {
+        userMessage = messages[i];
+        break;
+      }
+    }
+    if (userMessage == null) {
+      return;
+    }
+
+    _isSending = true;
+    emit(
+      current.copyWith(
+        messages: [
+          for (final message in current.messages)
+            if (message.id == aiMessageId)
+              message.copyWith(content: '', status: ChatMessageStatus.streaming)
+            else
+              message,
+        ],
+        isSending: true,
+      ),
+    );
+
+    final serverId = userMessage.serverId;
+    final stream = serverId == null
+        ? _repository.sendMessage(current.sessionId, userMessage.content)
+        : _repository.retryMessage(current.sessionId, serverId);
+    await _consumeStream(
+      stream,
+      userMessageId: userMessage.id,
+      aiMessageId: aiMessageId,
+    );
+  }
+
+  /// Shared by [sendMessage]/[retryMessage] (Code Map: "extract shared ...
+  /// helper" extends to this subscribe-and-wait shape too, not just
+  /// `ChatRemoteDataSource`'s own SSE buffering) — subscribes to [stream],
+  /// routing every emission through [_applyStreamEvent]/[_markFailed], and
+  /// resolves once the stream ends (`done`, an in-band error, or a
+  /// stream-level error), clearing [_isSending]/[ChatReady.isSending]
+  /// either way via [_finishSending].
+  Future<void> _consumeStream(
+    Stream<Either<Failure, ChatStreamEvent>> stream, {
+    required String userMessageId,
+    required String aiMessageId,
+  }) async {
     await _sendSubscription?.cancel();
     final completer = Completer<void>();
     _sendCompleter = completer;
-    _sendSubscription = _repository
-        .sendMessage(current.sessionId, trimmed)
-        .listen(
-          (event) {
-            event.match(
-              (failure) => _markFailed(aiMessage.id),
-              (streamEvent) => _applyStreamEvent(aiMessage.id, streamEvent),
-            );
-          },
-          onError: (Object _, StackTrace _) {
-            // RNF09: no exception escapes the cubit — a stream-level
-            // error (shouldn't happen, `ChatRemoteDataSource.sendMessage`
-            // never lets one through unmapped) still only fails the
-            // bubble, never crashes.
-            _markFailed(aiMessage.id);
-            _finishSending();
-            if (!completer.isCompleted) {
-              completer.complete();
-            }
-            _sendCompleter = null;
-          },
-          onDone: () {
-            _finishSending();
-            if (!completer.isCompleted) {
-              completer.complete();
-            }
-            _sendCompleter = null;
-          },
-          cancelOnError: false,
+    _sendSubscription = stream.listen(
+      (event) {
+        event.match(
+          (failure) => _markFailed(aiMessageId),
+          (streamEvent) =>
+              _applyStreamEvent(userMessageId, aiMessageId, streamEvent),
         );
+      },
+      onError: (Object _, StackTrace _) {
+        // RNF09: no exception escapes the cubit — a stream-level error
+        // (shouldn't happen, `ChatRemoteDataSource` never lets one through
+        // unmapped) still only fails the bubble, never crashes.
+        _markFailed(aiMessageId);
+        _finishSending();
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+        // Review finding: a stale, already-done subscription reference
+        // left on `_sendSubscription` made a *later* send/retry's own
+        // `await _sendSubscription?.cancel()` above hang indefinitely in
+        // practice (observed via a widget test driving two sends back to
+        // back) — cleared here (and in the `onDone` branch below)
+        // exactly where this stream's own lifecycle actually ends,
+        // rather than relying on cancelling an already-finished
+        // subscription being an instant no-op.
+        _sendSubscription = null;
+        _sendCompleter = null;
+      },
+      onDone: () {
+        _finishSending();
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+        _sendSubscription = null;
+        _sendCompleter = null;
+      },
+      cancelOnError: false,
+    );
     await completer.future;
   }
 
@@ -329,7 +507,11 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
-  void _applyStreamEvent(String aiMessageId, ChatStreamEvent event) {
+  void _applyStreamEvent(
+    String userMessageId,
+    String aiMessageId,
+    ChatStreamEvent event,
+  ) {
     if (isClosed) {
       return;
     }
@@ -338,11 +520,23 @@ class ChatCubit extends Cubit<ChatState> {
       return;
     }
     switch (event) {
-      case ChatMessageCreatedEvent():
-        // Design Notes: the persisted *user*-message id — no UI-facing
-        // use yet in this story (Story 6.3's retry call is the first
-        // consumer).
-        break;
+      case ChatMessageCreatedEvent(userMessageId: final serverId):
+        // spec-6-3 — Design Notes: "the persisted *user*-message id" is
+        // now this story's first consumer, captured onto the matching
+        // local user bubble by id so a later `retryMessage` call (on the
+        // AI bubble this same send produces) has a non-null `serverId` to
+        // key `chat-messages-retry` off of.
+        emit(
+          current.copyWith(
+            messages: [
+              for (final message in current.messages)
+                if (message.id == userMessageId)
+                  message.copyWith(serverId: serverId)
+                else
+                  message,
+            ],
+          ),
+        );
       case ChatTokenEvent(delta: final delta):
         emit(
           current.copyWith(
@@ -396,6 +590,24 @@ class ChatCubit extends Cubit<ChatState> {
 
   String _nextLocalId() => 'local-${_localIdCounter++}';
 
+  /// spec-6-3 — [_connectivityWatcher]'s own listener: [isOnline] `true`
+  /// means the device currently has connectivity. Always updates
+  /// [_isOffline] (even outside [ChatReady] — see [_isOffline]'s own doc),
+  /// but only *emits* when already [ChatReady] and the value actually
+  /// changed, so an unrelated repeated emission of the same status (e.g.
+  /// a plugin re-announcing "still online") never triggers a spurious
+  /// rebuild.
+  void _handleConnectivityChange(bool isOnline) {
+    _isOffline = !isOnline;
+    if (isClosed) {
+      return;
+    }
+    final current = state;
+    if (current is ChatReady && current.isOffline != _isOffline) {
+      emit(current.copyWith(isOffline: _isOffline));
+    }
+  }
+
   /// Review finding: "Cross-session stream leakage" — [switchSession]/
   /// [startNewSession] call this before touching anything else whenever
   /// they're about to make a *different* session active, so a response
@@ -420,6 +632,7 @@ class ChatCubit extends Cubit<ChatState> {
 
   @override
   Future<void> close() {
+    _connectivitySubscription?.cancel();
     _sendSubscription?.cancel();
     final completer = _sendCompleter;
     if (completer != null && !completer.isCompleted) {

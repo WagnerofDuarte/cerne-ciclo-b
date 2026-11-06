@@ -147,6 +147,28 @@ void main() {
         });
       },
     );
+
+    test(
+      'review fix: a malformed cached updatedAt never throws — '
+      'DateTime.tryParse falls back to DateTime(0), sorting that entry '
+      'last rather than crashing the whole offline-cache fallback',
+      () async {
+        when(() => mockRemoteDataSource.listSessions()).thenAnswer(
+          (_) async => left(const Failure.networkOffline(message: 'offline')),
+        );
+        when(() => mockSessionsBox.values).thenReturn([
+          _sessionDto('good', '2026-01-01T00:00:00Z').toJson(),
+          _sessionDto('corruptDate', 'not-a-date').toJson(),
+        ]);
+
+        final result = await repository.listSessions();
+
+        expect(result.isRight(), isTrue);
+        result.match((_) => fail('expected Right'), (sessions) {
+          expect(sessions.map((s) => s.id).toList(), ['good', 'corruptDate']);
+        });
+      },
+    );
   });
 
   group('createSession', () {
@@ -265,6 +287,20 @@ void main() {
           .thenAnswer((_) => stream);
 
       expect(repository.sendMessage('s1', 'hi'), stream);
+      verifyNever(() => mockMessagesBox.put(any(), any()));
+      verifyNever(() => mockMessagesBox.putAll(any()));
+    });
+  });
+
+  group('retryMessage — spec-6-3', () {
+    test('is a pure passthrough to the remote data source — no Hive write', () {
+      final stream = Stream<Either<Failure, ChatStreamEvent>>.fromIterable([
+        right(const ChatDoneEvent()),
+      ]);
+      when(() => mockRemoteDataSource.retryMessage('s1', 'srv-user-1'))
+          .thenAnswer((_) => stream);
+
+      expect(repository.retryMessage('s1', 'srv-user-1'), stream);
       verifyNever(() => mockMessagesBox.put(any(), any()));
       verifyNever(() => mockMessagesBox.putAll(any()));
     });

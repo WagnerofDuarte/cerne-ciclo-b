@@ -35,6 +35,7 @@ class RetryInterceptor extends Interceptor {
   /// name here is the only place this can be enforced.
   static const Set<String> neverRetriedFunctions = {
     'chat-messages-send',
+    'chat-messages-retry',
     'chat-sessions-create',
   };
 
