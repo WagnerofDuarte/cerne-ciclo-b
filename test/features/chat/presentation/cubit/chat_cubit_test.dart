@@ -70,9 +70,7 @@ class _FakeChatRepository implements ChatRepository {
     String sessionId,
     String userMessageId,
   ) {
-    retryMessageCalls.add(
-      (sessionId: sessionId, userMessageId: userMessageId),
-    );
+    retryMessageCalls.add((sessionId: sessionId, userMessageId: userMessageId));
     final controller = StreamController<Either<Failure, ChatStreamEvent>>();
     lastRetryController = controller;
     return controller.stream;
@@ -148,98 +146,86 @@ void main() {
   });
 
   group('init() — bootstrap', () {
-    test(
-      'an existing session is reused (the most recent by updatedAt) and its '
-      'history loads -> ChatReady',
-      () async {
-        final older = const ChatSession(
-          id: 'older',
-          title: '',
-          persona: ChatPersona.analitico,
-          userMessageCount: 0,
-          lastUserMessageAt: null,
-          createdAt: '2026-01-01T00:00:00Z',
-          updatedAt: '2026-01-01T00:00:00Z',
-        );
-        final newer = const ChatSession(
-          id: 'newer',
-          title: '',
-          persona: ChatPersona.analitico,
-          userMessageCount: 0,
-          lastUserMessageAt: null,
+    test('an existing session is reused (the most recent by updatedAt) and its '
+        'history loads -> ChatReady', () async {
+      final older = const ChatSession(
+        id: 'older',
+        title: '',
+        persona: ChatPersona.analitico,
+        userMessageCount: 0,
+        lastUserMessageAt: null,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      );
+      final newer = const ChatSession(
+        id: 'newer',
+        title: '',
+        persona: ChatPersona.analitico,
+        userMessageCount: 0,
+        lastUserMessageAt: null,
+        createdAt: '2026-01-02T00:00:00Z',
+        updatedAt: '2026-01-02T00:00:00Z',
+      );
+      fakeRepository.listSessionsResult = right([older, newer]);
+      fakeRepository.listMessagesResult = right([
+        const ChatMessage(
+          id: 'm1',
+          sessionId: 'newer',
+          role: ChatMessageRole.user,
+          content: 'oi',
+          seq: 0,
+          status: ChatMessageStatus.complete,
+          retryCount: 0,
           createdAt: '2026-01-02T00:00:00Z',
-          updatedAt: '2026-01-02T00:00:00Z',
-        );
-        fakeRepository.listSessionsResult = right([older, newer]);
-        fakeRepository.listMessagesResult = right([
-          const ChatMessage(
-            id: 'm1',
-            sessionId: 'newer',
-            role: ChatMessageRole.user,
-            content: 'oi',
-            seq: 0,
-            status: ChatMessageStatus.complete,
-            retryCount: 0,
-            createdAt: '2026-01-02T00:00:00Z',
-          ),
-        ]);
+        ),
+      ]);
 
-        await cubit.init();
+      await cubit.init();
 
-        final state = cubit.state;
-        expect(state, isA<ChatReady>());
-        final ready = state as ChatReady;
-        expect(ready.sessionId, 'newer');
-        expect(ready.messages, hasLength(1));
-        expect(ready.messages.single.content, 'oi');
-      },
-    );
+      final state = cubit.state;
+      expect(state, isA<ChatReady>());
+      final ready = state as ChatReady;
+      expect(ready.sessionId, 'newer');
+      expect(ready.messages, hasLength(1));
+      expect(ready.messages.single.content, 'oi');
+    });
 
-    test(
-      'no existing session -> silently creates exactly one, reused for the '
-      'resulting ChatReady.sessionId',
-      () async {
-        fakeRepository.listSessionsResult = right(const []);
-        fakeRepository.createSessionResult = right(_session);
+    test('no existing session -> silently creates exactly one, reused for the '
+        'resulting ChatReady.sessionId', () async {
+      fakeRepository.listSessionsResult = right(const []);
+      fakeRepository.createSessionResult = right(_session);
 
-        await cubit.init();
+      await cubit.init();
 
-        expect(cubit.state, isA<ChatReady>());
-        expect((cubit.state as ChatReady).sessionId, _session.id);
-      },
-    );
+      expect(cubit.state, isA<ChatReady>());
+      expect((cubit.state as ChatReady).sessionId, _session.id);
+    });
 
-    test(
-      'a bootstrap failure (chat-sessions-list) -> ChatBootstrapError, not '
-      'an infinite spinner',
-      () async {
-        fakeRepository.listSessionsResult = left(
-          const Failure.networkOffline(message: 'offline'),
-        );
+    test('a bootstrap failure (chat-sessions-list) -> ChatBootstrapError, not '
+        'an infinite spinner', () async {
+      fakeRepository.listSessionsResult = left(
+        const Failure.networkOffline(message: 'offline'),
+      );
 
-        await cubit.init();
+      await cubit.init();
 
-        expect(cubit.state, isA<ChatBootstrapError>());
-        expect(
-          (cubit.state as ChatBootstrapError).failure,
-          isA<NetworkOffline>(),
-        );
-      },
-    );
+      expect(cubit.state, isA<ChatBootstrapError>());
+      expect(
+        (cubit.state as ChatBootstrapError).failure,
+        isA<NetworkOffline>(),
+      );
+    });
 
-    test(
-      'a history-fetch failure after a successful session resolve -> '
-      'ChatBootstrapError too',
-      () async {
-        fakeRepository.listMessagesResult = left(
-          const Failure.networkTimeout(message: 'timeout'),
-        );
+    test('a history-fetch failure after a successful session resolve -> '
+        'ChatBootstrapError too', () async {
+      fakeRepository.listMessagesResult = left(
+        const Failure.networkTimeout(message: 'timeout'),
+      );
 
-        await cubit.init();
+      await cubit.init();
 
-        expect(cubit.state, isA<ChatBootstrapError>());
-      },
-    );
+      expect(cubit.state, isA<ChatBootstrapError>());
+    });
 
     test('calling init() again once already ChatReady is a no-op', () async {
       await cubit.init();
@@ -314,251 +300,221 @@ void main() {
       await cubit.init();
     });
 
-    test(
-      'I/O matrix "Switch session": fetches the target session\'s own '
-      'history via listMessages and makes it active',
-      () async {
-        fakeRepository.listMessagesResult = right([
-          const ChatMessage(
-            id: 'm-s2',
-            sessionId: 's2',
-            role: ChatMessageRole.user,
-            content: 'oi de novo',
-            seq: 0,
-            status: ChatMessageStatus.complete,
-            retryCount: 0,
-            createdAt: '2026-01-02T00:00:00Z',
-          ),
-        ]);
+    test('I/O matrix "Switch session": fetches the target session\'s own '
+        'history via listMessages and makes it active', () async {
+      fakeRepository.listMessagesResult = right([
+        const ChatMessage(
+          id: 'm-s2',
+          sessionId: 's2',
+          role: ChatMessageRole.user,
+          content: 'oi de novo',
+          seq: 0,
+          status: ChatMessageStatus.complete,
+          retryCount: 0,
+          createdAt: '2026-01-02T00:00:00Z',
+        ),
+      ]);
 
-        final result = await cubit.switchSession('s2');
+      final result = await cubit.switchSession('s2');
 
-        expect(result.isRight(), isTrue);
-        final ready = cubit.state as ChatReady;
-        expect(ready.sessionId, 's2');
-        expect(ready.messages, hasLength(1));
-        expect(ready.messages.single.content, 'oi de novo');
-        // The bootstrapped session list is carried over untouched.
-        expect(ready.sessions, [_session, otherSession]);
-      },
-    );
+      expect(result.isRight(), isTrue);
+      final ready = cubit.state as ChatReady;
+      expect(ready.sessionId, 's2');
+      expect(ready.messages, hasLength(1));
+      expect(ready.messages.single.content, 'oi de novo');
+      // The bootstrapped session list is carried over untouched.
+      expect(ready.sessions, [_session, otherSession]);
+    });
 
-    test(
-      'I/O matrix "Switch to already-active session": a no-op Right, no '
-      're-fetch, state object unchanged',
-      () async {
-        final before = cubit.state as ChatReady;
+    test('I/O matrix "Switch to already-active session": a no-op Right, no '
+        're-fetch, state object unchanged', () async {
+      final before = cubit.state as ChatReady;
 
-        final result = await cubit.switchSession(before.sessionId);
+      final result = await cubit.switchSession(before.sessionId);
 
-        expect(result.isRight(), isTrue);
-        expect(cubit.state, same(before));
-      },
-    );
+      expect(result.isRight(), isTrue);
+      expect(cubit.state, same(before));
+    });
 
-    test(
-      'a switchSession failure surfaces as Left, current session stays '
-      'active',
-      () async {
-        fakeRepository.listMessagesResult = left(
-          const Failure.networkTimeout(message: 'timeout'),
-        );
-        final before = cubit.state as ChatReady;
+    test('a switchSession failure surfaces as Left, current session stays '
+        'active', () async {
+      fakeRepository.listMessagesResult = left(
+        const Failure.networkTimeout(message: 'timeout'),
+      );
+      final before = cubit.state as ChatReady;
 
-        final result = await cubit.switchSession('s2');
+      final result = await cubit.switchSession('s2');
 
-        expect(result.isLeft(), isTrue);
-        expect((cubit.state as ChatReady).sessionId, before.sessionId);
-      },
-    );
+      expect(result.isLeft(), isTrue);
+      expect((cubit.state as ChatReady).sessionId, before.sessionId);
+    });
 
-    test(
-      'Design Notes/Boundaries: switching to a session restores the '
-      'scroll offset last recorded for it via recordScrollOffset, or '
-      'null (ChatScreen\'s own cue to jump to the bottom) if none was '
-      'ever recorded',
-      () async {
-        cubit.recordScrollOffset('s2', 123.0);
+    test('Design Notes/Boundaries: switching to a session restores the '
+        'scroll offset last recorded for it via recordScrollOffset, or '
+        'null (ChatScreen\'s own cue to jump to the bottom) if none was '
+        'ever recorded', () async {
+      cubit.recordScrollOffset('s2', 123.0);
 
-        final result = await cubit.switchSession('s2');
+      final result = await cubit.switchSession('s2');
 
-        expect(result.isRight(), isTrue);
-        expect((cubit.state as ChatReady).restoreScrollOffset, 123.0);
+      expect(result.isRight(), isTrue);
+      expect((cubit.state as ChatReady).restoreScrollOffset, 123.0);
 
-        // Switching back to 's1' (never recorded) falls back to null.
-        final backResult = await cubit.switchSession('s1');
-        expect(backResult.isRight(), isTrue);
-        expect((cubit.state as ChatReady).restoreScrollOffset, isNull);
-      },
-    );
+      // Switching back to 's1' (never recorded) falls back to null.
+      final backResult = await cubit.switchSession('s1');
+      expect(backResult.isRight(), isTrue);
+      expect((cubit.state as ChatReady).restoreScrollOffset, isNull);
+    });
 
-    test(
-      'I/O matrix "New session online": createSession() succeeds -> a '
-      'new, empty session becomes active, prepended to sessions',
-      () async {
-        const created = ChatSession(
-          id: 's3',
-          title: '',
-          persona: ChatPersona.analitico,
-          userMessageCount: 0,
-          lastUserMessageAt: null,
-          createdAt: '2026-01-03T00:00:00Z',
-          updatedAt: '2026-01-03T00:00:00Z',
-        );
-        fakeRepository.createSessionResult = right(created);
-        final before = cubit.state as ChatReady;
+    test('I/O matrix "New session online": createSession() succeeds -> a '
+        'new, empty session becomes active, prepended to sessions', () async {
+      const created = ChatSession(
+        id: 's3',
+        title: '',
+        persona: ChatPersona.analitico,
+        userMessageCount: 0,
+        lastUserMessageAt: null,
+        createdAt: '2026-01-03T00:00:00Z',
+        updatedAt: '2026-01-03T00:00:00Z',
+      );
+      fakeRepository.createSessionResult = right(created);
+      final before = cubit.state as ChatReady;
 
-        final result = await cubit.startNewSession();
+      final result = await cubit.startNewSession();
 
-        expect(result.isRight(), isTrue);
-        final ready = cubit.state as ChatReady;
-        expect(ready.sessionId, 's3');
-        expect(ready.messages, isEmpty);
-        expect(ready.sessions, [created, ...before.sessions]);
-      },
-    );
+      expect(result.isRight(), isTrue);
+      final ready = cubit.state as ChatReady;
+      expect(ready.sessionId, 's3');
+      expect(ready.messages, isEmpty);
+      expect(ready.sessions, [created, ...before.sessions]);
+    });
 
-    test(
-      'I/O matrix "New session offline": createSession() resolves '
-      'Left(networkOffline) -> surfaced as Left, current session (and '
-      'its sessions list) left completely untouched',
-      () async {
-        final before = cubit.state as ChatReady;
-        fakeRepository.createSessionResult = left(
-          const Failure.networkOffline(message: 'offline'),
-        );
+    test('I/O matrix "New session offline": createSession() resolves '
+        'Left(networkOffline) -> surfaced as Left, current session (and '
+        'its sessions list) left completely untouched', () async {
+      final before = cubit.state as ChatReady;
+      fakeRepository.createSessionResult = left(
+        const Failure.networkOffline(message: 'offline'),
+      );
 
-        final result = await cubit.startNewSession();
+      final result = await cubit.startNewSession();
 
-        expect(result.isLeft(), isTrue);
-        result.match(
-          (failure) => expect(failure, isA<NetworkOffline>()),
-          (_) => fail('expected a Left'),
-        );
-        expect(cubit.state, same(before));
-      },
-    );
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<NetworkOffline>()),
+        (_) => fail('expected a Left'),
+      );
+      expect(cubit.state, same(before));
+    });
 
-    test(
-      'review finding "Cross-session stream leakage": switchSession '
-      'cancels an in-flight send\'s subscription first, so the old '
-      'sendMessage() call resolves promptly and a late event from the '
-      'now-orphaned stream never reaches the cubit at all',
-      () async {
-        final sendFuture = cubit.sendMessage('oi');
-        await Future<void>.delayed(Duration.zero);
-        expect((cubit.state as ChatReady).isSending, isTrue);
-        final oldController = fakeRepository.lastSendController!;
+    test('review finding "Cross-session stream leakage": switchSession '
+        'cancels an in-flight send\'s subscription first, so the old '
+        'sendMessage() call resolves promptly and a late event from the '
+        'now-orphaned stream never reaches the cubit at all', () async {
+      final sendFuture = cubit.sendMessage('oi');
+      await Future<void>.delayed(Duration.zero);
+      expect((cubit.state as ChatReady).isSending, isTrue);
+      final oldController = fakeRepository.lastSendController!;
 
-        fakeRepository.listMessagesResult = right(const []);
-        await cubit.switchSession('s2');
+      fakeRepository.listMessagesResult = right(const []);
+      await cubit.switchSession('s2');
 
-        // Without the fix, nothing cancels `_sendSubscription`/completes
-        // `_sendCompleter`, so this would hang until `oldController` is
-        // closed (which this test deliberately never does) — the
-        // `timeout` turns that hang into a clear failure instead of a
-        // stuck test run.
-        await sendFuture.timeout(const Duration(milliseconds: 500));
+      // Without the fix, nothing cancels `_sendSubscription`/completes
+      // `_sendCompleter`, so this would hang until `oldController` is
+      // closed (which this test deliberately never does) — the
+      // `timeout` turns that hang into a clear failure instead of a
+      // stuck test run.
+      await sendFuture.timeout(const Duration(milliseconds: 500));
 
-        final afterSwitch = cubit.state as ChatReady;
-        expect(afterSwitch.sessionId, 's2');
-        expect(afterSwitch.isSending, isFalse);
+      final afterSwitch = cubit.state as ChatReady;
+      expect(afterSwitch.sessionId, 's2');
+      expect(afterSwitch.isSending, isFalse);
 
-        // A genuinely cancelled subscription never delivers another
-        // callback at all (Dart's own `StreamSubscription.cancel()`
-        // contract) — `same()` (identity, not equality) catches even a
-        // content-equivalent spurious re-emit, which `_applyStreamEvent`/
-        // `_finishSending` would otherwise still produce via `copyWith`
-        // despite the orphaned event's id never matching anything in the
-        // newly active session.
-        final beforeLateEvent = cubit.state;
-        oldController.add(right(const ChatTokenEvent('late token')));
-        oldController.add(right(const ChatDoneEvent()));
-        await Future<void>.delayed(Duration.zero);
+      // A genuinely cancelled subscription never delivers another
+      // callback at all (Dart's own `StreamSubscription.cancel()`
+      // contract) — `same()` (identity, not equality) catches even a
+      // content-equivalent spurious re-emit, which `_applyStreamEvent`/
+      // `_finishSending` would otherwise still produce via `copyWith`
+      // despite the orphaned event's id never matching anything in the
+      // newly active session.
+      final beforeLateEvent = cubit.state;
+      oldController.add(right(const ChatTokenEvent('late token')));
+      oldController.add(right(const ChatDoneEvent()));
+      await Future<void>.delayed(Duration.zero);
 
-        expect(cubit.state, same(beforeLateEvent));
-      },
-    );
+      expect(cubit.state, same(beforeLateEvent));
+    });
 
-    test(
-      'review finding "Cross-session stream leakage": startNewSession '
-      'cancels an in-flight send\'s subscription too, before creating '
-      'the new session',
-      () async {
-        final sendFuture = cubit.sendMessage('oi');
-        await Future<void>.delayed(Duration.zero);
-        final oldController = fakeRepository.lastSendController!;
+    test('review finding "Cross-session stream leakage": startNewSession '
+        'cancels an in-flight send\'s subscription too, before creating '
+        'the new session', () async {
+      final sendFuture = cubit.sendMessage('oi');
+      await Future<void>.delayed(Duration.zero);
+      final oldController = fakeRepository.lastSendController!;
 
-        const created = ChatSession(
-          id: 's3',
-          title: '',
-          persona: ChatPersona.analitico,
-          userMessageCount: 0,
-          lastUserMessageAt: null,
-          createdAt: '2026-01-03T00:00:00Z',
-          updatedAt: '2026-01-03T00:00:00Z',
-        );
-        fakeRepository.createSessionResult = right(created);
+      const created = ChatSession(
+        id: 's3',
+        title: '',
+        persona: ChatPersona.analitico,
+        userMessageCount: 0,
+        lastUserMessageAt: null,
+        createdAt: '2026-01-03T00:00:00Z',
+        updatedAt: '2026-01-03T00:00:00Z',
+      );
+      fakeRepository.createSessionResult = right(created);
 
-        await cubit.startNewSession();
-        await sendFuture.timeout(const Duration(milliseconds: 500));
+      await cubit.startNewSession();
+      await sendFuture.timeout(const Duration(milliseconds: 500));
 
-        expect((cubit.state as ChatReady).sessionId, 's3');
-        final beforeLateEvent = cubit.state;
-        oldController.add(right(const ChatTokenEvent('late token')));
-        oldController.add(right(const ChatDoneEvent()));
-        await Future<void>.delayed(Duration.zero);
+      expect((cubit.state as ChatReady).sessionId, 's3');
+      final beforeLateEvent = cubit.state;
+      oldController.add(right(const ChatTokenEvent('late token')));
+      oldController.add(right(const ChatDoneEvent()));
+      await Future<void>.delayed(Duration.zero);
 
-        expect(cubit.state, same(beforeLateEvent));
-        expect((cubit.state as ChatReady).sessionId, 's3');
-      },
-    );
+      expect(cubit.state, same(beforeLateEvent));
+      expect((cubit.state as ChatReady).sessionId, 's3');
+    });
 
-    test(
-      'review fix: a switchSession failure while a send was in flight '
-      'flips the stale isSending flag back to false, so the composer '
-      "isn't left disabled for the rest of the app run (isSending gates "
-      'canSend, which _cancelInFlightSend() alone never resets)',
-      () async {
-        final sendFuture = cubit.sendMessage('oi');
-        await Future<void>.delayed(Duration.zero);
-        expect((cubit.state as ChatReady).isSending, isTrue);
+    test('review fix: a switchSession failure while a send was in flight '
+        'flips the stale isSending flag back to false, so the composer '
+        "isn't left disabled for the rest of the app run (isSending gates "
+        'canSend, which _cancelInFlightSend() alone never resets)', () async {
+      final sendFuture = cubit.sendMessage('oi');
+      await Future<void>.delayed(Duration.zero);
+      expect((cubit.state as ChatReady).isSending, isTrue);
 
-        fakeRepository.listMessagesResult = left(
-          const Failure.networkTimeout(message: 'timeout'),
-        );
+      fakeRepository.listMessagesResult = left(
+        const Failure.networkTimeout(message: 'timeout'),
+      );
 
-        final result = await cubit.switchSession('s2');
-        await sendFuture.timeout(const Duration(milliseconds: 500));
+      final result = await cubit.switchSession('s2');
+      await sendFuture.timeout(const Duration(milliseconds: 500));
 
-        expect(result.isLeft(), isTrue);
-        final after = cubit.state as ChatReady;
-        expect(after.sessionId, _session.id);
-        expect(after.isSending, isFalse);
-      },
-    );
+      expect(result.isLeft(), isTrue);
+      final after = cubit.state as ChatReady;
+      expect(after.sessionId, _session.id);
+      expect(after.isSending, isFalse);
+    });
 
-    test(
-      'review fix: a startNewSession failure while a send was in flight '
-      'flips the stale isSending flag back to false too',
-      () async {
-        final sendFuture = cubit.sendMessage('oi');
-        await Future<void>.delayed(Duration.zero);
-        expect((cubit.state as ChatReady).isSending, isTrue);
+    test('review fix: a startNewSession failure while a send was in flight '
+        'flips the stale isSending flag back to false too', () async {
+      final sendFuture = cubit.sendMessage('oi');
+      await Future<void>.delayed(Duration.zero);
+      expect((cubit.state as ChatReady).isSending, isTrue);
 
-        fakeRepository.createSessionResult = left(
-          const Failure.networkOffline(message: 'offline'),
-        );
+      fakeRepository.createSessionResult = left(
+        const Failure.networkOffline(message: 'offline'),
+      );
 
-        final result = await cubit.startNewSession();
-        await sendFuture.timeout(const Duration(milliseconds: 500));
+      final result = await cubit.startNewSession();
+      await sendFuture.timeout(const Duration(milliseconds: 500));
 
-        expect(result.isLeft(), isTrue);
-        final after = cubit.state as ChatReady;
-        expect(after.sessionId, _session.id);
-        expect(after.isSending, isFalse);
-      },
-    );
+      expect(result.isLeft(), isTrue);
+      final after = cubit.state as ChatReady;
+      expect(after.sessionId, _session.id);
+      expect(after.isSending, isFalse);
+    });
   });
 
   group('sendMessage() — the 3 visible message states', () {
@@ -566,117 +522,100 @@ void main() {
       await cubit.init();
     });
 
-    test(
-      'optimistic send appends a complete user bubble and a streaming AI '
-      'bubble immediately',
-      () async {
-        final future = cubit.sendMessage('Olá, tudo bem?');
-        await Future<void>.delayed(Duration.zero);
+    test('optimistic send appends a complete user bubble and a streaming AI '
+        'bubble immediately', () async {
+      final future = cubit.sendMessage('Olá, tudo bem?');
+      await Future<void>.delayed(Duration.zero);
 
-        final ready = cubit.state as ChatReady;
-        expect(ready.messages, hasLength(2));
-        expect(ready.messages[0].role, ChatMessageRole.user);
-        expect(ready.messages[0].content, 'Olá, tudo bem?');
-        expect(ready.messages[0].status, ChatMessageStatus.complete);
-        expect(ready.messages[1].role, ChatMessageRole.assistant);
-        expect(ready.messages[1].content, '');
-        expect(ready.messages[1].status, ChatMessageStatus.streaming);
+      final ready = cubit.state as ChatReady;
+      expect(ready.messages, hasLength(2));
+      expect(ready.messages[0].role, ChatMessageRole.user);
+      expect(ready.messages[0].content, 'Olá, tudo bem?');
+      expect(ready.messages[0].status, ChatMessageStatus.complete);
+      expect(ready.messages[1].role, ChatMessageRole.assistant);
+      expect(ready.messages[1].content, '');
+      expect(ready.messages[1].status, ChatMessageStatus.streaming);
 
-        fakeRepository.lastSendController!.close();
-        await future;
-      },
-    );
+      fakeRepository.lastSendController!.close();
+      await future;
+    });
 
-    test(
-      'happy path: token deltas append progressively, done finalizes to '
-      'complete',
-      () async {
-        final future = cubit.sendMessage('oi');
-        await Future<void>.delayed(Duration.zero);
-        final controller = fakeRepository.lastSendController!;
+    test('happy path: token deltas append progressively, done finalizes to '
+        'complete', () async {
+      final future = cubit.sendMessage('oi');
+      await Future<void>.delayed(Duration.zero);
+      final controller = fakeRepository.lastSendController!;
 
-        controller.add(right(const ChatTokenEvent('Olá')));
-        await Future<void>.delayed(Duration.zero);
-        var aiMessage = (cubit.state as ChatReady).messages[1];
-        expect(aiMessage.content, 'Olá');
-        expect(aiMessage.status, ChatMessageStatus.streaming);
+      controller.add(right(const ChatTokenEvent('Olá')));
+      await Future<void>.delayed(Duration.zero);
+      var aiMessage = (cubit.state as ChatReady).messages[1];
+      expect(aiMessage.content, 'Olá');
+      expect(aiMessage.status, ChatMessageStatus.streaming);
 
-        controller.add(right(const ChatTokenEvent('!')));
-        await Future<void>.delayed(Duration.zero);
-        aiMessage = (cubit.state as ChatReady).messages[1];
-        expect(aiMessage.content, 'Olá!');
+      controller.add(right(const ChatTokenEvent('!')));
+      await Future<void>.delayed(Duration.zero);
+      aiMessage = (cubit.state as ChatReady).messages[1];
+      expect(aiMessage.content, 'Olá!');
 
-        controller.add(right(const ChatDoneEvent()));
-        await controller.close();
-        await future;
+      controller.add(right(const ChatDoneEvent()));
+      await controller.close();
+      await future;
 
-        aiMessage = (cubit.state as ChatReady).messages[1];
-        expect(aiMessage.content, 'Olá!');
-        expect(aiMessage.status, ChatMessageStatus.complete);
-      },
-    );
+      aiMessage = (cubit.state as ChatReady).messages[1];
+      expect(aiMessage.content, 'Olá!');
+      expect(aiMessage.status, ChatMessageStatus.complete);
+    });
 
-    test(
-      'mid-stream drop: partial text is never cleared, status becomes '
-      'failed, no exception escapes the cubit',
-      () async {
-        final future = cubit.sendMessage('oi');
-        await Future<void>.delayed(Duration.zero);
-        final controller = fakeRepository.lastSendController!;
+    test('mid-stream drop: partial text is never cleared, status becomes '
+        'failed, no exception escapes the cubit', () async {
+      final future = cubit.sendMessage('oi');
+      await Future<void>.delayed(Duration.zero);
+      final controller = fakeRepository.lastSendController!;
 
-        controller.add(right(const ChatTokenEvent('resposta parcial')));
-        await Future<void>.delayed(Duration.zero);
-        // The connection drops — the repository stream closes with no
-        // done/error event, mirroring `ChatRemoteDataSource`'s own
-        // trailing-NetworkTimeout emission for this exact scenario.
-        controller.add(left(const Failure.networkTimeout(message: 'drop')));
-        await controller.close();
-        await future;
+      controller.add(right(const ChatTokenEvent('resposta parcial')));
+      await Future<void>.delayed(Duration.zero);
+      // The connection drops — the repository stream closes with no
+      // done/error event, mirroring `ChatRemoteDataSource`'s own
+      // trailing-NetworkTimeout emission for this exact scenario.
+      controller.add(left(const Failure.networkTimeout(message: 'drop')));
+      await controller.close();
+      await future;
 
-        final aiMessage = (cubit.state as ChatReady).messages[1];
-        expect(aiMessage.content, 'resposta parcial');
-        expect(aiMessage.status, ChatMessageStatus.failed);
-      },
-    );
+      final aiMessage = (cubit.state as ChatReady).messages[1];
+      expect(aiMessage.content, 'resposta parcial');
+      expect(aiMessage.status, ChatMessageStatus.failed);
+    });
 
-    test(
-      'in-band error event: marks the bubble failed via the mapped '
-      'Failure, text untouched',
-      () async {
-        final future = cubit.sendMessage('oi');
-        await Future<void>.delayed(Duration.zero);
-        final controller = fakeRepository.lastSendController!;
+    test('in-band error event: marks the bubble failed via the mapped '
+        'Failure, text untouched', () async {
+      final future = cubit.sendMessage('oi');
+      await Future<void>.delayed(Duration.zero);
+      final controller = fakeRepository.lastSendController!;
 
-        controller.add(right(const ChatTokenEvent('algo')));
-        controller.add(left(const Failure.rateLimited(message: 'slow down')));
-        await controller.close();
-        await future;
+      controller.add(right(const ChatTokenEvent('algo')));
+      controller.add(left(const Failure.rateLimited(message: 'slow down')));
+      await controller.close();
+      await future;
 
-        final aiMessage = (cubit.state as ChatReady).messages[1];
-        expect(aiMessage.content, 'algo');
-        expect(aiMessage.status, ChatMessageStatus.failed);
-      },
-    );
+      final aiMessage = (cubit.state as ChatReady).messages[1];
+      expect(aiMessage.content, 'algo');
+      expect(aiMessage.status, ChatMessageStatus.failed);
+    });
 
-    test(
-      'send while offline: the AI bubble is marked failed immediately, no '
-      'text ever streamed in (still never cleared — just empty)',
-      () async {
-        final future = cubit.sendMessage('oi');
-        await Future<void>.delayed(Duration.zero);
-        final controller = fakeRepository.lastSendController!;
+    test('send while offline: the AI bubble is marked failed immediately, no '
+        'text ever streamed in (still never cleared — just empty)', () async {
+      final future = cubit.sendMessage('oi');
+      await Future<void>.delayed(Duration.zero);
+      final controller = fakeRepository.lastSendController!;
 
-        controller.add(
-          left(const Failure.networkOffline(message: 'offline')),
-        );
-        await controller.close();
-        await future;
+      controller.add(left(const Failure.networkOffline(message: 'offline')));
+      await controller.close();
+      await future;
 
-        final aiMessage = (cubit.state as ChatReady).messages[1];
-        expect(aiMessage.content, '');
-        expect(aiMessage.status, ChatMessageStatus.failed);
-      },
-    );
+      final aiMessage = (cubit.state as ChatReady).messages[1];
+      expect(aiMessage.content, '');
+      expect(aiMessage.status, ChatMessageStatus.failed);
+    });
 
     test('a blank (whitespace-only) message is never sent', () async {
       await cubit.sendMessage('   ');
@@ -685,21 +624,18 @@ void main() {
       expect(fakeRepository.sendMessageCalls, isEmpty);
     });
 
-    test(
-      'a second sendMessage() call while one AI bubble is still streaming '
-      'is a no-op (never races two concurrent sends)',
-      () async {
-        final firstFuture = cubit.sendMessage('primeira');
-        await Future<void>.delayed(Duration.zero);
-        expect(fakeRepository.sendMessageCalls, hasLength(1));
+    test('a second sendMessage() call while one AI bubble is still streaming '
+        'is a no-op (never races two concurrent sends)', () async {
+      final firstFuture = cubit.sendMessage('primeira');
+      await Future<void>.delayed(Duration.zero);
+      expect(fakeRepository.sendMessageCalls, hasLength(1));
 
-        await cubit.sendMessage('segunda');
-        expect(fakeRepository.sendMessageCalls, hasLength(1));
+      await cubit.sendMessage('segunda');
+      expect(fakeRepository.sendMessageCalls, hasLength(1));
 
-        fakeRepository.lastSendController!.close();
-        await firstFuture;
-      },
-    );
+      fakeRepository.lastSendController!.close();
+      await firstFuture;
+    });
   });
 
   group('message_created -> ChatUiMessage.serverId — spec-6-3', () {
@@ -707,58 +643,49 @@ void main() {
       await cubit.init();
     });
 
-    test(
-      'message_created sets serverId on the matching user bubble only, '
-      'leaving the AI bubble untouched',
-      () async {
-        final future = cubit.sendMessage('oi');
-        await Future<void>.delayed(Duration.zero);
-        final controller = fakeRepository.lastSendController!;
+    test('message_created sets serverId on the matching user bubble only, '
+        'leaving the AI bubble untouched', () async {
+      final future = cubit.sendMessage('oi');
+      await Future<void>.delayed(Duration.zero);
+      final controller = fakeRepository.lastSendController!;
 
-        controller.add(right(const ChatMessageCreatedEvent('srv-1')));
-        await Future<void>.delayed(Duration.zero);
+      controller.add(right(const ChatMessageCreatedEvent('srv-1')));
+      await Future<void>.delayed(Duration.zero);
 
-        final ready = cubit.state as ChatReady;
-        expect(ready.messages[0].serverId, 'srv-1');
-        expect(ready.messages[1].serverId, isNull);
-        expect(ready.messages[1].status, ChatMessageStatus.streaming);
+      final ready = cubit.state as ChatReady;
+      expect(ready.messages[0].serverId, 'srv-1');
+      expect(ready.messages[1].serverId, isNull);
+      expect(ready.messages[1].status, ChatMessageStatus.streaming);
 
-        controller.add(right(const ChatDoneEvent()));
-        await controller.close();
-        await future;
-      },
-    );
+      controller.add(right(const ChatDoneEvent()));
+      await controller.close();
+      await future;
+    });
 
-    test(
-      'a message reloaded from history/cache already carries its own id '
-      'as serverId (ChatCubit._fromDomain)',
-      () async {
-        fakeRepository.listMessagesResult = right([
-          const ChatMessage(
-            id: 'm1',
-            sessionId: 's1',
-            role: ChatMessageRole.user,
-            content: 'oi',
-            seq: 0,
-            status: ChatMessageStatus.complete,
-            retryCount: 0,
-            createdAt: '2026-01-01T00:00:00Z',
-          ),
-        ]);
-        final freshCubit = ChatCubit(
-          fakeRepository,
-          FakeConnectivityWatcher(),
-          _FakeSaveChatMessageAsEntryUseCase(),
-        );
-        await freshCubit.init();
+    test('a message reloaded from history/cache already carries its own id '
+        'as serverId (ChatCubit._fromDomain)', () async {
+      fakeRepository.listMessagesResult = right([
+        const ChatMessage(
+          id: 'm1',
+          sessionId: 's1',
+          role: ChatMessageRole.user,
+          content: 'oi',
+          seq: 0,
+          status: ChatMessageStatus.complete,
+          retryCount: 0,
+          createdAt: '2026-01-01T00:00:00Z',
+        ),
+      ]);
+      final freshCubit = ChatCubit(
+        fakeRepository,
+        FakeConnectivityWatcher(),
+        _FakeSaveChatMessageAsEntryUseCase(),
+      );
+      await freshCubit.init();
 
-        expect(
-          (freshCubit.state as ChatReady).messages.single.serverId,
-          'm1',
-        );
-        await freshCubit.close();
-      },
-    );
+      expect((freshCubit.state as ChatReady).messages.single.serverId, 'm1');
+      await freshCubit.close();
+    });
   });
 
   group('retryMessage() — spec-6-3', () {
@@ -780,112 +707,100 @@ void main() {
       await future;
     }
 
-    test(
-      'I/O matrix "Tap retry, normal": calls chat-messages-retry keyed by '
-      'the preceding user message\'s serverId, resets the same AI bubble '
-      'in place (same id, same position — never a second bubble), and '
-      'completes it via done',
-      () async {
-        await sendAndFailWithServerId('srv-user-1');
-        final before = cubit.state as ChatReady;
-        expect(before.messages, hasLength(2));
-        final aiId = before.messages[1].id;
-        expect(before.messages[1].status, ChatMessageStatus.failed);
-        expect(before.messages[1].content, 'resposta parcial');
+    test('I/O matrix "Tap retry, normal": calls chat-messages-retry keyed by '
+        'the preceding user message\'s serverId, resets the same AI bubble '
+        'in place (same id, same position — never a second bubble), and '
+        'completes it via done', () async {
+      await sendAndFailWithServerId('srv-user-1');
+      final before = cubit.state as ChatReady;
+      expect(before.messages, hasLength(2));
+      final aiId = before.messages[1].id;
+      expect(before.messages[1].status, ChatMessageStatus.failed);
+      expect(before.messages[1].content, 'resposta parcial');
 
-        final retryFuture = cubit.retryMessage(aiId);
-        await Future<void>.delayed(Duration.zero);
+      final retryFuture = cubit.retryMessage(aiId);
+      await Future<void>.delayed(Duration.zero);
 
-        expect(fakeRepository.retryMessageCalls, [
-          (sessionId: before.sessionId, userMessageId: 'srv-user-1'),
-        ]);
-        // Never a full resend — chat-messages-retry alone was called.
-        expect(fakeRepository.sendMessageCalls, hasLength(1));
+      expect(fakeRepository.retryMessageCalls, [
+        (sessionId: before.sessionId, userMessageId: 'srv-user-1'),
+      ]);
+      // Never a full resend — chat-messages-retry alone was called.
+      expect(fakeRepository.sendMessageCalls, hasLength(1));
 
-        var ready = cubit.state as ChatReady;
-        expect(ready.messages, hasLength(2));
-        expect(ready.messages[1].id, aiId);
-        expect(ready.messages[1].content, '');
-        expect(ready.messages[1].status, ChatMessageStatus.streaming);
+      var ready = cubit.state as ChatReady;
+      expect(ready.messages, hasLength(2));
+      expect(ready.messages[1].id, aiId);
+      expect(ready.messages[1].content, '');
+      expect(ready.messages[1].status, ChatMessageStatus.streaming);
 
-        final retryController = fakeRepository.lastRetryController!;
-        retryController.add(right(const ChatTokenEvent('nova resposta')));
-        await Future<void>.delayed(Duration.zero);
-        ready = cubit.state as ChatReady;
-        expect(ready.messages[1].content, 'nova resposta');
+      final retryController = fakeRepository.lastRetryController!;
+      retryController.add(right(const ChatTokenEvent('nova resposta')));
+      await Future<void>.delayed(Duration.zero);
+      ready = cubit.state as ChatReady;
+      expect(ready.messages[1].content, 'nova resposta');
 
-        retryController.add(right(const ChatDoneEvent()));
-        await retryController.close();
-        await retryFuture;
+      retryController.add(right(const ChatDoneEvent()));
+      await retryController.close();
+      await retryFuture;
 
-        ready = cubit.state as ChatReady;
-        expect(ready.messages, hasLength(2));
-        expect(ready.messages[1].id, aiId);
-        expect(ready.messages[1].content, 'nova resposta');
-        expect(ready.messages[1].status, ChatMessageStatus.complete);
-      },
-    );
+      ready = cubit.state as ChatReady;
+      expect(ready.messages, hasLength(2));
+      expect(ready.messages[1].id, aiId);
+      expect(ready.messages[1].content, 'nova resposta');
+      expect(ready.messages[1].status, ChatMessageStatus.complete);
+    });
 
-    test(
-      'I/O matrix "Tap retry, no serverId": the stream dropped before '
-      'message_created ever arrived -> falls back to a full sendMessage '
-      'resend of the same content, into the same AI bubble slot',
-      () async {
-        final future = cubit.sendMessage('pergunta original');
-        await Future<void>.delayed(Duration.zero);
-        final controller = fakeRepository.lastSendController!;
-        controller.add(left(const Failure.networkTimeout(message: 'drop')));
-        await controller.close();
-        await future;
+    test('I/O matrix "Tap retry, no serverId": the stream dropped before '
+        'message_created ever arrived -> falls back to a full sendMessage '
+        'resend of the same content, into the same AI bubble slot', () async {
+      final future = cubit.sendMessage('pergunta original');
+      await Future<void>.delayed(Duration.zero);
+      final controller = fakeRepository.lastSendController!;
+      controller.add(left(const Failure.networkTimeout(message: 'drop')));
+      await controller.close();
+      await future;
 
-        final before = cubit.state as ChatReady;
-        final aiId = before.messages[1].id;
-        expect(before.messages[0].serverId, isNull);
-        expect(before.messages[1].status, ChatMessageStatus.failed);
+      final before = cubit.state as ChatReady;
+      final aiId = before.messages[1].id;
+      expect(before.messages[0].serverId, isNull);
+      expect(before.messages[1].status, ChatMessageStatus.failed);
 
-        final retryFuture = cubit.retryMessage(aiId);
-        await Future<void>.delayed(Duration.zero);
+      final retryFuture = cubit.retryMessage(aiId);
+      await Future<void>.delayed(Duration.zero);
 
-        expect(fakeRepository.retryMessageCalls, isEmpty);
-        expect(fakeRepository.sendMessageCalls, hasLength(2));
-        expect(
-          fakeRepository.sendMessageCalls.last.content,
-          'pergunta original',
-        );
+      expect(fakeRepository.retryMessageCalls, isEmpty);
+      expect(fakeRepository.sendMessageCalls, hasLength(2));
+      expect(fakeRepository.sendMessageCalls.last.content, 'pergunta original');
 
-        final ready = cubit.state as ChatReady;
-        expect(ready.messages, hasLength(2));
-        expect(ready.messages[1].id, aiId);
-        expect(ready.messages[1].status, ChatMessageStatus.streaming);
+      final ready = cubit.state as ChatReady;
+      expect(ready.messages, hasLength(2));
+      expect(ready.messages[1].id, aiId);
+      expect(ready.messages[1].status, ChatMessageStatus.streaming);
 
-        final newController = fakeRepository.lastSendController!;
-        newController.add(right(const ChatDoneEvent()));
-        await newController.close();
-        await retryFuture;
-      },
-    );
+      final newController = fakeRepository.lastSendController!;
+      newController.add(right(const ChatDoneEvent()));
+      await newController.close();
+      await retryFuture;
+    });
 
-    test(
-      'a second failure after retry re-marks the same bubble failed, '
-      'stays tappable',
-      () async {
-        await sendAndFailWithServerId('srv-1');
-        final aiId = (cubit.state as ChatReady).messages[1].id;
+    test('a second failure after retry re-marks the same bubble failed, '
+        'stays tappable', () async {
+      await sendAndFailWithServerId('srv-1');
+      final aiId = (cubit.state as ChatReady).messages[1].id;
 
-        final retryFuture = cubit.retryMessage(aiId);
-        await Future<void>.delayed(Duration.zero);
-        final retryController = fakeRepository.lastRetryController!;
-        retryController.add(
-          left(const Failure.rateLimited(message: 'slow down')),
-        );
-        await retryController.close();
-        await retryFuture;
+      final retryFuture = cubit.retryMessage(aiId);
+      await Future<void>.delayed(Duration.zero);
+      final retryController = fakeRepository.lastRetryController!;
+      retryController.add(
+        left(const Failure.rateLimited(message: 'slow down')),
+      );
+      await retryController.close();
+      await retryFuture;
 
-        final after = cubit.state as ChatReady;
-        expect(after.messages[1].id, aiId);
-        expect(after.messages[1].status, ChatMessageStatus.failed);
-      },
-    );
+      final after = cubit.state as ChatReady;
+      expect(after.messages[1].id, aiId);
+      expect(after.messages[1].status, ChatMessageStatus.failed);
+    });
 
     test('retrying a non-existent message id is a silent no-op', () async {
       await cubit.retryMessage('does-not-exist');
@@ -894,68 +809,59 @@ void main() {
       expect(fakeRepository.sendMessageCalls, isEmpty);
     });
 
-    test(
-      'retrying a bubble that is no longer failed (already complete) is '
-      'a no-op',
-      () async {
-        await sendAndFailWithServerId('srv-1');
-        final aiId = (cubit.state as ChatReady).messages[1].id;
+    test('retrying a bubble that is no longer failed (already complete) is '
+        'a no-op', () async {
+      await sendAndFailWithServerId('srv-1');
+      final aiId = (cubit.state as ChatReady).messages[1].id;
 
-        final retryFuture = cubit.retryMessage(aiId);
-        await Future<void>.delayed(Duration.zero);
-        fakeRepository.lastRetryController!.add(right(const ChatDoneEvent()));
-        await fakeRepository.lastRetryController!.close();
-        await retryFuture;
-        expect(
-          (cubit.state as ChatReady).messages[1].status,
-          ChatMessageStatus.complete,
-        );
+      final retryFuture = cubit.retryMessage(aiId);
+      await Future<void>.delayed(Duration.zero);
+      fakeRepository.lastRetryController!.add(right(const ChatDoneEvent()));
+      await fakeRepository.lastRetryController!.close();
+      await retryFuture;
+      expect(
+        (cubit.state as ChatReady).messages[1].status,
+        ChatMessageStatus.complete,
+      );
 
-        await cubit.retryMessage(aiId);
+      await cubit.retryMessage(aiId);
 
-        expect(fakeRepository.retryMessageCalls, hasLength(1));
-      },
-    );
+      expect(fakeRepository.retryMessageCalls, hasLength(1));
+    });
 
-    test(
-      'Boundaries: "a second retry while one is in flight" is a no-op — '
-      'reuses _isSending verbatim',
-      () async {
-        await sendAndFailWithServerId('srv-1');
-        final aiId = (cubit.state as ChatReady).messages[1].id;
+    test('Boundaries: "a second retry while one is in flight" is a no-op — '
+        'reuses _isSending verbatim', () async {
+      await sendAndFailWithServerId('srv-1');
+      final aiId = (cubit.state as ChatReady).messages[1].id;
 
-        final firstRetry = cubit.retryMessage(aiId);
-        await Future<void>.delayed(Duration.zero);
-        expect(fakeRepository.retryMessageCalls, hasLength(1));
+      final firstRetry = cubit.retryMessage(aiId);
+      await Future<void>.delayed(Duration.zero);
+      expect(fakeRepository.retryMessageCalls, hasLength(1));
 
-        await cubit.retryMessage(aiId);
-        expect(fakeRepository.retryMessageCalls, hasLength(1));
+      await cubit.retryMessage(aiId);
+      expect(fakeRepository.retryMessageCalls, hasLength(1));
 
-        fakeRepository.lastRetryController!.close();
-        await firstRetry;
-      },
-    );
+      fakeRepository.lastRetryController!.close();
+      await firstRetry;
+    });
 
-    test(
-      'review finding: close()-ing the cubit while retryMessage() is '
-      'in-flight resolves its stranded Future instead of leaving it '
-      'permanently unresolved (same fix _consumeStream already proves '
-      'for sendMessage, extended to the retry call path)',
-      () async {
-        await sendAndFailWithServerId('srv-1');
-        final aiId = (cubit.state as ChatReady).messages[1].id;
+    test('review finding: close()-ing the cubit while retryMessage() is '
+        'in-flight resolves its stranded Future instead of leaving it '
+        'permanently unresolved (same fix _consumeStream already proves '
+        'for sendMessage, extended to the retry call path)', () async {
+      await sendAndFailWithServerId('srv-1');
+      final aiId = (cubit.state as ChatReady).messages[1].id;
 
-        final retryFuture = cubit.retryMessage(aiId);
-        await Future<void>.delayed(Duration.zero);
-        expect(fakeRepository.retryMessageCalls, hasLength(1));
+      final retryFuture = cubit.retryMessage(aiId);
+      await Future<void>.delayed(Duration.zero);
+      expect(fakeRepository.retryMessageCalls, hasLength(1));
 
-        // The retry's own stream controller is never closed here —
-        // close() alone must still resolve retryFuture promptly.
-        await cubit.close();
+      // The retry's own stream controller is never closed here —
+      // close() alone must still resolve retryFuture promptly.
+      await cubit.close();
 
-        await retryFuture.timeout(const Duration(milliseconds: 500));
-      },
-    );
+      await retryFuture.timeout(const Duration(milliseconds: 500));
+    });
   });
 
   group(
@@ -965,138 +871,120 @@ void main() {
         await cubit.init();
       });
 
-      test(
-        'I/O matrix "Goes offline mid-session": an offline reading flips '
-        'ChatReady.isOffline to true',
-        () async {
-          expect((cubit.state as ChatReady).isOffline, isFalse);
+      test('I/O matrix "Goes offline mid-session": an offline reading flips '
+          'ChatReady.isOffline to true', () async {
+        expect((cubit.state as ChatReady).isOffline, isFalse);
 
-          fakeConnectivityWatcher.emit(false);
-          await Future<void>.delayed(Duration.zero);
+        fakeConnectivityWatcher.emit(false);
+        await Future<void>.delayed(Duration.zero);
 
-          expect((cubit.state as ChatReady).isOffline, isTrue);
-        },
-      );
+        expect((cubit.state as ChatReady).isOffline, isTrue);
+      });
 
-      test(
-        'I/O matrix "Comes back online": a subsequent online reading '
-        'flips it back to false',
-        () async {
-          fakeConnectivityWatcher.emit(false);
-          await Future<void>.delayed(Duration.zero);
-          expect((cubit.state as ChatReady).isOffline, isTrue);
+      test('I/O matrix "Comes back online": a subsequent online reading '
+          'flips it back to false', () async {
+        fakeConnectivityWatcher.emit(false);
+        await Future<void>.delayed(Duration.zero);
+        expect((cubit.state as ChatReady).isOffline, isTrue);
 
-          fakeConnectivityWatcher.emit(true);
-          await Future<void>.delayed(Duration.zero);
+        fakeConnectivityWatcher.emit(true);
+        await Future<void>.delayed(Duration.zero);
 
-          expect((cubit.state as ChatReady).isOffline, isFalse);
-        },
-      );
+        expect((cubit.state as ChatReady).isOffline, isFalse);
+      });
 
-      test(
-        'a connectivity reading that arrives before bootstrap resolves is '
-        'still reflected on the very first ChatReady emitted',
-        () async {
-          final freshRepository = _FakeChatRepository();
-          final freshWatcher = FakeConnectivityWatcher();
-          final freshCubit = ChatCubit(
-            freshRepository,
-            freshWatcher,
-            _FakeSaveChatMessageAsEntryUseCase(),
-          );
+      test('a connectivity reading that arrives before bootstrap resolves is '
+          'still reflected on the very first ChatReady emitted', () async {
+        final freshRepository = _FakeChatRepository();
+        final freshWatcher = FakeConnectivityWatcher();
+        final freshCubit = ChatCubit(
+          freshRepository,
+          freshWatcher,
+          _FakeSaveChatMessageAsEntryUseCase(),
+        );
 
-          freshWatcher.emit(false);
-          await Future<void>.delayed(Duration.zero);
+        freshWatcher.emit(false);
+        await Future<void>.delayed(Duration.zero);
 
-          await freshCubit.init();
+        await freshCubit.init();
 
-          expect((freshCubit.state as ChatReady).isOffline, isTrue);
-          await freshCubit.close();
-          await freshWatcher.close();
-        },
-      );
+        expect((freshCubit.state as ChatReady).isOffline, isTrue);
+        await freshCubit.close();
+        await freshWatcher.close();
+      });
 
-      test(
-        'startNewSession() carries the current offline status forward '
-        'onto the newly emitted ChatReady',
-        () async {
-          fakeConnectivityWatcher.emit(false);
-          await Future<void>.delayed(Duration.zero);
-          expect((cubit.state as ChatReady).isOffline, isTrue);
+      test('startNewSession() carries the current offline status forward '
+          'onto the newly emitted ChatReady', () async {
+        fakeConnectivityWatcher.emit(false);
+        await Future<void>.delayed(Duration.zero);
+        expect((cubit.state as ChatReady).isOffline, isTrue);
 
-          const created = ChatSession(
-            id: 's-new',
-            title: '',
-            persona: ChatPersona.analitico,
-            userMessageCount: 0,
-            lastUserMessageAt: null,
-            createdAt: '2026-01-05T00:00:00Z',
-            updatedAt: '2026-01-05T00:00:00Z',
-          );
-          fakeRepository.createSessionResult = right(created);
+        const created = ChatSession(
+          id: 's-new',
+          title: '',
+          persona: ChatPersona.analitico,
+          userMessageCount: 0,
+          lastUserMessageAt: null,
+          createdAt: '2026-01-05T00:00:00Z',
+          updatedAt: '2026-01-05T00:00:00Z',
+        );
+        fakeRepository.createSessionResult = right(created);
 
-          final result = await cubit.startNewSession();
+        final result = await cubit.startNewSession();
 
-          expect(result.isRight(), isTrue);
-          expect((cubit.state as ChatReady).isOffline, isTrue);
-        },
-      );
+        expect(result.isRight(), isTrue);
+        expect((cubit.state as ChatReady).isOffline, isTrue);
+      });
 
-      test(
-        'RNF09: a connectivity-watch stream error never crashes the '
-        'cubit — isOffline simply keeps its last known value',
-        () async {
-          fakeConnectivityWatcher.emitError(
-            Exception('platform channel unavailable'),
-          );
-          await Future<void>.delayed(Duration.zero);
+      test('RNF09: a connectivity-watch stream error never crashes the '
+          'cubit — isOffline simply keeps its last known value', () async {
+        fakeConnectivityWatcher.emitError(
+          Exception('platform channel unavailable'),
+        );
+        await Future<void>.delayed(Duration.zero);
 
-          expect(cubit.state, isA<ChatReady>());
-          expect((cubit.state as ChatReady).isOffline, isFalse);
-        },
-      );
+        expect(cubit.state, isA<ChatReady>());
+        expect((cubit.state as ChatReady).isOffline, isFalse);
+      });
     },
   );
 
-  test(
-    'review finding: a message restored from history with a persisted '
-    '`streaming` status (left over from an earlier dropped response) '
-    'never permanently disables the composer — the send-in-flight guard '
-    'must not be derived from scanning loaded messages\' status',
-    () async {
-      final staleRepository = _FakeChatRepository();
-      staleRepository.listMessagesResult = right([
-        const ChatMessage(
-          id: 'stale',
-          sessionId: 's1',
-          role: ChatMessageRole.assistant,
-          content: 'metade de uma resposta',
-          seq: 0,
-          status: ChatMessageStatus.streaming,
-          retryCount: 0,
-          createdAt: '2026-01-01T00:00:00Z',
-        ),
-      ]);
-      final staleCubit = ChatCubit(
-        staleRepository,
-        FakeConnectivityWatcher(),
-        _FakeSaveChatMessageAsEntryUseCase(),
-      );
-      await staleCubit.init();
-      expect(staleCubit.state, isA<ChatReady>());
+  test('review finding: a message restored from history with a persisted '
+      '`streaming` status (left over from an earlier dropped response) '
+      'never permanently disables the composer — the send-in-flight guard '
+      'must not be derived from scanning loaded messages\' status', () async {
+    final staleRepository = _FakeChatRepository();
+    staleRepository.listMessagesResult = right([
+      const ChatMessage(
+        id: 'stale',
+        sessionId: 's1',
+        role: ChatMessageRole.assistant,
+        content: 'metade de uma resposta',
+        seq: 0,
+        status: ChatMessageStatus.streaming,
+        retryCount: 0,
+        createdAt: '2026-01-01T00:00:00Z',
+      ),
+    ]);
+    final staleCubit = ChatCubit(
+      staleRepository,
+      FakeConnectivityWatcher(),
+      _FakeSaveChatMessageAsEntryUseCase(),
+    );
+    await staleCubit.init();
+    expect(staleCubit.state, isA<ChatReady>());
 
-      // Not awaited: `_FakeChatRepository.sendMessage`'s controller never
-      // closes on its own, same reason every other sendMessage() test in
-      // this file awaits a zero-duration delay instead of the call
-      // itself before asserting.
-      unawaited(staleCubit.sendMessage('nova mensagem'));
-      await Future<void>.delayed(Duration.zero);
+    // Not awaited: `_FakeChatRepository.sendMessage`'s controller never
+    // closes on its own, same reason every other sendMessage() test in
+    // this file awaits a zero-duration delay instead of the call
+    // itself before asserting.
+    unawaited(staleCubit.sendMessage('nova mensagem'));
+    await Future<void>.delayed(Duration.zero);
 
-      expect(staleRepository.sendMessageCalls, hasLength(1));
-      staleRepository.lastSendController!.close();
-      await staleCubit.close();
-    },
-  );
+    expect(staleRepository.sendMessageCalls, hasLength(1));
+    staleRepository.lastSendController!.close();
+    await staleCubit.close();
+  });
 
   group('bookmarkMessage() — spec-6-4', () {
     /// Drives a send that resolves into a `complete` user bubble with a
@@ -1127,125 +1015,110 @@ void main() {
       await cubit.init();
     });
 
-    test(
-      'happy path: idle -> saving -> saved, the use case called once with '
-      'the message content and its serverId as chatMessageId',
-      () async {
-        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
-        expect(
-          (cubit.state as ChatReady).messages[0].bookmarkState,
-          const BookmarkState.idle(),
-        );
+    test('happy path: idle -> saving -> saved, the use case called once with '
+        'the message content and its serverId as chatMessageId', () async {
+      final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+      expect(
+        (cubit.state as ChatReady).messages[0].bookmarkState,
+        const BookmarkState.idle(),
+      );
 
-        final bookmarkFuture = cubit.bookmarkMessage(userId);
-        await Future<void>.delayed(Duration.zero);
+      final bookmarkFuture = cubit.bookmarkMessage(userId);
+      await Future<void>.delayed(Duration.zero);
 
-        expect(
-          (cubit.state as ChatReady).messages[0].bookmarkState,
-          const BookmarkState.saving(),
-        );
-        expect(fakeSaveChatMessageAsEntryUseCase.calls, [
-          (content: 'oi', chatMessageId: 'srv-1'),
-        ]);
+      expect(
+        (cubit.state as ChatReady).messages[0].bookmarkState,
+        const BookmarkState.saving(),
+      );
+      expect(fakeSaveChatMessageAsEntryUseCase.calls, [
+        (content: 'oi', chatMessageId: 'srv-1'),
+      ]);
 
-        fakeSaveChatMessageAsEntryUseCase.resolve(0, right(_savedEntry));
-        await bookmarkFuture;
+      fakeSaveChatMessageAsEntryUseCase.resolve(0, right(_savedEntry));
+      await bookmarkFuture;
 
-        expect(
-          (cubit.state as ChatReady).messages[0].bookmarkState,
-          const BookmarkState.saved(),
-        );
-      },
-    );
+      expect(
+        (cubit.state as ChatReady).messages[0].bookmarkState,
+        const BookmarkState.saved(),
+      );
+    });
 
-    test(
-      'I/O matrix "Already saved": tapping a saved bubble again is a '
-      'no-op — no new call, no state change',
-      () async {
-        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
-        final bookmarkFuture = cubit.bookmarkMessage(userId);
-        fakeSaveChatMessageAsEntryUseCase.resolve(0, right(_savedEntry));
-        await bookmarkFuture;
-        expect(
-          (cubit.state as ChatReady).messages[0].bookmarkState,
-          const BookmarkState.saved(),
-        );
-        final before = cubit.state;
+    test('I/O matrix "Already saved": tapping a saved bubble again is a '
+        'no-op — no new call, no state change', () async {
+      final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+      final bookmarkFuture = cubit.bookmarkMessage(userId);
+      fakeSaveChatMessageAsEntryUseCase.resolve(0, right(_savedEntry));
+      await bookmarkFuture;
+      expect(
+        (cubit.state as ChatReady).messages[0].bookmarkState,
+        const BookmarkState.saved(),
+      );
+      final before = cubit.state;
 
-        await cubit.bookmarkMessage(userId);
+      await cubit.bookmarkMessage(userId);
 
-        expect(fakeSaveChatMessageAsEntryUseCase.calls, hasLength(1));
-        expect(cubit.state, same(before));
-      },
-    );
+      expect(fakeSaveChatMessageAsEntryUseCase.calls, hasLength(1));
+      expect(cubit.state, same(before));
+    });
 
-    test(
-      'I/O matrix "No serverId yet": tapping bookmark before '
-      'message_created ever set serverId is a no-op, same guard shape as '
-      'retryMessage',
-      () async {
-        final future = cubit.sendMessage('oi');
-        await Future<void>.delayed(Duration.zero);
-        final userId = (cubit.state as ChatReady).messages[0].id;
-        expect((cubit.state as ChatReady).messages[0].serverId, isNull);
+    test('I/O matrix "No serverId yet": tapping bookmark before '
+        'message_created ever set serverId is a no-op, same guard shape as '
+        'retryMessage', () async {
+      final future = cubit.sendMessage('oi');
+      await Future<void>.delayed(Duration.zero);
+      final userId = (cubit.state as ChatReady).messages[0].id;
+      expect((cubit.state as ChatReady).messages[0].serverId, isNull);
 
-        await cubit.bookmarkMessage(userId);
+      await cubit.bookmarkMessage(userId);
 
-        expect(fakeSaveChatMessageAsEntryUseCase.calls, isEmpty);
-        expect(
-          (cubit.state as ChatReady).messages[0].bookmarkState,
-          const BookmarkState.idle(),
-        );
+      expect(fakeSaveChatMessageAsEntryUseCase.calls, isEmpty);
+      expect(
+        (cubit.state as ChatReady).messages[0].bookmarkState,
+        const BookmarkState.idle(),
+      );
 
-        fakeRepository.lastSendController!.add(right(const ChatDoneEvent()));
-        await fakeRepository.lastSendController!.close();
-        await future;
-      },
-    );
+      fakeRepository.lastSendController!.add(right(const ChatDoneEvent()));
+      await fakeRepository.lastSendController!.close();
+      await future;
+    });
 
-    test(
-      'a bookmark attempt on an AI (assistant) bubble is a no-op — the '
-      'affordance only ever exists on the user\'s own messages',
-      () async {
-        final future = cubit.sendMessage('oi');
-        await Future<void>.delayed(Duration.zero);
-        final controller = fakeRepository.lastSendController!;
-        controller.add(right(const ChatMessageCreatedEvent('srv-1')));
-        controller.add(right(const ChatDoneEvent()));
-        await controller.close();
-        await future;
-        final aiId = (cubit.state as ChatReady).messages[1].id;
-        expect((cubit.state as ChatReady).messages[1].role, ChatMessageRole.assistant);
+    test('a bookmark attempt on an AI (assistant) bubble is a no-op — the '
+        'affordance only ever exists on the user\'s own messages', () async {
+      final future = cubit.sendMessage('oi');
+      await Future<void>.delayed(Duration.zero);
+      final controller = fakeRepository.lastSendController!;
+      controller.add(right(const ChatMessageCreatedEvent('srv-1')));
+      controller.add(right(const ChatDoneEvent()));
+      await controller.close();
+      await future;
+      final aiId = (cubit.state as ChatReady).messages[1].id;
+      expect(
+        (cubit.state as ChatReady).messages[1].role,
+        ChatMessageRole.assistant,
+      );
 
-        await cubit.bookmarkMessage(aiId);
+      await cubit.bookmarkMessage(aiId);
 
-        expect(fakeSaveChatMessageAsEntryUseCase.calls, isEmpty);
-      },
-    );
+      expect(fakeSaveChatMessageAsEntryUseCase.calls, isEmpty);
+    });
 
-    test(
-      'I/O matrix "Save fails": create() resolves Left(Failure) -> the '
-      'bubble flips to error (retryable); the rest of the session '
-      '(isSending, other messages) is unaffected',
-      () async {
-        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+    test('I/O matrix "Save fails": create() resolves Left(Failure) -> the '
+        'bubble flips to error (retryable); the rest of the session '
+        '(isSending, other messages) is unaffected', () async {
+      final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
 
-        final bookmarkFuture = cubit.bookmarkMessage(userId);
-        fakeSaveChatMessageAsEntryUseCase.resolve(
-          0,
-          left(const Failure.networkTimeout(message: 'timeout')),
-        );
-        await bookmarkFuture;
+      final bookmarkFuture = cubit.bookmarkMessage(userId);
+      fakeSaveChatMessageAsEntryUseCase.resolve(
+        0,
+        left(const Failure.networkTimeout(message: 'timeout')),
+      );
+      await bookmarkFuture;
 
-        final ready = cubit.state as ChatReady;
-        expect(
-          ready.messages[0].bookmarkState,
-          isA<BookmarkError>(),
-        );
-        expect(ready.isSending, isFalse);
-        expect(ready.messages, hasLength(2));
-      },
-    );
+      final ready = cubit.state as ChatReady;
+      expect(ready.messages[0].bookmarkState, isA<BookmarkError>());
+      expect(ready.isSending, isFalse);
+      expect(ready.messages, hasLength(2));
+    });
 
     test(
       'I/O matrix "Save fails" Error Handling: tapping an error bubble '
@@ -1282,63 +1155,54 @@ void main() {
       },
     );
 
-    test(
-      'I/O matrix "Side-effect throws": a synchronous throw from the use '
-      'case is caught by isolatedSideEffect, mapped to '
-      'malformedResponse, and never propagates to the caller — the '
-      'bubble still flips to error',
-      () async {
-        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
-        fakeSaveChatMessageAsEntryUseCase.throwOnNextCall = true;
+    test('I/O matrix "Side-effect throws": a synchronous throw from the use '
+        'case is caught by isolatedSideEffect, mapped to '
+        'malformedResponse, and never propagates to the caller — the '
+        'bubble still flips to error', () async {
+      final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+      fakeSaveChatMessageAsEntryUseCase.throwOnNextCall = true;
 
-        await cubit.bookmarkMessage(userId);
+      await cubit.bookmarkMessage(userId);
 
-        final ready = cubit.state as ChatReady;
-        expect(ready.messages[0].bookmarkState, isA<BookmarkError>());
-        expect(
-          (ready.messages[0].bookmarkState as BookmarkError).failure,
-          isA<MalformedResponse>(),
-        );
-      },
-    );
+      final ready = cubit.state as ChatReady;
+      expect(ready.messages[0].bookmarkState, isA<BookmarkError>());
+      expect(
+        (ready.messages[0].bookmarkState as BookmarkError).failure,
+        isA<MalformedResponse>(),
+      );
+    });
 
-    test(
-      'I/O matrix "Second tap while saving": a no-op re-entrancy guard, '
-      'scoped to that one message — never a second call while the first '
-      'is still in flight',
-      () async {
-        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+    test('I/O matrix "Second tap while saving": a no-op re-entrancy guard, '
+        'scoped to that one message — never a second call while the first '
+        'is still in flight', () async {
+      final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
 
-        final firstBookmark = cubit.bookmarkMessage(userId);
-        await Future<void>.delayed(Duration.zero);
-        expect(fakeSaveChatMessageAsEntryUseCase.calls, hasLength(1));
+      final firstBookmark = cubit.bookmarkMessage(userId);
+      await Future<void>.delayed(Duration.zero);
+      expect(fakeSaveChatMessageAsEntryUseCase.calls, hasLength(1));
 
-        await cubit.bookmarkMessage(userId);
-        expect(fakeSaveChatMessageAsEntryUseCase.calls, hasLength(1));
+      await cubit.bookmarkMessage(userId);
+      expect(fakeSaveChatMessageAsEntryUseCase.calls, hasLength(1));
 
-        fakeSaveChatMessageAsEntryUseCase.resolve(0, right(_savedEntry));
-        await firstBookmark;
-      },
-    );
+      fakeSaveChatMessageAsEntryUseCase.resolve(0, right(_savedEntry));
+      await firstBookmark;
+    });
 
-    test(
-      'a save failure never disables the composer or affects other '
-      'bubbles — the session stays fully usable',
-      () async {
-        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+    test('a save failure never disables the composer or affects other '
+        'bubbles — the session stays fully usable', () async {
+      final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
 
-        final bookmarkFuture = cubit.bookmarkMessage(userId);
-        fakeSaveChatMessageAsEntryUseCase.resolve(
-          0,
-          left(const Failure.networkTimeout(message: 'timeout')),
-        );
-        await bookmarkFuture;
+      final bookmarkFuture = cubit.bookmarkMessage(userId);
+      fakeSaveChatMessageAsEntryUseCase.resolve(
+        0,
+        left(const Failure.networkTimeout(message: 'timeout')),
+      );
+      await bookmarkFuture;
 
-        final ready = cubit.state as ChatReady;
-        expect(ready.isOffline, isFalse);
-        expect(ready.messages[1].bookmarkState, const BookmarkState.idle());
-      },
-    );
+      final ready = cubit.state as ChatReady;
+      expect(ready.isOffline, isFalse);
+      expect(ready.messages[1].bookmarkState, const BookmarkState.idle());
+    });
 
     test(
       'review: close()-ing the cubit while a bookmark save is in flight '
@@ -1355,6 +1219,138 @@ void main() {
         await expectLater(bookmarkFuture, completes);
       },
     );
+
+    test(
+      'review fix (round 2): a save that resolves after the user has '
+      'switched sessions is never silently dropped — re-entering a '
+      'session carrying the bookmarked message picks the outcome back up',
+      () async {
+        final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+
+        final bookmarkFuture = cubit.bookmarkMessage(userId);
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          (cubit.state as ChatReady).messages[0].bookmarkState,
+          const BookmarkState.saving(),
+        );
+
+        // Switches away before the save resolves — switchSession replaces
+        // ChatReady.messages wholesale, so `userId` (this session's own
+        // local id) no longer identifies anything in the new state.
+        fakeRepository.listMessagesResult = right(const []);
+        await cubit.switchSession('s2');
+        expect((cubit.state as ChatReady).sessionId, 's2');
+
+        fakeSaveChatMessageAsEntryUseCase.resolve(0, right(_savedEntry));
+        await bookmarkFuture;
+
+        // The now-active, unrelated session is untouched by the stray
+        // result — no crash, no spurious message materializing in it.
+        expect((cubit.state as ChatReady).messages, isEmpty);
+
+        // Re-entering the original session reloads the message fresh
+        // from the server — its own `id` is now the backend id
+        // ('srv-1'), the same identifier the save resolved under.
+        fakeRepository.listMessagesResult = right(const [
+          ChatMessage(
+            id: 'srv-1',
+            sessionId: 's1',
+            role: ChatMessageRole.user,
+            content: 'oi',
+            seq: 0,
+            status: ChatMessageStatus.complete,
+            retryCount: 0,
+            createdAt: '2026-01-01T00:00:00Z',
+          ),
+        ]);
+        await cubit.switchSession('s1');
+
+        expect(
+          (cubit.state as ChatReady).messages.single.bookmarkState,
+          const BookmarkState.saved(),
+        );
+      },
+    );
+
+    test('bookmarkMessage() is a no-op while state is not yet ChatReady '
+        '(bootstrap still loading or failed)', () async {
+      final freshCubit = ChatCubit(
+        _FakeChatRepository(),
+        FakeConnectivityWatcher(),
+        fakeSaveChatMessageAsEntryUseCase,
+      );
+      expect(freshCubit.state, isA<ChatBootstrapLoading>());
+
+      await freshCubit.bookmarkMessage('whatever');
+
+      expect(freshCubit.state, isA<ChatBootstrapLoading>());
+      expect(fakeSaveChatMessageAsEntryUseCase.calls, isEmpty);
+      await freshCubit.close();
+    });
+
+    test('review: calling bookmarkMessage() on an already-closed cubit never '
+        'crashes and never reaches the use case — the isClosed guard before '
+        'the first (saving) emit, not just the one after the await', () async {
+      final userId = await sendAndCompleteWithServerId('oi', 'srv-1');
+      await cubit.close();
+
+      await expectLater(cubit.bookmarkMessage(userId), completes);
+
+      expect(fakeSaveChatMessageAsEntryUseCase.calls, isEmpty);
+    });
+
+    test('bookmarking two different messages concurrently resolves each '
+        'independently, with no cross-talk', () async {
+      final firstId = await sendAndCompleteWithServerId('oi', 'srv-1');
+      // sendAndCompleteWithServerId's own role-only filter always returns
+      // the *first* user message, so a second round trip needs its own
+      // content-keyed lookup to get the message it actually just sent.
+      await sendAndCompleteWithServerId('tudo bem', 'srv-2');
+      final secondId = (cubit.state as ChatReady).messages
+          .firstWhere((message) => message.content == 'tudo bem')
+          .id;
+
+      final firstBookmark = cubit.bookmarkMessage(firstId);
+      await Future<void>.delayed(Duration.zero);
+      final secondBookmark = cubit.bookmarkMessage(secondId);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(fakeSaveChatMessageAsEntryUseCase.calls, [
+        (content: 'oi', chatMessageId: 'srv-1'),
+        (content: 'tudo bem', chatMessageId: 'srv-2'),
+      ]);
+
+      // Resolves the *second* call first — proves the result lands on
+      // its own message only, never the other one still in flight.
+      fakeSaveChatMessageAsEntryUseCase.resolve(1, right(_savedEntry));
+      await secondBookmark;
+
+      var ready = cubit.state as ChatReady;
+      expect(
+        ready.messages.firstWhere((m) => m.id == secondId).bookmarkState,
+        const BookmarkState.saved(),
+      );
+      expect(
+        ready.messages.firstWhere((m) => m.id == firstId).bookmarkState,
+        const BookmarkState.saving(),
+      );
+
+      fakeSaveChatMessageAsEntryUseCase.resolve(
+        0,
+        left(const Failure.networkTimeout(message: 'timeout')),
+      );
+      await firstBookmark;
+
+      ready = cubit.state as ChatReady;
+      expect(
+        ready.messages.firstWhere((m) => m.id == firstId).bookmarkState,
+        isA<BookmarkError>(),
+      );
+      expect(
+        ready.messages.firstWhere((m) => m.id == secondId).bookmarkState,
+        const BookmarkState.saved(),
+      );
+    });
   });
 }
 

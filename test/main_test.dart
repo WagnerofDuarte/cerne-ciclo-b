@@ -22,8 +22,6 @@ import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
 import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
 import 'package:cerne/features/chat/presentation/screens/chat_screen.dart';
-import 'package:cerne/features/entries/domain/entities/entry.dart';
-import 'package:cerne/features/entries/domain/usecases/save_chat_message_as_entry_use_case.dart';
 import 'package:cerne/features/vault/domain/entities/vault_status.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 import 'package:cerne/features/vault/presentation/screens/vault_lock_screen.dart';
@@ -31,6 +29,7 @@ import 'package:cerne/main.dart';
 
 import 'support/fake_connectivity_watcher.dart';
 import 'support/fake_path_provider_platform.dart';
+import 'support/unused_save_chat_message_as_entry_use_case.dart';
 
 class MockAuthRepository extends Mock implements AuthRepository {}
 
@@ -216,20 +215,6 @@ class _FakeChatRepository implements ChatRepository {
   ) => const Stream.empty();
 }
 
-/// spec-6-4 — same "never expected to be called" throwing-fake convention
-/// every other touched test file in this story now uses, swapped in for
-/// the real DI-backed `SaveChatMessageAsEntryUseCase` (which would
-/// otherwise wrap the real `EntriesRepository`/`ApiClient`/`Dio`
-/// pipeline) — this suite never exercises the bookmark affordance itself.
-class _UnusedSaveChatMessageAsEntryUseCase
-    implements SaveChatMessageAsEntryUseCase {
-  @override
-  Future<Either<Failure, Entry>> call({
-    required String content,
-    required String chatMessageId,
-  }) async => throw UnimplementedError('not expected to be called');
-}
-
 /// Proves the one real production composition root — `CerneApp` resolving
 /// `sl<AuthCubit>()`/`sl<SessionRepository>()`/`sl<VaultRepository>()`,
 /// building the one `go_router` (Story 1.6; AD-14's vault gate), and
@@ -310,7 +295,7 @@ void main() {
       () => ChatCubit(
         _FakeChatRepository(),
         FakeConnectivityWatcher(),
-        _UnusedSaveChatMessageAsEntryUseCase(),
+        UnusedSaveChatMessageAsEntryUseCase(),
       ),
       dispose: (cubit) => cubit.close(),
     );
@@ -649,13 +634,13 @@ void main() {
     },
   );
 
-  group('AD-14 — VaultStatus gate composed ahead of SessionStatus (spec-2-1)', () {
-    testWidgets(
-      'cold start stays on /vault (VaultLockScreen) until a fake '
-      'authenticate() success flips VaultStatus to unlocked, at which '
-      'point the existing SessionStatus logic takes over and routes to '
-      'Home',
-      (tester) async {
+  group(
+    'AD-14 — VaultStatus gate composed ahead of SessionStatus (spec-2-1)',
+    () {
+      testWidgets('cold start stays on /vault (VaultLockScreen) until a fake '
+          'authenticate() success flips VaultStatus to unlocked, at which '
+          'point the existing SessionStatus logic takes over and routes to '
+          'Home', (tester) async {
         final fakeVaultRepository = _FakeVaultRepository(
           initialStatus: VaultStatus.locked,
         );
@@ -691,56 +676,56 @@ void main() {
 
         expect(find.byType(ChatScreen), findsOneWidget);
         expect(find.byType(VaultLockScreen), findsNothing);
-      },
-    );
+      });
 
-    testWidgets(
-      'biometric failure falls through to the real PinKeypad wiring '
-      '(spec-2-2): the initial auto-attempt fails (authenticateSucceeds '
-      'starts false) and shows the keypad, then entering 4 digits stores '
-      'them as the new PIN, unlocks the vault and routes through to Home',
-      (tester) async {
-        final fakeVaultRepository = _FakeVaultRepository(
-          initialStatus: VaultStatus.locked,
-        );
-        addTearDown(fakeVaultRepository.dispose);
-        sl.unregister<VaultRepository>();
-        sl.registerLazySingleton<VaultRepository>(() => fakeVaultRepository);
+      testWidgets(
+        'biometric failure falls through to the real PinKeypad wiring '
+        '(spec-2-2): the initial auto-attempt fails (authenticateSucceeds '
+        'starts false) and shows the keypad, then entering 4 digits stores '
+        'them as the new PIN, unlocks the vault and routes through to Home',
+        (tester) async {
+          final fakeVaultRepository = _FakeVaultRepository(
+            initialStatus: VaultStatus.locked,
+          );
+          addTearDown(fakeVaultRepository.dispose);
+          sl.unregister<VaultRepository>();
+          sl.registerLazySingleton<VaultRepository>(() => fakeVaultRepository);
 
-        final fakeSessionRepository = _FakeSessionRepository()
-          ..setStatus(SessionStatus.authenticated);
-        addTearDown(fakeSessionRepository.dispose);
-        sl.unregister<SessionRepository>();
-        sl.registerLazySingleton<SessionRepository>(
-          () => fakeSessionRepository,
-        );
+          final fakeSessionRepository = _FakeSessionRepository()
+            ..setStatus(SessionStatus.authenticated);
+          addTearDown(fakeSessionRepository.dispose);
+          sl.unregister<SessionRepository>();
+          sl.registerLazySingleton<SessionRepository>(
+            () => fakeSessionRepository,
+          );
 
-        await tester.pumpWidget(const CerneApp());
-        await tester.pumpAndSettle();
+          await tester.pumpWidget(const CerneApp());
+          await tester.pumpAndSettle();
 
-        // The initial auto-triggered authenticate() call used the fake's
-        // default authenticateSucceeds == false, so the PIN keypad is now
-        // visible (never a "Tentar novamente" biometric-retry affordance —
-        // AC2) and the vault is still locked.
-        expect(find.byType(VaultLockScreen), findsOneWidget);
-        expect(find.text('Digite seu PIN'), findsOneWidget);
-        expect(find.text('Tentar novamente'), findsNothing);
+          // The initial auto-triggered authenticate() call used the fake's
+          // default authenticateSucceeds == false, so the PIN keypad is now
+          // visible (never a "Tentar novamente" biometric-retry affordance —
+          // AC2) and the vault is still locked.
+          expect(find.byType(VaultLockScreen), findsOneWidget);
+          expect(find.text('Digite seu PIN'), findsOneWidget);
+          expect(find.text('Tentar novamente'), findsNothing);
 
-        // Drive the real PinKeypad wiring (_submitPin) rather than
-        // setStatus directly — no PIN stored yet, so this first entry
-        // becomes the stored PIN (Design Notes).
-        for (final digit in '1234'.split('')) {
-          await tester.tap(find.text(digit));
-          await tester.pump();
-        }
-        await tester.pump(const Duration(milliseconds: 350));
-        await tester.pumpAndSettle();
+          // Drive the real PinKeypad wiring (_submitPin) rather than
+          // setStatus directly — no PIN stored yet, so this first entry
+          // becomes the stored PIN (Design Notes).
+          for (final digit in '1234'.split('')) {
+            await tester.tap(find.text(digit));
+            await tester.pump();
+          }
+          await tester.pump(const Duration(milliseconds: 350));
+          await tester.pumpAndSettle();
 
-        expect(find.byType(ChatScreen), findsOneWidget);
-        expect(find.byType(VaultLockScreen), findsNothing);
-      },
-    );
-  });
+          expect(find.byType(ChatScreen), findsOneWidget);
+          expect(find.byType(VaultLockScreen), findsNothing);
+        },
+      );
+    },
+  );
 
   group('Story 2.4 — AccountSettingsRepository feeds VaultLockScreen through '
       'the real composition root', () {
@@ -787,41 +772,38 @@ void main() {
       },
     );
 
-    testWidgets(
-      'a boot fetch failure leaves currentBiometricEnabled unchanged '
-      '(default true) -> VaultLockScreen still attempts biometric first, '
-      'same as pre-2.4 behavior',
-      (tester) async {
-        final fakeVaultRepository = _FakeVaultRepository(
-          initialStatus: VaultStatus.locked,
-        );
-        addTearDown(fakeVaultRepository.dispose);
-        sl.unregister<VaultRepository>();
-        sl.registerLazySingleton<VaultRepository>(() => fakeVaultRepository);
+    testWidgets('a boot fetch failure leaves currentBiometricEnabled unchanged '
+        '(default true) -> VaultLockScreen still attempts biometric first, '
+        'same as pre-2.4 behavior', (tester) async {
+      final fakeVaultRepository = _FakeVaultRepository(
+        initialStatus: VaultStatus.locked,
+      );
+      addTearDown(fakeVaultRepository.dispose);
+      sl.unregister<VaultRepository>();
+      sl.registerLazySingleton<VaultRepository>(() => fakeVaultRepository);
 
-        final fakeAccountSettingsRepository = _FakeAccountSettingsRepository()
-          ..fetchBiometricEnabledSucceeds = false;
-        addTearDown(fakeAccountSettingsRepository.dispose);
-        sl.unregister<AccountSettingsRepository>();
-        sl.registerLazySingleton<AccountSettingsRepository>(
-          () => fakeAccountSettingsRepository,
-        );
+      final fakeAccountSettingsRepository = _FakeAccountSettingsRepository()
+        ..fetchBiometricEnabledSucceeds = false;
+      addTearDown(fakeAccountSettingsRepository.dispose);
+      sl.unregister<AccountSettingsRepository>();
+      sl.registerLazySingleton<AccountSettingsRepository>(
+        () => fakeAccountSettingsRepository,
+      );
 
-        await tester.pumpWidget(const CerneApp());
-        await tester.pumpAndSettle();
+      await tester.pumpWidget(const CerneApp());
+      await tester.pumpAndSettle();
 
-        // The fake's own `authenticateSucceeds` default is `false`, so a
-        // biometric attempt was made and declined -> PIN keypad with the
-        // biometric-failure band. Had `attemptBiometricFirst` wrongly been
-        // `false` here, no such attempt would ever happen and this band
-        // would never appear.
-        expect(find.byType(VaultLockScreen), findsOneWidget);
-        expect(
-          find.text('Não foi possível reconhecer — digite seu PIN'),
-          findsOneWidget,
-        );
-        expect(fakeAccountSettingsRepository.currentBiometricEnabled, isTrue);
-      },
-    );
+      // The fake's own `authenticateSucceeds` default is `false`, so a
+      // biometric attempt was made and declined -> PIN keypad with the
+      // biometric-failure band. Had `attemptBiometricFirst` wrongly been
+      // `false` here, no such attempt would ever happen and this band
+      // would never appear.
+      expect(find.byType(VaultLockScreen), findsOneWidget);
+      expect(
+        find.text('Não foi possível reconhecer — digite seu PIN'),
+        findsOneWidget,
+      );
+      expect(fakeAccountSettingsRepository.currentBiometricEnabled, isTrue);
+    });
   });
 }

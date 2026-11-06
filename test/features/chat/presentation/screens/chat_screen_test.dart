@@ -23,6 +23,7 @@ import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_state.dart';
 import 'package:cerne/features/chat/presentation/screens/chat_screen.dart';
+import 'package:cerne/features/chat/presentation/widgets/chat_bubble.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
@@ -152,14 +153,16 @@ class _UnusedMicRecorder implements MicRecorder {
       throw UnimplementedError('not expected to be called');
 
   @override
-  Future<void> start() async => throw UnimplementedError('not expected to be called');
+  Future<void> start() async =>
+      throw UnimplementedError('not expected to be called');
 
   @override
   Future<MicRecording?> stop() async =>
       throw UnimplementedError('not expected to be called');
 
   @override
-  Future<void> cancel() async => throw UnimplementedError('not expected to be called');
+  Future<void> cancel() async =>
+      throw UnimplementedError('not expected to be called');
 
   @override
   Stream<double> get amplitudeStream => const Stream.empty();
@@ -230,21 +233,20 @@ void main() {
     return cubit;
   }
 
-  testWidgets(
-    'dark-green header shows "Cerne"; ☰ opens AppDrawer',
-    (tester) async {
-      await pumpScreen(tester, _FakeChatRepository());
-      await tester.pumpAndSettle();
+  testWidgets('dark-green header shows "Cerne"; ☰ opens AppDrawer', (
+    tester,
+  ) async {
+    await pumpScreen(tester, _FakeChatRepository());
+    await tester.pumpAndSettle();
 
-      expect(find.text('Cerne'), findsOneWidget);
-      expect(find.byType(AppDrawer), findsNothing);
+    expect(find.text('Cerne'), findsOneWidget);
+    expect(find.byType(AppDrawer), findsNothing);
 
-      await tester.tap(find.byIcon(Icons.menu));
-      await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
 
-      expect(find.byType(AppDrawer), findsOneWidget);
-    },
-  );
+    expect(find.byType(AppDrawer), findsOneWidget);
+  });
 
   testWidgets(
     'settles on the composer enabled once bootstrap resolves (the loading '
@@ -301,146 +303,138 @@ void main() {
     },
   );
 
-  testWidgets(
-    'the composer disables while an AI bubble is streaming',
-    (tester) async {
-      final repository = _FakeChatRepository();
-      await pumpScreen(tester, repository);
-      await tester.pumpAndSettle();
+  testWidgets('the composer disables while an AI bubble is streaming', (
+    tester,
+  ) async {
+    final repository = _FakeChatRepository();
+    await pumpScreen(tester, repository);
+    await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextField), 'oi');
-      await tester.tap(find.byIcon(Icons.send_outlined));
-      await tester.pump();
+    await tester.enterText(find.byType(TextField), 'oi');
+    await tester.tap(find.byIcon(Icons.send_outlined));
+    await tester.pump();
 
-      final textField = tester.widget<TextField>(find.byType(TextField));
-      expect(textField.enabled, isFalse);
+    final textField = tester.widget<TextField>(find.byType(TextField));
+    expect(textField.enabled, isFalse);
 
-      repository.lastSendController?.add(right(const ChatDoneEvent()));
-      await repository.lastSendController?.close();
-      await tester.pumpAndSettle();
+    repository.lastSendController?.add(right(const ChatDoneEvent()));
+    await repository.lastSendController?.close();
+    await tester.pumpAndSettle();
 
-      final reEnabledField = tester.widget<TextField>(find.byType(TextField));
-      expect(reEnabledField.enabled, isTrue);
-    },
-  );
+    final reEnabledField = tester.widget<TextField>(find.byType(TextField));
+    expect(reEnabledField.enabled, isTrue);
+  });
 
-  testWidgets(
-    'the "+" control opens the Insertion Modal on Texto',
-    (tester) async {
-      await pumpScreen(tester, _FakeChatRepository());
-      await tester.pumpAndSettle();
+  testWidgets('the "+" control opens the Insertion Modal on Texto', (
+    tester,
+  ) async {
+    await pumpScreen(tester, _FakeChatRepository());
+    await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.add));
-      await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
 
-      expect(find.text('Texto'), findsOneWidget);
-      expect(find.text('Áudio'), findsOneWidget);
-      expect(find.text('Foto'), findsOneWidget);
-    },
-  );
+    expect(find.text('Texto'), findsOneWidget);
+    expect(find.text('Áudio'), findsOneWidget);
+    expect(find.text('Foto'), findsOneWidget);
+  });
 
-  testWidgets(
-    'review finding: a real ChatScreen focuses the composer once '
-    'ChatCubit.startNewSession() lands on a new, empty session (AC2 — '
-    '"it opens empty, composer focused")',
-    (tester) async {
-      // A non-empty bootstrap history (the guard this screen's own
-      // listener actually uses is `state.messages.isEmpty`, not "brand
-      // new session" — Design Notes) so the initial load does *not*
-      // itself focus the composer, isolating `startNewSession()`'s own
-      // empty-session landing as the thing under test.
-      final repository = _FakeChatRepository()
-        ..listMessagesResult = right([
-          const ChatMessage(
-            id: 'm0',
-            sessionId: 's1',
-            role: ChatMessageRole.user,
-            content: 'oi',
-            seq: 0,
-            status: ChatMessageStatus.complete,
-            retryCount: 0,
-            createdAt: '2026-01-01T00:00:00Z',
-          ),
-        ]);
-      final cubit = await pumpScreen(tester, repository);
-      await tester.pumpAndSettle();
-
-      var textField = tester.widget<TextField>(find.byType(TextField));
-      expect(textField.focusNode!.hasFocus, isFalse);
-
-      repository.createSessionResult = right(
-        const ChatSession(
-          id: 's2',
-          title: '',
-          persona: ChatPersona.analitico,
-          userMessageCount: 0,
-          lastUserMessageAt: null,
-          createdAt: '2026-01-02T00:00:00Z',
-          updatedAt: '2026-01-02T00:00:00Z',
-        ),
-      );
-
-      final result = await cubit.startNewSession();
-      await tester.pumpAndSettle();
-
-      expect(result.isRight(), isTrue);
-      expect((cubit.state as ChatReady).sessionId, 's2');
-      textField = tester.widget<TextField>(find.byType(TextField));
-      expect(textField.focusNode!.hasFocus, isTrue);
-    },
-  );
-
-  testWidgets(
-    'review finding: a real ChatScreen restores the scroll offset it '
-    'was left at when switching back to a session, instead of jumping '
-    'to the bottom (AC4)',
-    (tester) async {
-      final manyMessages = List.generate(
-        30,
-        (i) => ChatMessage(
-          id: 'm$i',
+  testWidgets('review finding: a real ChatScreen focuses the composer once '
+      'ChatCubit.startNewSession() lands on a new, empty session (AC2 — '
+      '"it opens empty, composer focused")', (tester) async {
+    // A non-empty bootstrap history (the guard this screen's own
+    // listener actually uses is `state.messages.isEmpty`, not "brand
+    // new session" — Design Notes) so the initial load does *not*
+    // itself focus the composer, isolating `startNewSession()`'s own
+    // empty-session landing as the thing under test.
+    final repository = _FakeChatRepository()
+      ..listMessagesResult = right([
+        const ChatMessage(
+          id: 'm0',
           sessionId: 's1',
           role: ChatMessageRole.user,
-          content:
-              'mensagem numero $i, bem mais longa para garantir altura '
-              'suficiente e permitir rolagem dentro da lista de mensagens',
-          seq: i,
+          content: 'oi',
+          seq: 0,
           status: ChatMessageStatus.complete,
           retryCount: 0,
           createdAt: '2026-01-01T00:00:00Z',
         ),
-      );
-      final repository = _FakeChatRepository()
-        ..listMessagesResult = right(manyMessages);
-      final cubit = await pumpScreen(tester, repository);
-      await tester.pumpAndSettle();
+      ]);
+    final cubit = await pumpScreen(tester, repository);
+    await tester.pumpAndSettle();
 
-      ScrollController controller() =>
-          tester.widget<ListView>(find.byType(ListView)).controller!;
+    var textField = tester.widget<TextField>(find.byType(TextField));
+    expect(textField.focusNode!.hasFocus, isFalse);
 
-      // Bootstrap jumps to the bottom by default (`_scrollToBottomSoon`)
-      // — drag up so this session is left scrolled somewhere in the
-      // middle instead, the scenario AC4 actually describes.
-      await tester.drag(find.byType(ListView), const Offset(0, 300));
-      await tester.pumpAndSettle();
+    repository.createSessionResult = right(
+      const ChatSession(
+        id: 's2',
+        title: '',
+        persona: ChatPersona.analitico,
+        userMessageCount: 0,
+        lastUserMessageAt: null,
+        createdAt: '2026-01-02T00:00:00Z',
+        updatedAt: '2026-01-02T00:00:00Z',
+      ),
+    );
 
-      final recordedOffset = controller().position.pixels;
-      expect(recordedOffset, greaterThan(0));
+    final result = await cubit.startNewSession();
+    await tester.pumpAndSettle();
 
-      // Switch away to a different, empty session.
-      repository.listMessagesResult = right(const []);
-      await cubit.switchSession('s2');
-      await tester.pumpAndSettle();
+    expect(result.isRight(), isTrue);
+    expect((cubit.state as ChatReady).sessionId, 's2');
+    textField = tester.widget<TextField>(find.byType(TextField));
+    expect(textField.focusNode!.hasFocus, isTrue);
+  });
 
-      // ... and back, with the same history (and therefore the same
-      // scrollable extent) restored.
-      repository.listMessagesResult = right(manyMessages);
-      await cubit.switchSession('s1');
-      await tester.pumpAndSettle();
+  testWidgets('review finding: a real ChatScreen restores the scroll offset it '
+      'was left at when switching back to a session, instead of jumping '
+      'to the bottom (AC4)', (tester) async {
+    final manyMessages = List.generate(
+      30,
+      (i) => ChatMessage(
+        id: 'm$i',
+        sessionId: 's1',
+        role: ChatMessageRole.user,
+        content:
+            'mensagem numero $i, bem mais longa para garantir altura '
+            'suficiente e permitir rolagem dentro da lista de mensagens',
+        seq: i,
+        status: ChatMessageStatus.complete,
+        retryCount: 0,
+        createdAt: '2026-01-01T00:00:00Z',
+      ),
+    );
+    final repository = _FakeChatRepository()
+      ..listMessagesResult = right(manyMessages);
+    final cubit = await pumpScreen(tester, repository);
+    await tester.pumpAndSettle();
 
-      expect(controller().position.pixels, closeTo(recordedOffset, 1.0));
-    },
-  );
+    ScrollController controller() =>
+        tester.widget<ListView>(find.byType(ListView)).controller!;
+
+    // Bootstrap jumps to the bottom by default (`_scrollToBottomSoon`)
+    // — drag up so this session is left scrolled somewhere in the
+    // middle instead, the scenario AC4 actually describes.
+    await tester.drag(find.byType(ListView), const Offset(0, 300));
+    await tester.pumpAndSettle();
+
+    final recordedOffset = controller().position.pixels;
+    expect(recordedOffset, greaterThan(0));
+
+    // Switch away to a different, empty session.
+    repository.listMessagesResult = right(const []);
+    await cubit.switchSession('s2');
+    await tester.pumpAndSettle();
+
+    // ... and back, with the same history (and therefore the same
+    // scrollable extent) restored.
+    repository.listMessagesResult = right(manyMessages);
+    await cubit.switchSession('s1');
+    await tester.pumpAndSettle();
+
+    expect(controller().position.pixels, closeTo(recordedOffset, 1.0));
+  });
 
   group('spec-6-3 — offline composer lock + banner', () {
     testWidgets(
@@ -479,52 +473,45 @@ void main() {
         expect(textField.enabled, isFalse);
         // The "+" stays tappable (Boundaries: never disabled offline).
         expect(
-          tester.widget<IconButton>(
-            find.ancestor(
-              of: find.byIcon(Icons.add),
-              matching: find.byType(IconButton),
-            ),
-          ).onPressed,
+          tester
+              .widget<IconButton>(
+                find.ancestor(
+                  of: find.byIcon(Icons.add),
+                  matching: find.byType(IconButton),
+                ),
+              )
+              .onPressed,
           isNotNull,
         );
       },
     );
 
-    testWidgets(
-      'I/O matrix "Comes back online": the banner disappears and the '
-      'composer re-enables automatically',
-      (tester) async {
-        final watcher = FakeConnectivityWatcher();
-        await pumpScreen(
-          tester,
-          _FakeChatRepository(),
-          connectivityWatcher: watcher,
-        );
-        await tester.pumpAndSettle();
+    testWidgets('I/O matrix "Comes back online": the banner disappears and the '
+        'composer re-enables automatically', (tester) async {
+      final watcher = FakeConnectivityWatcher();
+      await pumpScreen(
+        tester,
+        _FakeChatRepository(),
+        connectivityWatcher: watcher,
+      );
+      await tester.pumpAndSettle();
 
-        watcher.emit(false);
-        await tester.pumpAndSettle();
-        expect(
-          tester.widget<TextField>(find.byType(TextField)).enabled,
-          isFalse,
-        );
+      watcher.emit(false);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(find.byType(TextField)).enabled, isFalse);
 
-        watcher.emit(true);
-        await tester.pumpAndSettle();
+      watcher.emit(true);
+      await tester.pumpAndSettle();
 
-        expect(
-          find.text(
-            'Sem conexão — histórico disponível, novas mensagens '
-            'bloqueadas',
-          ),
-          findsNothing,
-        );
-        expect(
-          tester.widget<TextField>(find.byType(TextField)).enabled,
-          isTrue,
-        );
-      },
-    );
+      expect(
+        find.text(
+          'Sem conexão — histórico disponível, novas mensagens '
+          'bloqueadas',
+        ),
+        findsNothing,
+      );
+      expect(tester.widget<TextField>(find.byType(TextField)).enabled, isTrue);
+    });
   });
 
   testWidgets(
@@ -575,78 +562,75 @@ void main() {
     },
   );
 
-  testWidgets(
-    'spec-6-3 — I/O matrix "Tap retry, normal": tapping a failed AI '
-    'bubble\'s retry copy, when the preceding user message already has a '
-    'serverId (message_created arrived before the drop), calls '
-    'chat-messages-retry — never the sendMessage fallback — and resolves '
-    'the same bubble in place',
-    (tester) async {
-      final repository = _FakeChatRepository();
-      final cubit = await pumpScreen(tester, repository);
-      await tester.pumpAndSettle();
+  testWidgets('spec-6-3 — I/O matrix "Tap retry, normal": tapping a failed AI '
+      'bubble\'s retry copy, when the preceding user message already has a '
+      'serverId (message_created arrived before the drop), calls '
+      'chat-messages-retry — never the sendMessage fallback — and resolves '
+      'the same bubble in place', (tester) async {
+    final repository = _FakeChatRepository();
+    final cubit = await pumpScreen(tester, repository);
+    await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextField), 'oi');
-      await tester.tap(find.byIcon(Icons.send_outlined));
-      await tester.pump();
+    await tester.enterText(find.byType(TextField), 'oi');
+    await tester.tap(find.byIcon(Icons.send_outlined));
+    await tester.pump();
 
-      // message_created arrives (capturing the user bubble's own
-      // serverId) before the stream drops mid-response.
-      repository.lastSendController?.add(
-        right(const ChatMessageCreatedEvent('srv-user-1')),
-      );
-      repository.lastSendController?.add(
-        right(const ChatTokenEvent('resposta parcial')),
-      );
-      repository.lastSendController?.add(
-        left(const Failure.networkTimeout(message: 'drop')),
-      );
-      await repository.lastSendController?.close();
-      await tester.pumpAndSettle();
+    // message_created arrives (capturing the user bubble's own
+    // serverId) before the stream drops mid-response.
+    repository.lastSendController?.add(
+      right(const ChatMessageCreatedEvent('srv-user-1')),
+    );
+    repository.lastSendController?.add(
+      right(const ChatTokenEvent('resposta parcial')),
+    );
+    repository.lastSendController?.add(
+      left(const Failure.networkTimeout(message: 'drop')),
+    );
+    await repository.lastSendController?.close();
+    await tester.pumpAndSettle();
 
-      final ready = cubit.state as ChatReady;
-      expect(ready.messages[0].serverId, 'srv-user-1');
-      final failedAiId = ready.messages[1].id;
-      expect(
-        find.text('Falha ao gerar resposta — toque para tentar novamente'),
-        findsOneWidget,
-      );
+    final ready = cubit.state as ChatReady;
+    expect(ready.messages[0].serverId, 'srv-user-1');
+    final failedAiId = ready.messages[1].id;
+    expect(
+      find.text('Falha ao gerar resposta — toque para tentar novamente'),
+      findsOneWidget,
+    );
 
-      await tester.tap(
-        find.text('Falha ao gerar resposta — toque para tentar novamente'),
-      );
-      await tester.pump();
+    await tester.tap(
+      find.text('Falha ao gerar resposta — toque para tentar novamente'),
+    );
+    await tester.pump();
 
-      // chat-messages-retry was called, keyed by the preceding user
-      // message's serverId — never a full sendMessage resend.
-      expect(repository.retryMessageCalls, ['srv-user-1']);
-      expect(repository.sendMessageCalls, ['oi']);
+    // chat-messages-retry was called, keyed by the preceding user
+    // message's serverId — never a full sendMessage resend.
+    expect(repository.retryMessageCalls, ['srv-user-1']);
+    expect(repository.sendMessageCalls, ['oi']);
 
-      // The same bubble (id unchanged) reset to streaming/empty, then
-      // filled via the retry's own stream.
-      var afterTap = cubit.state as ChatReady;
-      expect(afterTap.messages[1].id, failedAiId);
-      expect(afterTap.messages[1].content, '');
-      expect(afterTap.messages[1].status, ChatMessageStatus.streaming);
+    // The same bubble (id unchanged) reset to streaming/empty, then
+    // filled via the retry's own stream.
+    var afterTap = cubit.state as ChatReady;
+    expect(afterTap.messages[1].id, failedAiId);
+    expect(afterTap.messages[1].content, '');
+    expect(afterTap.messages[1].status, ChatMessageStatus.streaming);
 
-      repository.lastRetryController?.add(
-        right(const ChatTokenEvent('nova resposta')),
-      );
-      await tester.pump();
-      afterTap = cubit.state as ChatReady;
-      expect(afterTap.messages[1].content, 'nova resposta');
+    repository.lastRetryController?.add(
+      right(const ChatTokenEvent('nova resposta')),
+    );
+    await tester.pump();
+    afterTap = cubit.state as ChatReady;
+    expect(afterTap.messages[1].content, 'nova resposta');
 
-      repository.lastRetryController?.add(right(const ChatDoneEvent()));
-      await repository.lastRetryController?.close();
-      await tester.pumpAndSettle();
+    repository.lastRetryController?.add(right(const ChatDoneEvent()));
+    await repository.lastRetryController?.close();
+    await tester.pumpAndSettle();
 
-      final finalState = cubit.state as ChatReady;
-      expect(finalState.messages, hasLength(2));
-      expect(finalState.messages[1].id, failedAiId);
-      expect(finalState.messages[1].content, 'nova resposta');
-      expect(finalState.messages[1].status, ChatMessageStatus.complete);
-    },
-  );
+    final finalState = cubit.state as ChatReady;
+    expect(finalState.messages, hasLength(2));
+    expect(finalState.messages[1].id, failedAiId);
+    expect(finalState.messages[1].content, 'nova resposta');
+    expect(finalState.messages[1].status, ChatMessageStatus.complete);
+  });
 
   testWidgets(
     'spec-6-3 review finding: a rapid double-tap on the retry copy before '
@@ -725,7 +709,14 @@ void main() {
 
       expect((cubit.state as ChatReady).messages[0].serverId, 'srv-user-1');
 
-      await tester.tap(find.byIcon(Icons.bookmark_border));
+      // Scoped to the bubble itself — a global find.byIcon would start
+      // matching an unrelated bookmark/check icon elsewhere on screen if
+      // one is ever added (review finding).
+      final bubbleBookmarkIcon = find.descendant(
+        of: find.byType(ChatBubble),
+        matching: find.byIcon(Icons.bookmark_border),
+      );
+      await tester.tap(bubbleBookmarkIcon);
       await tester.pumpAndSettle();
 
       expect(fakeUseCase.calls, [
@@ -733,7 +724,13 @@ void main() {
       ]);
       final ready = cubit.state as ChatReady;
       expect(ready.messages[0].bookmarkState, const BookmarkState.saved());
-      expect(find.byIcon(Icons.check), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(ChatBubble),
+          matching: find.byIcon(Icons.check),
+        ),
+        findsOneWidget,
+      );
     },
   );
 }

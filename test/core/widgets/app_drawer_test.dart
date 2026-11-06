@@ -13,10 +13,9 @@ import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
 import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_state.dart';
-import 'package:cerne/features/entries/domain/entities/entry.dart';
-import 'package:cerne/features/entries/domain/usecases/save_chat_message_as_entry_use_case.dart';
 
 import '../../support/fake_connectivity_watcher.dart';
+import '../../support/unused_save_chat_message_as_entry_use_case.dart';
 
 const _sessionA = ChatSession(
   id: 'session-a',
@@ -81,19 +80,6 @@ class _FakeChatRepository implements ChatRepository {
   ) => const Stream.empty();
 }
 
-/// spec-6-4 — a throwing fake: this drawer-focused suite never exercises
-/// the bookmark affordance itself (that's `chat_cubit_test.dart`'s/
-/// `chat_screen_test.dart`'s job), only `AppDrawer`'s own
-/// `switchSession`/`startNewSession` wiring.
-class _UnusedSaveChatMessageAsEntryUseCase
-    implements SaveChatMessageAsEntryUseCase {
-  @override
-  Future<Either<Failure, Entry>> call({
-    required String content,
-    required String chatMessageId,
-  }) async => throw UnimplementedError('not expected to be called');
-}
-
 /// Tiny standalone `GoRouter` — [AppDrawer] needs *some* router ancestor
 /// to resolve `context.go(...)`, and — since spec-6-2 — a `ChatCubit`
 /// ancestor too, provided here exactly the way `ChatScreen` provides it
@@ -149,7 +135,7 @@ void main() {
     cubit = ChatCubit(
       fakeRepository,
       fakeConnectivityWatcher,
-      _UnusedSaveChatMessageAsEntryUseCase(),
+      UnusedSaveChatMessageAsEntryUseCase(),
     );
     await cubit.init();
   });
@@ -172,20 +158,19 @@ void main() {
     },
   );
 
-  testWidgets(
-    'CONVERSAS section lists every bootstrapped session (title + '
-    'timestamp), with an empty title falling back to "Nova conversa"',
-    (tester) async {
-      final router = _buildTestRouter(cubit);
-      addTearDown(router.dispose);
-      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-      await _openDrawer(tester);
+  testWidgets('CONVERSAS section lists every bootstrapped session (title + '
+      'timestamp), with an empty title falling back to "Nova conversa"', (
+    tester,
+  ) async {
+    final router = _buildTestRouter(cubit);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await _openDrawer(tester);
 
-      expect(find.text('CONVERSAS'), findsOneWidget);
-      expect(find.text('Primeira conversa'), findsOneWidget);
-      expect(find.text('Nova conversa'), findsOneWidget);
-    },
-  );
+    expect(find.text('CONVERSAS'), findsOneWidget);
+    expect(find.text('Primeira conversa'), findsOneWidget);
+    expect(find.text('Nova conversa'), findsOneWidget);
+  });
 
   testWidgets(
     'review finding: a session with a malformed updatedAt never crashes '
@@ -208,7 +193,7 @@ void main() {
       final crashCubit = ChatCubit(
         crashFakeRepository,
         FakeConnectivityWatcher(),
-        _UnusedSaveChatMessageAsEntryUseCase(),
+        UnusedSaveChatMessageAsEntryUseCase(),
       );
       addTearDown(crashCubit.close);
       await crashCubit.init();
@@ -263,61 +248,55 @@ void main() {
     },
   );
 
-  testWidgets(
-    'tapping "Novo Chat" while online creates and switches to a new, '
-    'empty session, then closes the drawer',
-    (tester) async {
-      const created = ChatSession(
-        id: 'session-new',
-        title: '',
-        persona: ChatPersona.analitico,
-        userMessageCount: 0,
-        lastUserMessageAt: null,
-        createdAt: '2026-01-03T00:00:00Z',
-        updatedAt: '2026-01-03T00:00:00Z',
-      );
-      fakeRepository.createSessionResult = right(created);
+  testWidgets('tapping "Novo Chat" while online creates and switches to a new, '
+      'empty session, then closes the drawer', (tester) async {
+    const created = ChatSession(
+      id: 'session-new',
+      title: '',
+      persona: ChatPersona.analitico,
+      userMessageCount: 0,
+      lastUserMessageAt: null,
+      createdAt: '2026-01-03T00:00:00Z',
+      updatedAt: '2026-01-03T00:00:00Z',
+    );
+    fakeRepository.createSessionResult = right(created);
 
-      final router = _buildTestRouter(cubit);
-      addTearDown(router.dispose);
-      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-      await _openDrawer(tester);
+    final router = _buildTestRouter(cubit);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await _openDrawer(tester);
 
-      await tester.tap(find.text('Novo Chat'));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text('Novo Chat'));
+    await tester.pumpAndSettle();
 
-      expect(find.byType(AppDrawer), findsNothing);
-      expect(router.state.uri.toString(), '/');
-      final state = cubit.state as ChatReady;
-      expect(state.sessionId, 'session-new');
-      expect(state.messages, isEmpty);
-    },
-  );
+    expect(find.byType(AppDrawer), findsNothing);
+    expect(router.state.uri.toString(), '/');
+    final state = cubit.state as ChatReady;
+    expect(state.sessionId, 'session-new');
+    expect(state.messages, isEmpty);
+  });
 
-  testWidgets(
-    'tapping "Novo Chat" while offline leaves the current session '
-    'untouched, closes the drawer, and shows an error SnackBar (I/O '
-    'matrix: "New session offline")',
-    (tester) async {
-      fakeRepository.createSessionResult = left(
-        const Failure.networkOffline(message: 'Sem conexão'),
-      );
+  testWidgets('tapping "Novo Chat" while offline leaves the current session '
+      'untouched, closes the drawer, and shows an error SnackBar (I/O '
+      'matrix: "New session offline")', (tester) async {
+    fakeRepository.createSessionResult = left(
+      const Failure.networkOffline(message: 'Sem conexão'),
+    );
 
-      final router = _buildTestRouter(cubit);
-      addTearDown(router.dispose);
-      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-      await _openDrawer(tester);
+    final router = _buildTestRouter(cubit);
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await _openDrawer(tester);
 
-      final sessionIdBefore = (cubit.state as ChatReady).sessionId;
+    final sessionIdBefore = (cubit.state as ChatReady).sessionId;
 
-      await tester.tap(find.text('Novo Chat'));
-      await tester.pumpAndSettle();
+    await tester.tap(find.text('Novo Chat'));
+    await tester.pumpAndSettle();
 
-      expect(find.byType(AppDrawer), findsNothing);
-      expect((cubit.state as ChatReady).sessionId, sessionIdBefore);
-      expect(find.text('Sem conexão'), findsOneWidget);
-    },
-  );
+    expect(find.byType(AppDrawer), findsNothing);
+    expect((cubit.state as ChatReady).sessionId, sessionIdBefore);
+    expect(find.text('Sem conexão'), findsOneWidget);
+  });
 
   group('spec-6-3 — "Novo Chat" disables while ChatReady.isOffline', () {
     // Deliberately builds its own `ChatCubit`/`FakeConnectivityWatcher`
@@ -341,7 +320,7 @@ void main() {
       final localCubit = ChatCubit(
         repository,
         watcher,
-        _UnusedSaveChatMessageAsEntryUseCase(),
+        UnusedSaveChatMessageAsEntryUseCase(),
       );
       await localCubit.init();
       addTearDown(localCubit.close);
@@ -362,29 +341,26 @@ void main() {
       find.ancestor(of: find.text('Novo Chat'), matching: find.byType(Opacity)),
     );
 
-    testWidgets(
-      '"Novo Chat" disables (dimmed, no tap handler) once the '
-      'ConnectivityWatcher reports offline',
-      (tester) async {
-        final booted = await boot(tester);
-        expect(novoChatOpacity(tester).opacity, 1);
+    testWidgets('"Novo Chat" disables (dimmed, no tap handler) once the '
+        'ConnectivityWatcher reports offline', (tester) async {
+      final booted = await boot(tester);
+      expect(novoChatOpacity(tester).opacity, 1);
 
-        booted.watcher.emit(false);
-        await tester.pumpAndSettle();
+      booted.watcher.emit(false);
+      await tester.pumpAndSettle();
 
-        expect(novoChatOpacity(tester).opacity, lessThan(1));
-        expect(novoChatInkWell(tester).onTap, isNull);
+      expect(novoChatOpacity(tester).opacity, lessThan(1));
+      expect(novoChatInkWell(tester).onTap, isNull);
 
-        // Tapping it while disabled does nothing — never reaches
-        // ChatCubit.startNewSession() at all.
-        final sessionIdBefore = (booted.cubit.state as ChatReady).sessionId;
-        await tester.tap(find.text('Novo Chat'));
-        await tester.pumpAndSettle();
+      // Tapping it while disabled does nothing — never reaches
+      // ChatCubit.startNewSession() at all.
+      final sessionIdBefore = (booted.cubit.state as ChatReady).sessionId;
+      await tester.tap(find.text('Novo Chat'));
+      await tester.pumpAndSettle();
 
-        expect(find.byType(AppDrawer), findsOneWidget);
-        expect((booted.cubit.state as ChatReady).sessionId, sessionIdBefore);
-      },
-    );
+      expect(find.byType(AppDrawer), findsOneWidget);
+      expect((booted.cubit.state as ChatReady).sessionId, sessionIdBefore);
+    });
 
     testWidgets(
       '"Novo Chat" re-enables automatically once connectivity returns',
@@ -420,19 +396,20 @@ void main() {
     },
   );
 
-  testWidgets('tapping "Planos de Ação" closes the drawer and navigates there', (
-    tester,
-  ) async {
-    final router = _buildTestRouter(cubit);
-    addTearDown(router.dispose);
-    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
-    await _openDrawer(tester);
+  testWidgets(
+    'tapping "Planos de Ação" closes the drawer and navigates there',
+    (tester) async {
+      final router = _buildTestRouter(cubit);
+      addTearDown(router.dispose);
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+      await _openDrawer(tester);
 
-    await tester.tap(find.text('Planos de Ação'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.text('Planos de Ação'));
+      await tester.pumpAndSettle();
 
-    expect(router.state.uri.toString(), '/planos-de-acao');
-  });
+      expect(router.state.uri.toString(), '/planos-de-acao');
+    },
+  );
 
   testWidgets('tapping "Configurações" closes the drawer and navigates there', (
     tester,

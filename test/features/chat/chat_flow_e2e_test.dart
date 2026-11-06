@@ -10,6 +10,7 @@ import 'package:path_provider_platform_interface/path_provider_platform_interfac
 import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/network/access_token_provider.dart';
 import 'package:cerne/core/network/url_builder.dart';
+import 'package:cerne/features/chat/domain/entities/bookmark_state.dart';
 import 'package:cerne/features/chat/domain/entities/chat_message.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_state.dart';
@@ -91,6 +92,23 @@ Map<String, dynamic> _sessionJson({required String id, required String updatedAt
   'lastUserMessageAt': null,
   'createdAt': updatedAt,
   'updatedAt': updatedAt,
+};
+
+/// `entries-create`'s own response `data` shape (`EntryDto.fromJson`) —
+/// mirrors `entries_remote_data_source_test.dart`'s own fixture, extended
+/// with a non-null [chatMessageId] (spec-6-4's own `source: chat` entries).
+Map<String, dynamic> _entryJson({
+  required String id,
+  required String chatMessageId,
+}) => {
+  'id': id,
+  'content': 'Como você está?',
+  'source': 'chat',
+  'chatMessageId': chatMessageId,
+  'occurredAt': '2026-01-01T00:00:00Z',
+  'serverRevision': 1,
+  'createdAt': '2026-01-01T00:00:00Z',
+  'updatedAt': '2026-01-01T00:00:00Z',
 };
 
 /// End-to-end coverage for spec-6-1's chat flow, driven through the real
@@ -524,6 +542,116 @@ void main() {
 
       await emitConnectivity(['wifi']);
       expect((cubit.state as ChatReady).isOffline, isFalse);
+    },
+  );
+
+  test(
+    'spec-6-4: bookmarkMessage() on a user bubble drives a genuine POST '
+    'to entries-create through the real SaveChatMessageAsEntryUseCase -> '
+    'EntriesRepositoryImpl -> ApiClient pipeline, flips that bubble to '
+    'BookmarkSaved, and persists the new Entry to the real `entries` Hive '
+    'box -- none of the mocked chat_cubit_test.dart/chat_screen_test.dart '
+    'coverage drives this cross-feature call through real production '
+    'wiring',
+    () async {
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+      adapter.queueJsonResponse(200, {
+        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+      });
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+      adapter.queueSseResponse([
+        'event: message_created\ndata: {"id":"srv-msg-1"}\n\n'
+            'event: token\ndata: {"delta":"Entendo."}\n\n'
+            'event: done\ndata: {}\n\n',
+      ]);
+
+      final cubit = sl<ChatCubit>();
+      await cubit.init();
+      await cubit.sendMessage('Como você está?');
+
+      var state = cubit.state as ChatReady;
+      final userMessage = state.messages[0];
+      expect(userMessage.role, ChatMessageRole.user);
+      expect(userMessage.serverId, 'srv-msg-1');
+      expect(userMessage.bookmarkState, const BookmarkState.idle());
+
+      adapter.queueJsonResponse(
+        200,
+        {'data': _entryJson(id: 'entry-1', chatMessageId: 'srv-msg-1')},
+      );
+
+      await cubit.bookmarkMessage(userMessage.id);
+
+      state = cubit.state as ChatReady;
+      expect(state.messages[0].bookmarkState, const BookmarkState.saved());
+      // Rest of the session stays untouched by the bookmark save.
+      expect(state.isSending, isFalse);
+      expect(state.messages[1].content, 'Entendo.');
+
+      final createRequest = adapter.requests.last;
+      expect(
+        createRequest.path,
+        sl<UrlBuilder>().build('entries-create'),
+      );
+      expect(createRequest.data, {
+        'content': 'Como você está?',
+        'source': 'chat',
+        'chatMessageId': 'srv-msg-1',
+      });
+      expect(
+        createRequest.headers['Authorization'],
+        'Bearer e2e-test-access-token',
+      );
+
+      // The real write-through happened against the real `entries` Hive
+      // box (`EntriesRepositoryImpl.create()`'s own persist-then-return
+      // step) -- proves the use case really reached the entries feature's
+      // own repository, not a fake standing in for it.
+      final entriesBox = sl<Box<Map>>();
+      expect(entriesBox.get('entry-1'), isNotNull);
+
+      // I/O matrix: "Already saved" -- tapping a BookmarkSaved bubble
+      // again is a client-side no-op, no second entries-create call.
+      await cubit.bookmarkMessage(userMessage.id);
+      expect(adapter.requests, hasLength(5));
+    },
+  );
+
+  test(
+    'spec-6-4: a failing entries-create flips only the tapped bubble to '
+    'BookmarkError, leaving the rest of the Chat Session (composer, other '
+    'bubbles) fully usable -- the save never propagates past '
+    'bookmarkMessage()',
+    () async {
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+      adapter.queueJsonResponse(200, {
+        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+      });
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+      adapter.queueSseResponse([
+        'event: message_created\ndata: {"id":"srv-msg-1"}\n\n'
+            'event: token\ndata: {"delta":"Entendo."}\n\n'
+            'event: done\ndata: {}\n\n',
+      ]);
+
+      final cubit = sl<ChatCubit>();
+      await cubit.init();
+      await cubit.sendMessage('Como você está?');
+
+      final userMessage = (cubit.state as ChatReady).messages[0];
+
+      adapter.queueErrorResponse('INTERNAL_ERROR', 'Falha ao salvar.');
+
+      await cubit.bookmarkMessage(userMessage.id);
+
+      final state = cubit.state as ChatReady;
+      expect(state.messages[0].bookmarkState, isA<BookmarkError>());
+      // The session itself is untouched: still ChatReady, composer
+      // re-enabled, the unrelated AI bubble unaffected.
+      expect(state.isSending, isFalse);
+      expect(state.isOffline, isFalse);
+      expect(state.messages[1].content, 'Entendo.');
+      expect(state.messages[1].status, ChatMessageStatus.complete);
     },
   );
 }

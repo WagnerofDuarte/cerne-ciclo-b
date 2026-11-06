@@ -105,6 +105,18 @@ class ChatCubit extends Cubit<ChatState> {
   /// unrelated `copyWith` call just to avoid losing it.
   final Map<String, double> _scrollOffsets = {};
 
+  /// Review fix (round 2) — [bookmarkMessage]'s own save outcome, keyed
+  /// by the message's `serverId` (never the in-session [ChatUiMessage.id],
+  /// which is only a local id until the server confirms it, Design Notes)
+  /// so a save that resolves *after* the user has switched/started a
+  /// session — [switchSession]/[startNewSession] replace [ChatReady.
+  /// messages] wholesale and never cancel a bookmark save in flight,
+  /// unlike [_cancelInFlightSend] for send/retry — is never silently
+  /// dropped. [_fromDomain] applies it when a session's history is
+  /// (re)loaded; same in-memory-only, never-persisted-across-restarts
+  /// lifetime as [_scrollOffsets] above (Boundaries).
+  final Map<String, BookmarkState> _bookmarkStateByServerId = {};
+
   /// Boundaries: "On opening Home/Chat, silently ensure one Chat Session
   /// exists (reuse the most recent from `chat-sessions-list`, else
   /// `chat-sessions-create` with no title)". A no-op once already
@@ -313,6 +325,12 @@ class ChatCubit extends Cubit<ChatState> {
     // off the *user* message immediately preceding a `failed` AI bubble.
     serverId: message.id,
     createdAt: message.createdAt,
+    // Review fix (round 2) — re-applies a bookmark save's outcome that
+    // resolved while this message wasn't part of the live `ChatReady`
+    // (session switched away mid-save); `idle` default when nothing was
+    // ever recorded for this `serverId`.
+    bookmarkState:
+        _bookmarkStateByServerId[message.id] ?? const BookmarkState.idle(),
   );
 
   /// Boundaries: optimistic user bubble, then subscribes to
@@ -641,6 +659,7 @@ class ChatCubit extends Cubit<ChatState> {
     if (isClosed) {
       return;
     }
+    _bookmarkStateByServerId[serverId] = const BookmarkState.saving();
     emit(
       current.copyWith(
         messages: [
@@ -670,6 +689,17 @@ class ChatCubit extends Cubit<ChatState> {
       (inner) => inner,
     );
 
+    final resolvedState = result.match(
+      (failure) => BookmarkState.error(failure),
+      (_) => const BookmarkState.saved(),
+    );
+    // Review fix (round 2) — written through to the serverId-keyed map
+    // unconditionally (even if the live [ChatReady] below has since moved
+    // on to a different session), so the outcome is never lost; re-
+    // entering any session carrying this message picks it back up via
+    // [_fromDomain].
+    _bookmarkStateByServerId[serverId] = resolvedState;
+
     if (isClosed) {
       return;
     }
@@ -677,17 +707,23 @@ class ChatCubit extends Cubit<ChatState> {
     if (latest is! ChatReady) {
       return;
     }
+    // Matched by `serverId`, not the in-session `messageId` — the latter
+    // is stale once [switchSession]/[startNewSession] reloads this exact
+    // session's history mid-save, which re-derives every message's own
+    // `id` from the server (`_fromDomain`) instead of keeping the local
+    // id this call started with.
+    final stillVisible = latest.messages.any(
+      (existing) => existing.serverId == serverId,
+    );
+    if (!stillVisible) {
+      return;
+    }
     emit(
       latest.copyWith(
         messages: [
           for (final existing in latest.messages)
-            if (existing.id == messageId)
-              existing.copyWith(
-                bookmarkState: result.match(
-                  (failure) => BookmarkState.error(failure),
-                  (_) => const BookmarkState.saved(),
-                ),
-              )
+            if (existing.serverId == serverId)
+              existing.copyWith(bookmarkState: resolvedState)
             else
               existing,
         ],

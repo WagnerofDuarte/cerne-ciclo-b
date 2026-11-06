@@ -29,7 +29,6 @@ import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
-import 'package:cerne/features/entries/domain/usecases/save_chat_message_as_entry_use_case.dart';
 import 'package:cerne/features/entries/presentation/cubit/entries_search_cubit.dart';
 import 'package:cerne/features/entries/presentation/cubit/entry_detail_cubit.dart';
 import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
@@ -40,6 +39,7 @@ import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 import 'package:cerne/features/vault/presentation/screens/vault_lock_screen.dart';
 
 import '../../support/fake_connectivity_watcher.dart';
+import '../../support/unused_save_chat_message_as_entry_use_case.dart';
 
 class MockAuthRepository extends Mock implements AuthRepository {}
 
@@ -163,19 +163,6 @@ class _FakeChatRepository implements ChatRepository {
     String sessionId,
     String userMessageId,
   ) => const Stream.empty();
-}
-
-/// spec-6-4 — a throwing fake: this router-focused suite never exercises
-/// the bookmark affordance itself (that's `chat_cubit_test.dart`'s/
-/// `chat_screen_test.dart`'s job), only that `ChatCubit` still resolves
-/// through the router's `GoRoute.builder`.
-class _UnusedSaveChatMessageAsEntryUseCase
-    implements SaveChatMessageAsEntryUseCase {
-  @override
-  Future<Either<Failure, Entry>> call({
-    required String content,
-    required String chatMessageId,
-  }) async => throw UnimplementedError('not expected to be called');
 }
 
 /// A plain (non-mocktail) fake — the redirect matrix needs [currentStatus]
@@ -354,7 +341,7 @@ void main() {
       () => ChatCubit(
         _FakeChatRepository(),
         FakeConnectivityWatcher(),
-        _UnusedSaveChatMessageAsEntryUseCase(),
+        UnusedSaveChatMessageAsEntryUseCase(),
       ),
     );
   });
