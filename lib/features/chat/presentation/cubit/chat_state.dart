@@ -125,12 +125,25 @@ class ChatUiMessage {
     required this.content,
     required this.status,
     this.serverId,
+    this.createdAt,
   });
 
   final String id;
   final ChatMessageRole role;
   final String content;
   final ChatMessageStatus status;
+
+  /// The server-persisted `createdAt` (`ChatMessage.createdAt`), known from
+  /// the moment this message is loaded from history/cache
+  /// (`ChatCubit._fromDomain`). `null` for a message created locally
+  /// mid-session (an optimistic user bubble, or the AI bubble a send/retry
+  /// is about to stream into) — neither `message_created`, `token`, nor
+  /// `done` ever carries a timestamp, so there's no server time to show for
+  /// one until the next full history reload; `ChatBubble` reads `null` here
+  /// as its own cue to show "agora" instead (`cerne-prototype.html`'s own
+  /// `sendMessage`/`streamAiResponse` use that exact placeholder for a
+  /// just-added message, never a computed clock time).
+  final String? createdAt;
 
   /// spec-6-3 Design Notes: "`serverId` (not reusing `id`) avoids ever
   /// swapping a `ChatUiMessage.id` mid-stream" — the backend-assigned id
@@ -155,6 +168,7 @@ class ChatUiMessage {
     content: content ?? this.content,
     status: status ?? this.status,
     serverId: serverId ?? this.serverId,
+    createdAt: createdAt,
   );
 
   @override
@@ -165,13 +179,15 @@ class ChatUiMessage {
           other.role == role &&
           other.content == content &&
           other.status == status &&
-          other.serverId == serverId);
+          other.serverId == serverId &&
+          other.createdAt == createdAt);
 
   @override
-  int get hashCode => Object.hash(id, role, content, status, serverId);
+  int get hashCode =>
+      Object.hash(id, role, content, status, serverId, createdAt);
 
   @override
   String toString() =>
       'ChatUiMessage(id: $id, role: $role, content: $content, '
-      'status: $status, serverId: $serverId)';
+      'status: $status, serverId: $serverId, createdAt: $createdAt)';
 }

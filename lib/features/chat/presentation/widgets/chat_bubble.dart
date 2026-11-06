@@ -14,10 +14,11 @@ const _retryCopy = 'Falha ao gerar resposta — toque para tentar novamente';
 /// corner, resting [DesignTokens.elevation1]). Exactly the 3 visible
 /// states RF04's Acceptance Criteria names render here, driven by
 /// [ChatUiMessage.status]: `streaming` (progressive text + blinking
-/// cursor), `failed` (spec-6-3: a tappable tap-to-retry indicator replaces
-/// the timestamp slot, invoking [onRetry]), `complete` (plain text,
-/// nothing else). [ChatUiMessage.content] itself is rendered as-is in
-/// every state — never cleared on failure (I/O matrix).
+/// cursor), `failed` (spec-6-3: a tappable tap-to-retry indicator,
+/// invoking [onRetry], renders *above* the timestamp caption —
+/// `cerne-prototype.html`'s own markup never hides the time behind it),
+/// `complete` (plain text, nothing else). [ChatUiMessage.content] itself is
+/// rendered as-is in every state — never cleared on failure (I/O matrix).
 class ChatBubble extends StatefulWidget {
   const ChatBubble({required this.message, this.onRetry, super.key});
 
@@ -89,32 +90,32 @@ class _ChatBubbleState extends State<ChatBubble>
 
     // spec-6-3 Boundaries: tap-to-retry copy, tappable, 44pt min tap
     // target — replaces the earlier generic (non-tappable) error
-    // indicator. The visible copy renders identically either way;
+    // indicator. Correction: `cerne-prototype.html`'s own markup renders
+    // this as a bare `<span>` below the bubble — plain red text, no
+    // background band, not banded *inside* the bubble the way a previous
+    // pass built it. Correction: the prototype's own `{{ msg.time }}` span
+    // sits right after this one, unconditionally — this note is additional
+    // (shown above the timestamp), never a replacement for it; an earlier
+    // pass rendered the two as mutually exclusive, hiding the time whenever
+    // a bubble failed.
     // `Semantics(button: true)` only wraps it when [onRetry] is actually
     // supplied (review finding) — a bubble built with no retry callback
     // must never be announced to a screen reader as a working button.
     final retryIndicator = InkWell(
       onTap: onRetry,
-      borderRadius: const BorderRadius.all(
-        Radius.circular(DesignTokens.radiusSm),
-      ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(
           minHeight: DesignTokens.insertionModalTapTargetMin,
         ),
-        child: Container(
-          alignment: Alignment.centerLeft,
-          padding: DesignTokens.chatFailureIndicatorPadding,
-          decoration: const BoxDecoration(
-            color: DesignTokens.colorErrorBg,
-            borderRadius: BorderRadius.all(
-              Radius.circular(DesignTokens.radiusSm),
-            ),
-          ),
-          child: Text(
-            _retryCopy,
-            style: DesignTokens.textCaptionSm.copyWith(
-              color: DesignTokens.colorError,
+        child: Align(
+          alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+          child: Padding(
+            padding: DesignTokens.chatFailureIndicatorPadding,
+            child: Text(
+              _retryCopy,
+              style: DesignTokens.textCaptionSm.copyWith(
+                color: DesignTokens.colorError,
+              ),
             ),
           ),
         ),
@@ -129,59 +130,110 @@ class _ChatBubbleState extends State<ChatBubble>
             child: retryIndicator,
           );
 
+    // Correction: `cerne-prototype.html`'s own bubble markup puts this
+    // `IBM Plex Mono`/`colorTextSecondary` caption *below* the bubble, on
+    // every message — including a `failed` one (right below the retry
+    // note, never hidden behind it) — a previous pass never rendered it at
+    // all. "agora"
+    // ([ChatUiMessage.createdAt]'s own doc) for a message with no server
+    // timestamp yet; otherwise the server `createdAt`'s local wall-clock
+    // time, `HH:mm` (same parse-for-display convention
+    // `entry_record_card.dart`'s own `_formatTime` already uses — a
+    // malformed timestamp falls back to the same "agora" placeholder
+    // rather than throwing, RNF09).
+    final timeCaption = Text(
+      _formatTime(message.createdAt),
+      style: DesignTokens.textMonoCaption.copyWith(
+        color: DesignTokens.colorTextSecondary,
+      ),
+    );
+
     return Align(
       alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: DesignTokens.chatBubbleGap),
+      child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth:
               MediaQuery.of(context).size.width *
               DesignTokens.chatBubbleMaxWidthFraction,
         ),
-        padding: DesignTokens.chatBubblePadding,
-        decoration: BoxDecoration(
-          color: isUser
-              ? DesignTokens.colorChatBubbleUser
-              : DesignTokens.colorSurfaceElevated,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(DesignTokens.radiusMd),
-            topRight: const Radius.circular(DesignTokens.radiusMd),
-            bottomLeft: Radius.circular(isUser ? DesignTokens.radiusMd : 0),
-            bottomRight: Radius.circular(isUser ? 0 : DesignTokens.radiusMd),
-          ),
-          boxShadow: isUser ? null : DesignTokens.elevation1,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text.rich(
-              TextSpan(
-                children: [
-                  TextSpan(text: message.content),
-                  if (showCursor)
-                    WidgetSpan(
-                      alignment: PlaceholderAlignment.middle,
-                      child: ExcludeSemantics(
-                        child: FadeTransition(
-                          opacity: _cursorController,
-                          child: const Text('▏'),
-                        ),
-                      ),
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: DesignTokens.chatBubbleGap),
+          child: Column(
+            crossAxisAlignment: isUser
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: DesignTokens.chatBubblePadding,
+                decoration: BoxDecoration(
+                  color: isUser
+                      ? DesignTokens.colorChatBubbleUser
+                      : DesignTokens.colorSurfaceElevated,
+                  borderRadius: BorderRadius.only(
+                    topLeft: const Radius.circular(DesignTokens.radiusMd),
+                    topRight: const Radius.circular(DesignTokens.radiusMd),
+                    bottomLeft: Radius.circular(
+                      isUser ? DesignTokens.radiusMd : 0,
                     ),
-                ],
+                    bottomRight: Radius.circular(
+                      isUser ? 0 : DesignTokens.radiusMd,
+                    ),
+                  ),
+                  boxShadow: isUser ? null : DesignTokens.elevation1,
+                ),
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(text: message.content),
+                      if (showCursor)
+                        WidgetSpan(
+                          alignment: PlaceholderAlignment.middle,
+                          child: ExcludeSemantics(
+                            child: FadeTransition(
+                              opacity: _cursorController,
+                              child: const Text('▏'),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  style: DesignTokens.textBodyLg.copyWith(
+                    color: DesignTokens.colorTextPrimary,
+                  ),
+                ),
               ),
-              style: DesignTokens.textBodyLg.copyWith(
-                color: DesignTokens.colorTextPrimary,
-              ),
-            ),
-            if (message.status == ChatMessageStatus.failed) ...[
               const SizedBox(height: DesignTokens.spacingXs),
-              retryIndicatorWithSemantics,
+              // Correction: the prototype's own `{{ msg.time }}` span is
+              // unconditional — a `failed` bubble shows the retry note
+              // *and* the time caption right below it (the retry
+              // indicator's own `chatFailureIndicatorPadding` bottom inset
+              // already supplies the matching 4px gap between the two).
+              if (message.status == ChatMessageStatus.failed)
+                retryIndicatorWithSemantics,
+              timeCaption,
             ],
-          ],
+          ),
         ),
       ),
     );
   }
+}
+
+/// [ChatBubble]'s own timestamp caption — `createdAt`'s local wall-clock
+/// time, `HH:mm`, or "agora" for a message with no server timestamp yet
+/// ([ChatUiMessage.createdAt]'s own doc) or one that fails to parse
+/// (RNF09: never throws on a malformed value), same defensive shape
+/// `entry_record_card.dart`'s own `_formatTime` already uses.
+String _formatTime(String? createdAt) {
+  if (createdAt == null) {
+    return 'agora';
+  }
+  final local = DateTime.tryParse(createdAt)?.toLocal();
+  if (local == null) {
+    return 'agora';
+  }
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
 }

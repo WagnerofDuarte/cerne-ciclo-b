@@ -247,7 +247,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.enterText(find.byType(TextField), 'Olá, tudo bem?');
-      await tester.tap(find.byIcon(Icons.send));
+      await tester.tap(find.byIcon(Icons.send_outlined));
       await tester.pump();
 
       expect(repository.sendMessageCalls, ['Olá, tudo bem?']);
@@ -271,7 +271,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.enterText(find.byType(TextField), 'oi');
-      await tester.tap(find.byIcon(Icons.send));
+      await tester.tap(find.byIcon(Icons.send_outlined));
       await tester.pump();
 
       final textField = tester.widget<TextField>(find.byType(TextField));
@@ -500,7 +500,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.enterText(find.byType(TextField), 'oi');
-      await tester.tap(find.byIcon(Icons.send));
+      await tester.tap(find.byIcon(Icons.send_outlined));
       await tester.pump();
 
       // A mid-stream drop — same shape `chat_cubit_test.dart`'s own
@@ -549,7 +549,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.enterText(find.byType(TextField), 'oi');
-      await tester.tap(find.byIcon(Icons.send));
+      await tester.tap(find.byIcon(Icons.send_outlined));
       await tester.pump();
 
       // message_created arrives (capturing the user bubble's own
@@ -607,6 +607,53 @@ void main() {
       expect(finalState.messages[1].id, failedAiId);
       expect(finalState.messages[1].content, 'nova resposta');
       expect(finalState.messages[1].status, ChatMessageStatus.complete);
+    },
+  );
+
+  testWidgets(
+    'spec-6-3 review finding: a rapid double-tap on the retry copy before '
+    'the first tap\'s rebuild lands only ever triggers one '
+    'chat-messages-retry call (ChatCubit._isSending swallows the second)',
+    (tester) async {
+      final repository = _FakeChatRepository();
+      await pumpScreen(tester, repository);
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'oi');
+      await tester.tap(find.byIcon(Icons.send_outlined));
+      await tester.pump();
+
+      repository.lastSendController?.add(
+        right(const ChatMessageCreatedEvent('srv-user-1')),
+      );
+      repository.lastSendController?.add(
+        left(const Failure.networkTimeout(message: 'drop')),
+      );
+      await repository.lastSendController?.close();
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Falha ao gerar resposta — toque para tentar novamente'),
+        findsOneWidget,
+      );
+
+      // Two taps back-to-back, with no pump in between — mirrors a real
+      // double-tap landing before the first one's own rebuild (which
+      // would otherwise remove/replace the tapped widget) has a chance
+      // to run.
+      await tester.tap(
+        find.text('Falha ao gerar resposta — toque para tentar novamente'),
+      );
+      await tester.tap(
+        find.text('Falha ao gerar resposta — toque para tentar novamente'),
+      );
+      await tester.pump();
+
+      expect(repository.retryMessageCalls, ['srv-user-1']);
+
+      repository.lastRetryController?.add(right(const ChatDoneEvent()));
+      await repository.lastRetryController?.close();
+      await tester.pumpAndSettle();
     },
   );
 }

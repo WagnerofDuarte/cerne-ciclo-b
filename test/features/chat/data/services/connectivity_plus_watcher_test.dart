@@ -181,6 +181,25 @@ void main() {
           expect(events, [true]);
         },
       );
+
+      test(
+        'an onConnectivityChanged getter that throws synchronously never '
+        'escapes watch() itself — the seed path still works (RNF09, review '
+        'finding)',
+        () async {
+          when(
+            () => mockConnectivity.checkConnectivity(),
+          ).thenAnswer((_) async => [ConnectivityResult.wifi]);
+          when(
+            () => mockConnectivity.onConnectivityChanged,
+          ).thenThrow(Exception('platform channel unavailable'));
+
+          late final Stream<bool> stream;
+          expect(() => stream = watcher.watch(), returnsNormally);
+
+          expect(await stream.first, isTrue);
+        },
+      );
     },
   );
 }

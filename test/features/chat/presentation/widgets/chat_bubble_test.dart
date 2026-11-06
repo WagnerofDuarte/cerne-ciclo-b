@@ -142,8 +142,8 @@ void main() {
     );
 
     testWidgets(
-      'spec-6-3: failed state shows the tap-to-retry copy in place of the '
-      'timestamp slot, text is never cleared',
+      'spec-6-3: failed state shows the tap-to-retry copy above the '
+      'timestamp caption (never in place of it), text is never cleared',
       (tester) async {
         await _pump(
           tester,
@@ -160,6 +160,10 @@ void main() {
           find.text('Falha ao gerar resposta — toque para tentar novamente'),
           findsOneWidget,
         );
+        // Correction: `cerne-prototype.html`'s own `{{ msg.time }}` span is
+        // unconditional — a failed bubble still shows the timestamp
+        // caption right below the retry note, never hidden behind it.
+        expect(find.text('agora'), findsOneWidget);
         // No cursor either — streaming and failed are mutually exclusive
         // visible states.
         expect(find.text('▏'), findsNothing);
@@ -212,6 +216,33 @@ void main() {
         expect(
           constrainedBoxes.map((c) => c.constraints.minHeight),
           contains(DesignTokens.insertionModalTapTargetMin),
+        );
+      },
+    );
+
+    testWidgets(
+      'spec-6-3 review finding: a failed bubble built with no onRetry '
+      'callback exposes no button semantics node',
+      (tester) async {
+        await _pump(
+          tester,
+          const ChatUiMessage(
+            id: '1',
+            role: ChatMessageRole.assistant,
+            content: 'resposta parcial',
+            status: ChatMessageStatus.failed,
+          ),
+        );
+
+        expect(
+          find.textContaining('toque para tentar novamente'),
+          findsOneWidget,
+        );
+        expect(
+          find.byWidgetPredicate(
+            (w) => w is Semantics && (w.properties.button ?? false),
+          ),
+          findsNothing,
         );
       },
     );

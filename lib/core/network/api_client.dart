@@ -5,6 +5,7 @@
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:fpdart/fpdart.dart';
 
 import '../failure/failure.dart';
@@ -114,7 +115,46 @@ class ApiClient {
       final response = await _dio.post<ResponseBody>(
         _urlBuilder.build(function, pathParams),
         data: data,
-        options: Options(responseType: ResponseType.stream),
+        // `receiveTimeout: Duration.zero` overrides `BaseOptions`' own 30s
+        // (set for every other, non-streaming call) for this one request —
+        // dio restarts that timer on every received chunk (including the
+        // gap before the very first one), so it fires mid-generation
+        // whenever the RAG+LLM pipeline takes longer than 30s to flush the
+        // next SSE event, aborting the connection client-side while the
+        // backend keeps running and persists the full answer regardless
+        // (bug: the aborted bubble then shows `failed` for an answer that
+        // actually succeeded, and a later retry — finding no `serverId`,
+        // since even `message_created` never arrived — resends as a brand
+        // new message instead of regenerating in place). The backend's own
+        // `AI_GENERATION_TIMEOUT` in-band `error` event (`error-taxonomy.md`,
+        // already mapped by `_parseEvent`) is this call's real circuit
+        // breaker for a generation that's actually stuck — no client-side
+        // receive-gap timeout is needed on top of it here.
+        // `persistentConnection: false` — every other call on this `Dio`
+        // instance happily reuses a pooled keep-alive connection, but this
+        // one follows `chat-sessions-list`/`chat-messages-list` (fired by
+        // `ChatCubit.init()` on every Home/Chat mount) against the same
+        // host, then sits idle while the user types. On a real network the
+        // edge/CDN in front of the backend closes that idle pooled
+        // connection well before the user hits send; `dart:io`'s
+        // `HttpClient` doesn't notice until it tries to reuse it, surfacing
+        // as a connection error with no response (`e.response == null`),
+        // which `dioErrorCodeOf` maps to `NETWORK_OFFLINE` —
+        // `RetryInterceptor` never retries this function (duplicate-send
+        // guard), so it reaches here as an immediate, silent `Left` with
+        // zero SSE bytes ever read: an empty bubble marked `failed` within
+        // ~1-2s, indistinguishable on screen from a real network failure.
+        // Forcing a brand-new connection for every send/retry (never
+        // reusing the pool) removes the race entirely — reproduces
+        // reliably on a physical device over Wi-Fi, never on
+        // localhost/simulator (negligible latency, no real idle-close
+        // policy) or a one-off external call (never reuses this app's own
+        // pooled connection to begin with).
+        options: Options(
+          responseType: ResponseType.stream,
+          receiveTimeout: Duration.zero,
+          persistentConnection: false,
+        ),
       );
       final body = response.data;
       if (body == null) {
@@ -134,8 +174,21 @@ class ApiClient {
         yield right(text);
       }
     } on DioException catch (e) {
+      // Diagnostic only (RNF09: the mapped `Failure` below is still what
+      // actually reaches the UI) — every other failure path in this file
+      // swallows the real exception silently, which is exactly what made
+      // this stream's own dropped-connection failures invisible on-device
+      // with nothing printed to the console. Kept past this specific
+      // investigation: a silent transport failure here is always worth a
+      // trace, the same rationale `HeaderInterceptor`'s own `debugPrint`
+      // calls already follow.
+      debugPrint(
+        'ApiClient.postStream: DioException ${e.type} on '
+        '${e.requestOptions.path} — ${e.message ?? e.error}',
+      );
       yield left(await _mapStreamDioException(e));
     } catch (e) {
+      debugPrint('ApiClient.postStream: unexpected error — $e');
       yield left(Failure.malformedResponse(message: e.toString()));
     }
   }

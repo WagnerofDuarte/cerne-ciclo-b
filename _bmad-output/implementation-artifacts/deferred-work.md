@@ -452,3 +452,15 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-6-3-dropped-stream-resilience-offline-composer-lock.md`
   summary: The new offline banner only renders while `state is ChatReady`; `ChatBootstrapLoading`/`ChatBootstrapError` never surface the offline cue even when `ChatCubit._isOffline` is already known `true` at that point.
   evidence: `lib/features/chat/presentation/screens/chat_screen.dart`. Review finding (edge-case-hunter layer). Brief, self-correcting window (bootstrap normally resolves quickly); no acceptance criterion scopes the bootstrap states' offline treatment.
+
+## Deferred from: code review of story-6-3-dropped-stream-resilience-offline-composer-lock, round 2 (2026-11-06)
+
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-3-dropped-stream-resilience-offline-composer-lock.md`
+  summary: `ConnectivityPlusWatcher` reports whether a network interface is up, not whether the device has real internet reachability — a device joined to a dead Wi-Fi or captive portal is reported "online," so the composer stays enabled while a send on it still fails as `Failure.networkOffline`.
+  evidence: `lib/features/chat/data/services/connectivity_plus_watcher.dart`. Review finding (blind-hunter layer). Mitigated in practice by this same story's own tap-to-retry/failed-bubble affordance — the send still fails gracefully, it's just not pre-empted by the banner. Reconciling the two independent "offline" signals would mean touching `ChatRepositoryImpl`'s existing `networkOffline` handling, which this story's Boundaries explicitly forbid ("isOffline is additive only").
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-3-dropped-stream-resilience-offline-composer-lock.md`
+  summary: No test covers a flapping connectivity signal — rapid true/false/true emissions, or a transition arriving mid-send/mid-retry — verifying the banner, composer, and `_isSending` state stay consistent through it.
+  evidence: `lib/features/chat/presentation/cubit/chat_cubit.dart`. Review finding (blind-hunter layer). Expected behavior for this case is unspecified anywhere in the spec's I/O matrix or Boundaries; no observed defect, just untested.
+- source_spec: `_bmad-output/implementation-artifacts/spec-6-3-dropped-stream-resilience-offline-composer-lock.md`
+  summary: A successful `retryMessage` never writes the regenerated content back to the local Hive cache — if the app is force-closed right after a successful retry and relaunched offline, the cached copy of that message still shows its stale/failed content.
+  evidence: `lib/features/chat/data/repositories/chat_repository_impl.dart` (`retryMessage`). Review finding (blind-hunter layer). Mirrors `sendMessage`'s own pre-existing "pure passthrough, no Hive persistence" design from story 6.1 — not a new asymmetry introduced by this story.

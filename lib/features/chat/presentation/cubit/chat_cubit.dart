@@ -299,6 +299,7 @@ class ChatCubit extends Cubit<ChatState> {
     // `message_created` arrives, Design Notes); [retryMessage] reads this
     // off the *user* message immediately preceding a `failed` AI bubble.
     serverId: message.id,
+    createdAt: message.createdAt,
   );
 
   /// Boundaries: optimistic user bubble, then subscribes to

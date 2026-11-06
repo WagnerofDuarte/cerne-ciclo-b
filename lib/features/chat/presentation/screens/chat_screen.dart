@@ -359,92 +359,111 @@ class _ChatComposer extends StatelessWidget {
       builder: (context, state) {
         final canSend =
             state is ChatReady && !state.isSending && !state.isOffline;
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: DesignTokens.screenPadding,
-            child: Row(
-              children: [
-                Semantics(
-                  button: true,
-                  label: 'Adicionar registro',
-                  excludeSemantics: true,
-                  child: IconButton(
-                    onPressed: () => InsertionModal.show(
-                      context,
-                      cubit: sl<TextEntryCubit>(),
-                      audioCubit: sl<AudioEntryCubit>(),
-                      photoCubit: sl<PhotoEntryCubit>(),
-                    ),
-                    icon: const Icon(Icons.add, color: DesignTokens.colorPrimary),
-                  ),
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: controller,
-                    focusNode: focusNode,
-                    enabled: canSend,
-                    // `chat-messages-send`'s own request schema caps
-                    // `content` at 8000 characters (openapi.yaml) — a
-                    // client-side cap surfaces that limit directly
-                    // instead of letting an over-length message fail
-                    // only after a round trip, indistinguishable from a
-                    // dropped connection.
-                    maxLength: 8000,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: canSend ? (_) => onSend() : null,
-                    style: DesignTokens.textBodyLg.copyWith(
-                      color: DesignTokens.colorTextPrimary,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: 'Escreva uma mensagem...',
-                      counterText: '',
-                      contentPadding: DesignTokens.textFieldContentPadding,
-                      border: const OutlineInputBorder(
-                        borderRadius: BorderRadius.all(
-                          Radius.circular(DesignTokens.radiusFull),
-                        ),
-                        borderSide: BorderSide(
-                          color: DesignTokens.colorBorder,
-                          width: DesignTokens.borderWidthDefault,
-                        ),
+        // Correction: `cerne-prototype.html`'s own composer markup is
+        // `background:#FBF9F4;border-top:1px solid #E1DACB` — a lighter
+        // surface than the screen's own `colorSurfaceBg` behind it, with a
+        // thin divider on top; a previous pass left the bar fully
+        // transparent (no fill, no border at all).
+        return Container(
+          decoration: const BoxDecoration(
+            color: DesignTokens.colorSurfaceElevated,
+            border: Border(top: BorderSide(color: DesignTokens.colorBorder)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: DesignTokens.screenPadding,
+              child: Row(
+                children: [
+                  Semantics(
+                    button: true,
+                    label: 'Adicionar registro',
+                    excludeSemantics: true,
+                    child: IconButton(
+                      onPressed: () => InsertionModal.show(
+                        context,
+                        cubit: sl<TextEntryCubit>(),
+                        audioCubit: sl<AudioEntryCubit>(),
+                        photoCubit: sl<PhotoEntryCubit>(),
                       ),
-                      enabledBorder: const OutlineInputBorder(
-                        borderRadius: BorderRadius.all(
-                          Radius.circular(DesignTokens.radiusFull),
-                        ),
-                        borderSide: BorderSide(
-                          color: DesignTokens.colorBorder,
-                          width: DesignTokens.borderWidthDefault,
-                        ),
-                      ),
-                      focusedBorder: const OutlineInputBorder(
-                        borderRadius: BorderRadius.all(
-                          Radius.circular(DesignTokens.radiusFull),
-                        ),
-                        borderSide: BorderSide(
-                          color: DesignTokens.colorPrimary,
-                          width: DesignTokens.borderWidthEmphasis,
-                        ),
+                      icon: const Icon(
+                        Icons.add,
+                        color: DesignTokens.colorPrimary,
                       ),
                     ),
                   ),
-                ),
-                Semantics(
-                  button: true,
-                  label: 'Enviar mensagem',
-                  excludeSemantics: true,
-                  child: IconButton(
-                    onPressed: canSend ? onSend : null,
-                    icon: Icon(
-                      Icons.send,
-                      color: canSend
-                          ? DesignTokens.colorPrimary
-                          : DesignTokens.colorTextSecondary,
+                  Expanded(
+                    child: TextField(
+                      controller: controller,
+                      focusNode: focusNode,
+                      enabled: canSend,
+                      // `chat-messages-send`'s own request schema caps
+                      // `content` at 8000 characters (openapi.yaml) — a
+                      // client-side cap surfaces that limit directly
+                      // instead of letting an over-length message fail
+                      // only after a round trip, indistinguishable from a
+                      // dropped connection.
+                      maxLength: 8000,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: canSend ? (_) => onSend() : null,
+                      style: DesignTokens.textBodyLg.copyWith(
+                        color: DesignTokens.colorTextPrimary,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'Escreva uma mensagem...',
+                        counterText: '',
+                        contentPadding: DesignTokens.textFieldContentPadding,
+                        border: const OutlineInputBorder(
+                          borderRadius: BorderRadius.all(
+                            Radius.circular(DesignTokens.radiusFull),
+                          ),
+                          borderSide: BorderSide(
+                            color: DesignTokens.colorBorder,
+                            width: DesignTokens.borderWidthDefault,
+                          ),
+                        ),
+                        enabledBorder: const OutlineInputBorder(
+                          borderRadius: BorderRadius.all(
+                            Radius.circular(DesignTokens.radiusFull),
+                          ),
+                          borderSide: BorderSide(
+                            color: DesignTokens.colorBorder,
+                            width: DesignTokens.borderWidthDefault,
+                          ),
+                        ),
+                        focusedBorder: const OutlineInputBorder(
+                          borderRadius: BorderRadius.all(
+                            Radius.circular(DesignTokens.radiusFull),
+                          ),
+                          borderSide: BorderSide(
+                            color: DesignTokens.colorPrimary,
+                            width: DesignTokens.borderWidthEmphasis,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ],
+                  Semantics(
+                    button: true,
+                    label: 'Enviar mensagem',
+                    excludeSemantics: true,
+                    child: IconButton(
+                      onPressed: canSend ? onSend : null,
+                      // Correction: `cerne-prototype.html`'s own
+                      // `ph-paper-plane-tilt` is the Phosphor library's
+                      // Regular (outline) style — `Icons.send` is a solid
+                      // glyph; `Icons.send_outlined` is the matching outline
+                      // variant.
+                      icon: Icon(
+                        Icons.send_outlined,
+                        color: canSend
+                            ? DesignTokens.colorPrimary
+                            : DesignTokens.colorTextSecondary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );

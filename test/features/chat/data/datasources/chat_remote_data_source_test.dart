@@ -550,5 +550,39 @@ void main() {
         );
       },
     );
+
+    test(
+      'review finding: the context event is discarded the same way as '
+      'sendMessage\'s own happy path — openapi.yaml documents the same '
+      'event order for chat-messages-retry',
+      () {
+        stubRetryPostStream(
+          Stream.fromIterable([
+            right(
+              'event: context\ndata: {"anything":"ignored"}\n\n'
+              'event: token\ndata: {"delta":"nova"}\n\n'
+              'event: done\ndata: {}\n\n',
+            ),
+          ]),
+        );
+
+        expect(
+          dataSource.retryMessage('s1', 'srv-user-1'),
+          emitsInOrder([
+            isA<Right<Failure, ChatStreamEvent>>().having(
+              (r) => r.getRight().toNullable(),
+              'event',
+              isA<ChatTokenEvent>().having((e) => e.delta, 'delta', 'nova'),
+            ),
+            isA<Right<Failure, ChatStreamEvent>>().having(
+              (r) => r.getRight().toNullable(),
+              'event',
+              isA<ChatDoneEvent>(),
+            ),
+            emitsDone,
+          ]),
+        );
+      },
+    );
   });
 }

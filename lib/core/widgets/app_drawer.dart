@@ -70,29 +70,15 @@ class _AppDrawerState extends State<AppDrawer> {
               ),
             ),
             const SizedBox(height: DesignTokens.spacingMd),
-            // spec-6-3 — "Novo Chat" disables (+ dims) while
-            // `ChatReady.isOffline`, same `BlocBuilder<ChatCubit,
-            // ChatState>` source the "CONVERSAS" section below already
-            // reads from; `_startNewSession`'s own offline `SnackBar`
-            // (spec-6-2) stays as a defense-in-depth fallback for the
-            // brief window between a tap and the drawer actually
-            // disabling (Boundaries: "never removing it").
-            BlocBuilder<ChatCubit, ChatState>(
-              builder: (context, state) {
-                final isOffline = state is ChatReady && state.isOffline;
-                return _DrawerPrimaryAction(
-                  icon: Icons.add,
-                  label: 'Novo Chat',
-                  onTap: isOffline ? null : () => _startNewSession(context),
-                );
-              },
-            ),
-            const SizedBox(height: DesignTokens.spacingSm),
-            // The rest of the drawer scrolls as one unit (CONVERSAS plus
-            // the static nav items below it) — a user with many Chat
-            // Sessions must never overflow the fixed-height `Drawer`
-            // (RenderFlex overflow), while the header and "Novo Chat"
-            // above stay pinned.
+            // Correction: `cerne-prototype.html`'s own drawer markup nests
+            // "Novo Chat" *inside* the scrollable content area, directly
+            // below the "CONVERSAS" label and above the session rows — a
+            // previous pass rendered it as a pinned sibling above that
+            // area entirely, label-then-sessions with the button stuck
+            // even further up. The whole scrollable unit (CONVERSAS label,
+            // "Novo Chat", session rows, then the static nav items below)
+            // must never overflow the fixed-height `Drawer` (RenderFlex
+            // overflow) — only the header above it stays pinned.
             Expanded(
               child: SingleChildScrollView(
                 child: Column(
@@ -105,7 +91,8 @@ class _AppDrawerState extends State<AppDrawer> {
                         }
                         return _ConversasSection(
                           sessions: state.sessions,
-                          activeSessionId: state.sessionId,
+                          isOffline: state.isOffline,
+                          onNewChat: () => _startNewSession(context),
                           onSelect: (sessionId) =>
                               _switchSession(context, sessionId),
                         );
@@ -128,28 +115,30 @@ class _AppDrawerState extends State<AppDrawer> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _DrawerNavItem(
-                            icon: Icons.menu_book_outlined,
+                            // Correction: `cerne-prototype.html`'s own
+                            // `ph-notebook` is a simple notepad silhouette
+                            // — `Icons.menu_book_outlined`'s open, double-
+                            // page spread reads as "a book being read,"
+                            // not a notebook; `Icons.note_outlined` is the
+                            // closer, lighter built-in approximation
+                            // (RNF08 Design Notes rationale: no new
+                            // icon-font dependency).
+                            icon: Icons.note_outlined,
                             label: 'Meus Registros',
-                            onTap: () => _navigate(
-                              context,
-                              AppRoutePaths.meusRegistros,
-                            ),
+                            onTap: () =>
+                                _navigate(context, AppRoutePaths.meusRegistros),
                           ),
                           _DrawerNavItem(
                             icon: Icons.view_kanban_outlined,
                             label: 'Planos de Ação',
-                            onTap: () => _navigate(
-                              context,
-                              AppRoutePaths.planosDeAcao,
-                            ),
+                            onTap: () =>
+                                _navigate(context, AppRoutePaths.planosDeAcao),
                           ),
                           _DrawerNavItem(
                             icon: Icons.settings_outlined,
                             label: 'Configurações',
-                            onTap: () => _navigate(
-                              context,
-                              AppRoutePaths.configuracoes,
-                            ),
+                            onTap: () =>
+                                _navigate(context, AppRoutePaths.configuracoes),
                           ),
                         ],
                       ),
@@ -196,9 +185,8 @@ class _AppDrawerState extends State<AppDrawer> {
     }
     Navigator.of(context).pop();
     result.match(
-      (failure) => messenger.showSnackBar(
-        SnackBar(content: Text(failure.message)),
-      ),
+      (failure) =>
+          messenger.showSnackBar(SnackBar(content: Text(failure.message))),
       (_) {},
     );
   }
@@ -218,9 +206,8 @@ class _AppDrawerState extends State<AppDrawer> {
     }
     Navigator.of(context).pop();
     result.match(
-      (failure) => messenger.showSnackBar(
-        SnackBar(content: Text(failure.message)),
-      ),
+      (failure) =>
+          messenger.showSnackBar(SnackBar(content: Text(failure.message))),
       (_) {},
     );
   }
@@ -321,25 +308,28 @@ class _DrawerNavItem extends StatelessWidget {
 
 /// spec-6-2 — the drawer's "CONVERSAS" section (`cerne-prototype.html`'s
 /// Tela 3: "section 'CONVERSAS' with past sessions (title + timestamp)").
-/// Renders nothing (an empty [SizedBox]) when [sessions] is empty — it
-/// never is in practice, `ChatCubit._bootstrap` always resolves at least
-/// one session, but this guard keeps the widget honest on its own.
+/// Correction: the prototype's own markup nests the label, then "Novo
+/// Chat", then the session rows inside the one scrollable block — a
+/// previous pass rendered "Novo Chat" as a separate, pinned sibling above
+/// this whole section instead.
 class _ConversasSection extends StatelessWidget {
   const _ConversasSection({
     required this.sessions,
-    required this.activeSessionId,
+    required this.isOffline,
+    required this.onNewChat,
     required this.onSelect,
   });
 
   final List<ChatSession> sessions;
-  final String activeSessionId;
+
+  /// spec-6-3 — "Novo Chat" disables (+ dims) while this is `true`, same
+  /// `ChatReady.isOffline` source as the offline banner/composer lock.
+  final bool isOffline;
+  final VoidCallback onNewChat;
   final void Function(String sessionId) onSelect;
 
   @override
   Widget build(BuildContext context) {
-    if (sessions.isEmpty) {
-      return const SizedBox.shrink();
-    }
     // `listSessions()`'s own ordering isn't documented either way
     // (`ChatCubit._bootstrap`'s own comment) — defensively re-sorts most
     // recently updated first, same rationale as `_bootstrap`'s "reuse the
@@ -369,10 +359,15 @@ class _ConversasSection extends StatelessWidget {
             ),
           ),
         ),
+        _DrawerPrimaryAction(
+          icon: Icons.add,
+          label: 'Novo Chat',
+          onTap: isOffline ? null : onNewChat,
+        ),
+        const SizedBox(height: DesignTokens.spacingSm),
         for (final session in sorted)
           _DrawerSessionItem(
             session: session,
-            isActive: session.id == activeSessionId,
             onTap: () => onSelect(session.id),
           ),
       ],
@@ -380,18 +375,19 @@ class _ConversasSection extends StatelessWidget {
   }
 }
 
-/// One "CONVERSAS" row — [_DrawerNavItem]'s own tokens reused verbatim
-/// (Boundaries: "no new design tokens"), plus a trailing mono timestamp
-/// (prototype: "title + timestamp").
+/// One "CONVERSAS" row — [_DrawerNavItem]'s own horizontal tokens reused
+/// verbatim (Boundaries: "no new design tokens") for the icon-less
+/// equivalent padding, plus a mono timestamp caption *below* the title
+/// (prototype: "title + timestamp", stacked in a column — a previous pass
+/// put the timestamp trailing in a row instead). Every row's title renders
+/// in the same [DesignTokens.colorTextPrimary] regardless of whether its
+/// session is the active one — the prototype's own markup never gives the
+/// active session a distinct color (a previous pass invented a
+/// `colorPrimary` highlight that doesn't exist in the ground truth).
 class _DrawerSessionItem extends StatelessWidget {
-  const _DrawerSessionItem({
-    required this.session,
-    required this.isActive,
-    required this.onTap,
-  });
+  const _DrawerSessionItem({required this.session, required this.onTap});
 
   final ChatSession session;
-  final bool isActive;
   final VoidCallback onTap;
 
   @override
@@ -406,21 +402,19 @@ class _DrawerSessionItem extends StatelessWidget {
       onTap: onTap,
       child: Padding(
         padding: DesignTokens.drawerNavItemPadding,
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: DesignTokens.textBodyMd.copyWith(
-                  color: isActive
-                      ? DesignTokens.colorPrimary
-                      : DesignTokens.colorTextPrimary,
-                ),
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: DesignTokens.textBodyMd.copyWith(
+                color: DesignTokens.colorTextPrimary,
               ),
             ),
-            const SizedBox(width: DesignTokens.spacingSm),
+            const SizedBox(height: DesignTokens.drawerSessionItemGap),
             Text(
               _formatSessionTimestamp(session.updatedAt),
               style: DesignTokens.textMonoCaption.copyWith(

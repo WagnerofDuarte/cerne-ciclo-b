@@ -17,5 +17,12 @@ abstract class ConnectivityWatcher {
   /// — a caller that needs the device's *current* status right away, not
   /// only future changes, depends on the concrete implementation
   /// providing one (`ConnectivityPlusWatcher`'s own doc).
+  ///
+  /// Each call returns an independent stream with its own underlying
+  /// subscription (`ConnectivityPlusWatcher`'s own doc) — today's single
+  /// caller (`ChatCubit`'s constructor) calls it exactly once per cubit
+  /// instance; a future second caller sharing the same `get_it` singleton
+  /// would get its own duplicate platform-channel listener rather than a
+  /// shared one.
   Stream<bool> watch();
 }

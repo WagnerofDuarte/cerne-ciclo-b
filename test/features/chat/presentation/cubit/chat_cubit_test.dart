@@ -871,6 +871,27 @@ void main() {
         await firstRetry;
       },
     );
+
+    test(
+      'review finding: close()-ing the cubit while retryMessage() is '
+      'in-flight resolves its stranded Future instead of leaving it '
+      'permanently unresolved (same fix _consumeStream already proves '
+      'for sendMessage, extended to the retry call path)',
+      () async {
+        await sendAndFailWithServerId('srv-1');
+        final aiId = (cubit.state as ChatReady).messages[1].id;
+
+        final retryFuture = cubit.retryMessage(aiId);
+        await Future<void>.delayed(Duration.zero);
+        expect(fakeRepository.retryMessageCalls, hasLength(1));
+
+        // The retry's own stream controller is never closed here —
+        // close() alone must still resolve retryFuture promptly.
+        await cubit.close();
+
+        await retryFuture.timeout(const Duration(milliseconds: 500));
+      },
+    );
   });
 
   group(

@@ -37,15 +37,23 @@ class ConnectivityPlusWatcher implements ConnectivityWatcher {
     final controller = StreamController<bool>();
     var liveEventDelivered = false;
 
-    final liveSubscription = _connectivity.onConnectivityChanged.listen(
-      (results) {
-        liveEventDelivered = true;
-        controller.add(_isOnline(results));
-      },
-      onError: controller.addError,
-      onDone: controller.close,
-    );
-    controller.onCancel = liveSubscription.cancel;
+    // Guarded (RNF09) the same way the seed read below is: a mocked/
+    // misbehaving `onConnectivityChanged` getter or `.listen()` throwing
+    // synchronously must never escape `watch()` itself.
+    try {
+      final liveSubscription = _connectivity.onConnectivityChanged.listen(
+        (results) {
+          liveEventDelivered = true;
+          controller.add(_isOnline(results));
+        },
+        onError: controller.addError,
+        onDone: controller.close,
+      );
+      controller.onCancel = liveSubscription.cancel;
+    } catch (_) {
+      // Best-effort only — the seed read below still gets a chance to
+      // deliver at least one reading.
+    }
 
     // Fire-and-forget: never awaited, so a hang here can't delay (let
     // alone block) the live subscription started above — it only ever

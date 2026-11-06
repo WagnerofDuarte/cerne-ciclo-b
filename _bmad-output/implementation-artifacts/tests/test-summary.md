@@ -105,3 +105,35 @@ API-tier tests are the right altitude for all three (pure response-shape/state-t
 
 - No e2e-tier test was added for the `isSending` stuck-flag fix: reproducing it at the real-pipeline tier would require extending `chat_flow_e2e_test.dart`'s fake `HttpClientAdapter` to hold an SSE response open mid-stream (via a `StreamController` instead of its current pre-baked chunk list) purely to interleave a concurrent `switchSession()`/`startNewSession()` call — nontrivial plumbing for a mechanism (a `Left` branch flipping a boolean in cubit state) that has no interaction with real SSE parsing. The cubit-level fake-repository test already gives precise control over that interleaving.
 - No device/simulator or CI exists yet; revisit true on-device E2E once one is introduced (per `AGENTS.md`).
+
+---
+
+## Target (2026-11-06)
+
+User-requested scope: e2e coverage for story 6.3 (dropped-stream resilience & offline composer lock), now `done` in `sprint-status.yaml`. Its own spec's review-findings list was already fully checked off with unit/widget/datasource-tier regression tests, but `chat_flow_e2e_test.dart` (the real-pipeline tier) had none of it: no test drove `retryMessage()` through the real `chat-messages-retry` endpoint, and no test ever pushed a live event through the real `connectivity_plus` event channel — `connectivityEventChannel` was mocked with an empty `setMockMethodCallHandler` stub that could never actually deliver a reading, and was also declared as the wrong channel type (`MethodChannel` instead of `EventChannel`, invisible until a real stream-push was attempted).
+
+## Generated Tests
+
+### E2E Tests (real pipeline, faked HTTP transport + native channels only)
+
+- [x] `test/features/chat/chat_flow_e2e_test.dart` — 4 new cases, plus one fixture fix:
+  - Fixed `connectivityEventChannel`'s declared type (`MethodChannel` → `EventChannel`) and its mock from `setMockMethodCallHandler` (a no-op stub) to `setMockStreamHandler`/`MockStreamHandler.inline`, capturing the live `MockStreamHandlerEventSink` so a test can actually push a connectivity reading — added an `emitConnectivity()` helper that pushes one event and flushes the 5 microtask hops between the fake channel and `ChatCubit`'s own listener.
+  - "tap-to-retry ... regenerates that exact bubble in place through the real chat-messages-retry endpoint" — `message_created` arrives then the stream drops; `retryMessage()` is called directly against the real DI-resolved cubit; asserts the same bubble id/position goes `failed` → `complete` with no new bubble pair, and the real request hits `chat-messages-retry/{sessionId}/{serverId}` (`UrlBuilder`-built).
+  - "tap-to-retry ... falls back to a full chat-messages-send resend ... never calls chat-messages-retry with no serverId" — stream drops before `message_created` ever arrives; asserts the fallback resend lands in the same bubble slot and no request ever touches `chat-messages-retry`.
+  - "a live 'offline' reading ... flips ChatReady.isOffline to true" — pushes `['none']` through the real event-channel pipeline.
+  - "connectivity returning flips ChatReady.isOffline back to false" — same pipeline, `['none']` then `['wifi']`.
+
+## Verification
+
+- `fvm flutter analyze` — zero issues (project-wide)
+- `fvm flutter test` — 971/971 passed (full suite, including all 4 new cases)
+
+## Coverage
+
+- Story 6.3's 4 acceptance criteria (retry-in-place, offline composer lock, offline "Novo Chat" disable via drawer-level widget tests already in place, connectivity recovery) now each have real-pipeline-tier proof for the two that are cubit/network-shaped (retry, connectivity toggling); the two that are pure-widget-shaped (composer/drawer disabling) remain correctly covered at the widget tier only, matching this project's existing altitude convention.
+- Closed a latent gap in the existing fixture itself (the mistyped `EventChannel`/`setMockMethodCallHandler` combination), which meant no prior test — including this story's own dev-authored ones — could ever have exercised a real connectivity change end-to-end; `fvm flutter analyze` catching the type mismatch only after the mock call was switched to `setMockStreamHandler` suggests the old stub was silently inert.
+
+## Next Steps
+
+- Not covered here: a flapping-connectivity e2e case (rapid on/off/on) — already logged in spec-6-3 as a deferred, pre-existing architectural trade-off, not a gap introduced by this run.
+- No device/simulator or CI exists yet; revisit true on-device E2E once one is introduced (per `AGENTS.md`).

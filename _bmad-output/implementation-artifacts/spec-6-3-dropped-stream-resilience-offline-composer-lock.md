@@ -86,6 +86,19 @@ context: ['{project-root}/_bmad-output/implementation-artifacts/epic-6-context.m
 - Given I'm offline, when I open the side menu, then "Novo Chat" is disabled.
 - Given connectivity returns, when `isOffline` flips back, then the composer and "Novo Chat" re-enable automatically.
 
+### Review Findings
+
+- [x] [Review][Patch] Add an e2e regression test for the stale-`_sendSubscription`-nulling fix — a second `sendMessage`/`retryMessage` on the same cubit after a prior one completed could hang again if this regresses, and no current test (fake-stream-backed) would catch it [lib/features/chat/presentation/cubit/chat_cubit.dart:479]
+- [x] [Review][Patch] Add a regression test for `ChatCubit.close()` while `retryMessage()` is in-flight — the "cancel() alone leaves the Future unresolved" bug's existing regression test covers `sendMessage` but was never duplicated for `retryMessage` [lib/features/chat/presentation/cubit/chat_cubit.dart:432]
+- [x] [Review][Patch] Wrap `ConnectivityPlusWatcher.watch()`'s `onConnectivityChanged.listen()` call in try/catch, mirroring the already-guarded `checkConnectivity()` seed path right beside it [lib/features/chat/data/services/connectivity_plus_watcher.dart:40]
+- [x] [Review][Patch] Add a negative-case test proving a `failed` bubble built with `onRetry: null` exposes no button semantics node, matching the code's own "must never" comment [lib/features/chat/presentation/widgets/chat_bubble.dart:136]
+- [x] [Review][Patch] Add retry-path test coverage for the `context` SSE event — `openapi.yaml` documents the same event order for `chat-messages-retry` as `sendMessage`, but no retry test exercises it [lib/features/chat/data/datasources/chat_remote_data_source.dart]
+- [x] [Review][Patch] Document `ConnectivityWatcher.watch()`'s single-vs-multiple-call contract — safe today with one caller, but undocumented as a constraint [lib/features/chat/domain/services/connectivity_watcher.dart]
+- [x] [Review][Patch] Add a widget-level test proving a rapid double-tap on the retry affordance is swallowed — only the cubit-level "second retry while in flight" case is covered today [lib/features/chat/presentation/widgets/chat_bubble.dart]
+- [x] [Review][Defer] `ConnectivityPlusWatcher` reports interface state, not real reachability — the composer can show enabled while a send simultaneously fails as `NetworkOffline`; mitigated in practice by this same story's own tap-to-retry affordance, and reconciling the two signals would mean touching `ChatRepositoryImpl`'s existing `networkOffline` handling, which this story's Boundaries forbid [lib/features/chat/data/services/connectivity_plus_watcher.dart] — deferred, pre-existing architectural trade-off
+- [x] [Review][Defer] No test covers a flapping connectivity signal (rapid on/off/on, or a transition arriving mid-send) verifying the banner/composer/`_isSending` stay consistent — expected behavior for this case is unspecified anywhere in the spec [lib/features/chat/presentation/cubit/chat_cubit.dart] — deferred, pre-existing
+- [x] [Review][Defer] `ChatRepositoryImpl.retryMessage` never writes a successful retry's new content back to the Hive cache — stale cached content could reappear after an offline relaunch right after a successful retry; mirrors `sendMessage`'s existing no-persist-on-success design from story 6.1, not newly introduced here [lib/features/chat/data/repositories/chat_repository_impl.dart:125] — deferred, pre-existing
+
 ## Spec Change Log
 
 ## Design Notes

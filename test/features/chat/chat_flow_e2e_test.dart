@@ -131,7 +131,7 @@ void main() {
   const connectivityMethodChannel = MethodChannel(
     'dev.fluttercommunity.plus/connectivity',
   );
-  const connectivityEventChannel = MethodChannel(
+  const connectivityEventChannel = EventChannel(
     'dev.fluttercommunity.plus/connectivity_status',
   );
 
@@ -156,6 +156,29 @@ void main() {
   late FakePathProviderPlatform fakePathProvider;
   late _FakeHttpClientAdapter adapter;
 
+  // spec-6-3 — the real `connectivity_plus` plugin reaches this channel's
+  // own event stream via `EventChannel.receiveBroadcastStream()`, not a
+  // plain method call, so it must be mocked with `setMockStreamHandler`
+  // rather than `setMockMethodCallHandler` to let a test push a live
+  // reading. Captured on `onListen` (fired as soon as `sl<ChatCubit>()`'s
+  // own constructor subscribes) so a test can call
+  // `connectivityEventSink!.success([...])` to simulate a connectivity
+  // change arriving from the OS.
+  MockStreamHandlerEventSink? connectivityEventSink;
+
+  /// Pushes a live `connectivity_plus` reading and flushes the microtask
+  /// hops between the fake event channel and `ChatCubit`'s own listener
+  /// (the channel's `receiveBroadcastStream` -> `connectivity_plus`'s
+  /// `distinct()` wrapper -> `ConnectivityPlusWatcher`'s own controller ->
+  /// `ChatCubit._handleConnectivityChange`) — same `Future.delayed(Duration.
+  /// zero)`-per-hop convention `connectivity_plus_watcher_test.dart` uses.
+  Future<void> emitConnectivity(List<String> results) async {
+    connectivityEventSink!.success(results);
+    for (var i = 0; i < 5; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+  }
+
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(secureStorageChannel, handleSecureStorageCall);
@@ -165,7 +188,13 @@ void main() {
           (call) async => call.method == 'check' ? <String>['wifi'] : null,
         );
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(connectivityEventChannel, (_) async => null);
+        .setMockStreamHandler(
+          connectivityEventChannel,
+          MockStreamHandler.inline(
+            onListen: (_, events) => connectivityEventSink = events,
+            onCancel: (_) => connectivityEventSink = null,
+          ),
+        );
     fakePathProvider = FakePathProviderPlatform();
     PathProviderPlatform.instance = fakePathProvider;
 
@@ -187,7 +216,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(connectivityMethodChannel, null);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(connectivityEventChannel, null);
+        .setMockStreamHandler(connectivityEventChannel, null);
     fakeNativeStorage.clear();
     await Hive.close();
     await resetCoreDependencies();
@@ -253,6 +282,53 @@ void main() {
   );
 
   test(
+    'review finding: a second sendMessage() on the same cubit, issued '
+    'after the first one fully completed, resolves promptly through the '
+    'real Dio/ApiClient.postStream subscription lifecycle — proves the '
+    'stale-_sendSubscription-nulling fix (chat_cubit.dart\'s '
+    '_consumeStream) actually works against a real subscription, not '
+    'only the fake-StreamController-backed one unit tests use',
+    () async {
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+      adapter.queueJsonResponse(200, {
+        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+      });
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+      adapter.queueSseResponse([
+        'event: token\ndata: {"delta":"Primeira resposta."}\n\n'
+            'event: done\ndata: {}\n\n',
+      ]);
+      adapter.queueSseResponse([
+        'event: token\ndata: {"delta":"Segunda resposta."}\n\n'
+            'event: done\ndata: {}\n\n',
+      ]);
+
+      final cubit = sl<ChatCubit>();
+      await cubit.init();
+
+      await cubit.sendMessage('Primeira pergunta.');
+      expect(
+        (cubit.state as ChatReady).messages[1].content,
+        'Primeira resposta.',
+      );
+
+      // Without the fix, the first call's own now-finished subscription
+      // is never cleared, so this second call's `await
+      // _sendSubscription?.cancel()` would hang on the real subscription
+      // — the timeout turns that hang into a clear failure instead of a
+      // stuck test run.
+      await cubit
+          .sendMessage('Segunda pergunta.')
+          .timeout(const Duration(seconds: 5));
+
+      final state = cubit.state as ChatReady;
+      expect(state.messages, hasLength(4));
+      expect(state.messages[3].content, 'Segunda resposta.');
+      expect(state.messages[3].status, ChatMessageStatus.complete);
+    },
+  );
+
+  test(
     'mid-stream drop: a connection that closes with no done/error event '
     'keeps the AI bubble\'s partial text (never cleared) and marks it '
     'failed, with no exception escaping the cubit',
@@ -308,6 +384,146 @@ void main() {
       // Exactly 3 requests total (sessions-list, messages-list, the one
       // send) — no retry attempt behind the scenes.
       expect(adapter.requests, hasLength(3));
+    },
+  );
+
+  test(
+    'spec-6-3: tap-to-retry on a failed AI bubble (its preceding user '
+    'message already carrying a serverId) regenerates that exact bubble '
+    'in place through the real chat-messages-retry endpoint — no new '
+    'bubble pair, no re-send of the question',
+    () async {
+      adapter.queueJsonResponse(200, {
+        'data': [_sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z')],
+      });
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+      // `message_created` arrives (capturing the serverId), then the
+      // stream drops mid-token with no `done`/`error` — I/O matrix's
+      // "Tap retry, normal" precondition.
+      adapter.queueSseResponse([
+        'event: message_created\ndata: {"id":"srv-msg-1"}\n\n'
+            'event: token\ndata: {"delta":"Entendo."}\n\n',
+      ]);
+      adapter.queueSseResponse([
+        'event: token\ndata: {"delta":"Resposta regenerada."}\n\n'
+            'event: done\ndata: {}\n\n',
+      ]);
+
+      final cubit = sl<ChatCubit>();
+      await cubit.init();
+      await cubit.sendMessage('Como você está?');
+
+      var state = cubit.state as ChatReady;
+      expect(state.messages, hasLength(2));
+      final userMessageId = state.messages[0].id;
+      final aiMessageId = state.messages[1].id;
+      expect(state.messages[1].status, ChatMessageStatus.failed);
+
+      await cubit.retryMessage(aiMessageId);
+
+      state = cubit.state as ChatReady;
+      expect(state.messages, hasLength(2));
+      expect(state.messages[0].id, userMessageId);
+      expect(state.messages[0].content, 'Como você está?');
+      expect(state.messages[1].id, aiMessageId);
+      expect(state.messages[1].content, 'Resposta regenerada.');
+      expect(state.messages[1].status, ChatMessageStatus.complete);
+
+      final retryRequest = adapter.requests.last;
+      expect(
+        retryRequest.path,
+        sl<UrlBuilder>().build('chat-messages-retry', [
+          'session-1',
+          'srv-msg-1',
+        ]),
+      );
+    },
+  );
+
+  test(
+    'spec-6-3: tap-to-retry on a failed bubble whose stream dropped '
+    'before message_created ever arrived falls back to a full '
+    'chat-messages-send resend of the same question into the same '
+    'bubble slot — never calls chat-messages-retry with no serverId',
+    () async {
+      adapter.queueJsonResponse(200, {
+        'data': [_sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z')],
+      });
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+      // Drops before `message_created` ever arrives — the user message
+      // never gains a serverId (I/O matrix: "Tap retry, no serverId").
+      adapter.queueSseResponse(['event: token\ndata: {"delta":"Oi."}\n\n']);
+      adapter.queueSseResponse([
+        'event: token\ndata: {"delta":"Resposta via resend."}\n\n'
+            'event: done\ndata: {}\n\n',
+      ]);
+
+      final cubit = sl<ChatCubit>();
+      await cubit.init();
+      await cubit.sendMessage('Pergunta original.');
+
+      var state = cubit.state as ChatReady;
+      expect(state.messages, hasLength(2));
+      final userMessageId = state.messages[0].id;
+      final aiMessageId = state.messages[1].id;
+      expect(state.messages[1].status, ChatMessageStatus.failed);
+
+      await cubit.retryMessage(aiMessageId);
+
+      state = cubit.state as ChatReady;
+      expect(state.messages, hasLength(2));
+      expect(state.messages[0].id, userMessageId);
+      expect(state.messages[1].id, aiMessageId);
+      expect(state.messages[1].content, 'Resposta via resend.');
+      expect(state.messages[1].status, ChatMessageStatus.complete);
+
+      expect(
+        adapter.requests.every((r) => !r.path.contains('chat-messages-retry')),
+        isTrue,
+      );
+      final sendUrl = sl<UrlBuilder>().build('chat-messages-send', ['session-1']);
+      expect(adapter.requests.where((r) => r.path == sendUrl).length, 2);
+    },
+  );
+
+  test(
+    'spec-6-3: a live "offline" reading from the real connectivity_plus '
+    'event-channel pipeline flips ChatReady.isOffline to true',
+    () async {
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+      adapter.queueJsonResponse(200, {
+        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+      });
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+
+      final cubit = sl<ChatCubit>();
+      await cubit.init();
+      expect((cubit.state as ChatReady).isOffline, isFalse);
+
+      await emitConnectivity(['none']);
+
+      expect((cubit.state as ChatReady).isOffline, isTrue);
+    },
+  );
+
+  test(
+    'spec-6-3: connectivity returning flips ChatReady.isOffline back to '
+    'false through the same real event-channel pipeline',
+    () async {
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+      adapter.queueJsonResponse(200, {
+        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+      });
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+
+      final cubit = sl<ChatCubit>();
+      await cubit.init();
+
+      await emitConnectivity(['none']);
+      expect((cubit.state as ChatReady).isOffline, isTrue);
+
+      await emitConnectivity(['wifi']);
+      expect((cubit.state as ChatReady).isOffline, isFalse);
     },
   );
 }

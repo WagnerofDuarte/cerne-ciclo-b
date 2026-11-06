@@ -414,6 +414,13 @@ class DesignTokens {
   /// its own nav items do).
   static const double drawerHeaderGap = 10;
 
+  /// Correction — a "CONVERSAS" session row's own title-to-timestamp gap
+  /// (`cerne-prototype.html`'s own row markup: `display:flex;flex-
+  /// direction:column;gap:2px`, the title stacked above its timestamp); not
+  /// on the 4dp spacing scale, and distinct from every other drawer gap
+  /// above (none of which is this small).
+  static const double drawerSessionItemGap = 2;
+
   /// Kanban board's column-to-column gap and each column's dot-title-count
   /// gap — `gap:12px`/`gap:8px`; the latter is already [spacingSm].
   static const double kanbanColumnGap = 12;
@@ -653,9 +660,12 @@ class DesignTokens {
   /// Gap between consecutive chat bubbles in the message list.
   static const double chatBubbleGap = spacingSm;
 
-  /// The failed-bubble indicator's own padding, replacing the timestamp
-  /// slot — same shape as [pinErrorBandPadding]'s own band, scaled down
-  /// for an inline caption rather than a full-width band.
+  /// The failed-bubble indicator's own tap-target padding (correction —
+  /// `cerne-prototype.html`'s own markup renders this as a bare `<span>`,
+  /// plain red text with no background band at all; a previous pass wrapped
+  /// it in a [colorErrorBg] band that doesn't exist in the prototype). Kept
+  /// only to pad out [ChatBubble]'s 44pt tap target comfortably — never
+  /// paired with a background fill.
   static const EdgeInsets chatFailureIndicatorPadding = EdgeInsets.symmetric(
     horizontal: spacingSm,
     vertical: spacingXs,
