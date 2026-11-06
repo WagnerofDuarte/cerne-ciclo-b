@@ -234,8 +234,15 @@ void testWidgets(String description, WidgetTesterCallback callback) {
     description,
     callback,
     cleanup: () async {
+      // Review fix: guards `isClosed` — a double `close()` on an
+      // already-closed Cubit never resolves inside flutter_test's
+      // fake-async zone, freezing the suite (the exact hazard
+      // `app_drawer_test.dart`'s/`main_test.dart`'s own tearDown already
+      // guards against).
       for (final cubit in _cubitsPendingClose) {
-        await cubit.close();
+        if (!cubit.isClosed) {
+          await cubit.close();
+        }
       }
       _cubitsPendingClose.clear();
     },
@@ -862,6 +869,50 @@ void main() {
       final after = cubit.state as ChatReady;
       expect(after.activeInsight, isNull);
       expect(after.messages, messagesBeforeDismiss);
+    },
+  );
+
+  testWidgets(
+    'review: dismissing the Insight card never visibly shifts scroll '
+    'position when the user had deliberately scrolled away from the '
+    "bottom — ChatReady.restoreScrollOffset being unchanged (already "
+    "covered at the cubit level) doesn't by itself prove the ListView's "
+    'own rendered offset stays put',
+    (tester) async {
+      final repository = _FakeChatRepository()
+        ..generateInsightResult = right(
+          const ChatInsight(id: 'ins-1', content: 'um padrão notado'),
+        );
+      final cubit = await pumpScreen(tester, repository);
+      await tester.pumpAndSettle();
+
+      // 3 rounds (15 exchanges) of real sends/replies, so there's
+      // real scrollable content well beyond the viewport height.
+      await sendFiveMessages(tester, repository);
+      await sendFiveMessages(tester, repository);
+      await sendFiveMessages(tester, repository);
+      expect(find.byType(InsightCard), findsOneWidget);
+
+      // Scroll well away from the bottom — the card itself is only
+      // ~80px tall (exactly `_scrollToBottomSoon`'s own "near bottom"
+      // threshold), so it can never stay on screen at any offset that
+      // also clears that threshold; drive the dismiss through the
+      // cubit directly instead of a tap, the same way this file's
+      // other state-only assertions (e.g. `activeInsight`) already do,
+      // to isolate "does the rebuild itself shift scroll position" from
+      // the already-covered tap-affordance wiring.
+      final controller = tester.widget<ListView>(find.byType(ListView)).controller!;
+      final maxScrollExtent = controller.position.maxScrollExtent;
+      controller.jumpTo(maxScrollExtent - 500);
+      await tester.pumpAndSettle();
+      expect(maxScrollExtent - controller.offset, greaterThan(80));
+      final offsetBeforeDismiss = controller.offset;
+
+      cubit.dismissInsight();
+      await tester.pumpAndSettle();
+
+      expect(find.byType(InsightCard), findsNothing);
+      expect(controller.offset, offsetBeforeDismiss);
     },
   );
 }

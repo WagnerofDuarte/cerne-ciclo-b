@@ -859,7 +859,12 @@ class ChatCubit extends Cubit<ChatState> {
   /// **unawaited** (Boundaries: "never await the insight
   /// isolatedSideEffect call" — this story's first unawaited caller, per
   /// the epic's own Technical Decisions). The result, whenever it
-  /// resolves, is routed through [_applyInsightResult].
+  /// resolves, is routed through [_applyInsightResult]. Review fix: while
+  /// offline, the window still closes/reopens structurally, but the
+  /// network call itself is skipped — it would only resolve
+  /// `networkOffline` and be dropped anyway (Boundaries: failures are
+  /// always silent), same rationale [retryMessage]/`_ChatComposer.canSend`
+  /// already apply to their own offline guard.
   void _fireInsightTrigger(String sessionId, InsightTriggerType triggerType) {
     final triggerKey = _insightTriggerKey;
     // Review fix: captured *before* the call resolves, so a later-fired
@@ -867,6 +872,9 @@ class ChatCubit extends Cubit<ChatState> {
     // from this one when both are still in flight.
     final requestSeq = ++_insightRequestSeq;
     _resetInsightWindow(sessionId);
+    if (_isOffline) {
+      return;
+    }
     unawaited(
       isolatedSideEffect(
         () => _generateInsight(

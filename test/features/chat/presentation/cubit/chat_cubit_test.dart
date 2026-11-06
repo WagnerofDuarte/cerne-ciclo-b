@@ -1387,21 +1387,27 @@ void main() {
 
   group('proactive insight — spec-6-5', () {
     late ChatCubit insightCubit;
+    // Review fix: a plain `late` var's own `tearDown` close() throws
+    // `LateInitializationError` (masking the real failure) if a test
+    // fails before `initInsightCubit` ever assigns it — this flag lets
+    // `tearDown` tell "never assigned" apart from "assigned".
+    var insightCubitInitialized = false;
 
     /// Builds a dedicated cubit for this group — a short/long
     /// [timeout] override lets each test control whether the inactivity
     /// side of the race can realistically fire during the test's own
     /// real-time execution, without a `fake_async` dependency (Design
-    /// Notes).
-    Future<ChatCubit> initInsightCubit({required Duration timeout}) async {
-      final result = ChatCubit(
+    /// Notes). Assigns [insightCubit] itself (rather than returning it)
+    /// so [insightCubitInitialized] is always set at the same time.
+    Future<void> initInsightCubit({required Duration timeout}) async {
+      insightCubit = ChatCubit(
         fakeRepository,
         fakeConnectivityWatcher,
         fakeSaveChatMessageAsEntryUseCase,
         insightInactivityTimeout: timeout,
       );
-      await result.init();
-      return result;
+      insightCubitInitialized = true;
+      await insightCubit.init();
     }
 
     /// Drives one full send-to-completion on [target] — same shape the
@@ -1418,14 +1424,17 @@ void main() {
     }
 
     tearDown(() async {
-      await insightCubit.close();
+      if (insightCubitInitialized) {
+        await insightCubit.close();
+        insightCubitInitialized = false;
+      }
     });
 
     test(
       'I/O matrix "5th user message": the message_count trigger fires '
       'exactly once, never before, with a non-empty triggerKey',
       () async {
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(seconds: 5),
         );
 
@@ -1448,7 +1457,7 @@ void main() {
       'after firing, the window reopens immediately: a new count starts '
       'from zero, never refiring on the very next send',
       () async {
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(seconds: 5),
         );
         for (var i = 0; i < 5; i++) {
@@ -1478,7 +1487,7 @@ void main() {
       'after the configured (here, injected-short) duration with no '
       'sendMessage() call at all',
       () async {
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(milliseconds: 20),
         );
 
@@ -1514,7 +1523,7 @@ void main() {
         // Long enough that the inactivity side could never win this race
         // for real within the test's own (near-instant) execution time —
         // sendAndComplete only ever yields via zero-duration delays.
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(milliseconds: 500),
         );
         for (var i = 0; i < 5; i++) {
@@ -1538,7 +1547,7 @@ void main() {
       'fire-and-forget: a pending (never-resolved) generateInsight call '
       'never blocks sending another message',
       () async {
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(seconds: 5),
         );
         for (var i = 0; i < 5; i++) {
@@ -1558,7 +1567,7 @@ void main() {
       'I/O matrix "Generation fails" (transport Left): activeInsight '
       'stays null, no crash, ordinary chat keeps working',
       () async {
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(seconds: 5),
         );
         for (var i = 0; i < 5; i++) {
@@ -1582,7 +1591,7 @@ void main() {
       'ChatRepository.generateInsight already maps this to Right(null)): '
       'activeInsight stays null',
       () async {
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(seconds: 5),
         );
         for (var i = 0; i < 5; i++) {
@@ -1600,7 +1609,7 @@ void main() {
       'a successful, ready insight is appended onto ChatReady.'
       'activeInsight',
       () async {
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(seconds: 5),
         );
         for (var i = 0; i < 5; i++) {
@@ -1625,7 +1634,7 @@ void main() {
       'later-fired request already applied its own insight is dropped — '
       'it never overwrites the newer activeInsight',
       () async {
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(seconds: 5),
         );
         // First window: 5 sends fire the first generateInsight call
@@ -1670,7 +1679,7 @@ void main() {
       'review fix: a stale result also can\'t resurrect an insight the '
       'user already dismissed',
       () async {
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(seconds: 5),
         );
         for (var i = 0; i < 5; i++) {
@@ -1703,7 +1712,7 @@ void main() {
       'matches',
       () async {
         fakeRepository.listSessionsResult = right([_session, _otherSession]);
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(seconds: 5),
         );
         for (var i = 0; i < 5; i++) {
@@ -1735,7 +1744,7 @@ void main() {
       'construction, every other field — messages, sessions, isSending, '
       'restoreScrollOffset, isOffline — left exactly as-is',
       () async {
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(seconds: 5),
         );
         for (var i = 0; i < 5; i++) {
@@ -1765,7 +1774,7 @@ void main() {
       'I/O matrix "Dismiss with none active": a no-op — the state object '
       'itself is left untouched',
       () async {
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(seconds: 5),
         );
         final before = insightCubit.state;
@@ -1780,7 +1789,7 @@ void main() {
       'never calls the backend on dismiss — only the one generateInsight '
       'call this test itself drove is ever recorded',
       () async {
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(seconds: 5),
         );
         for (var i = 0; i < 5; i++) {
@@ -1803,7 +1812,7 @@ void main() {
       'carries over the previous session\'s own message count',
       () async {
         fakeRepository.listSessionsResult = right([_session, _otherSession]);
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(seconds: 5),
         );
         for (var i = 0; i < 4; i++) {
@@ -1833,7 +1842,7 @@ void main() {
     test(
       'the window resets on startNewSession the same way',
       () async {
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(seconds: 5),
         );
         for (var i = 0; i < 4; i++) {
@@ -1871,7 +1880,7 @@ void main() {
       'close() cancels the pending inactivity timer — it never fires '
       'into a closed cubit',
       () async {
-        insightCubit = await initInsightCubit(
+        await initInsightCubit(
           timeout: const Duration(milliseconds: 20),
         );
         await insightCubit.close();
@@ -1879,6 +1888,136 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 100));
 
         expect(fakeRepository.generateInsightCalls, isEmpty);
+      },
+    );
+
+    test(
+      'review: close()-ing the cubit while a generateInsight call is in '
+      'flight never crashes — the stray emit after close is simply '
+      'swallowed, guarded by isClosed in _applyInsightResult, same shape '
+      "bookmarkMessage's own in-flight-close test already proves",
+      () async {
+        await initInsightCubit(timeout: const Duration(seconds: 5));
+        for (var i = 0; i < 5; i++) {
+          await sendAndComplete(insightCubit, 'msg $i');
+        }
+        expect(fakeRepository.generateInsightCalls, hasLength(1));
+
+        await insightCubit.close();
+        fakeRepository.resolveInsight(
+          0,
+          right(const ChatInsight(id: 'ins-1', content: 'conteúdo')),
+        );
+
+        // No crash reaching here is the assertion itself.
+        await Future<void>.delayed(Duration.zero);
+        expect(insightCubit.isClosed, isTrue);
+      },
+    );
+
+    test(
+      'review: retryMessage() never counts toward the insight trigger '
+      'window — the no-serverId branch calls _repository.sendMessage '
+      'directly, never through ChatCubit.sendMessage() where the '
+      'counting logic lives, even retried enough times to exceed the '
+      'message-count threshold',
+      () async {
+        await initInsightCubit(timeout: const Duration(seconds: 5));
+
+        final sendFuture = insightCubit.sendMessage('oi');
+        await Future<void>.delayed(Duration.zero);
+        fakeRepository.lastSendController!.add(
+          left(const Failure.networkTimeout(message: 'drop')),
+        );
+        await fakeRepository.lastSendController!.close();
+        await sendFuture;
+        final aiId = (insightCubit.state as ChatReady).messages[1].id;
+
+        for (var i = 0; i < 6; i++) {
+          final retryFuture = insightCubit.retryMessage(aiId);
+          await Future<void>.delayed(Duration.zero);
+          fakeRepository.lastSendController!.add(
+            left(const Failure.networkTimeout(message: 'drop again')),
+          );
+          await fakeRepository.lastSendController!.close();
+          await retryFuture;
+        }
+
+        expect(fakeRepository.generateInsightCalls, isEmpty);
+      },
+    );
+
+    test(
+      'a real insight resolving while ChatReady.isSending is true (an AI '
+      'response still streaming) is applied without disturbing the send '
+      '— isSending and the streaming bubble are both left exactly as '
+      'they were',
+      () async {
+        await initInsightCubit(timeout: const Duration(seconds: 5));
+        for (var i = 0; i < 4; i++) {
+          await sendAndComplete(insightCubit, 'msg $i');
+        }
+        expect(fakeRepository.generateInsightCalls, isEmpty);
+
+        final sendFuture = insightCubit.sendMessage('msg 4');
+        await Future<void>.delayed(Duration.zero);
+        expect(fakeRepository.generateInsightCalls, hasLength(1));
+        expect((insightCubit.state as ChatReady).isSending, isTrue);
+
+        fakeRepository.resolveInsight(
+          0,
+          right(const ChatInsight(id: 'ins-1', content: 'conteúdo')),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        final midStream = insightCubit.state as ChatReady;
+        expect(midStream.isSending, isTrue);
+        expect(
+          midStream.activeInsight,
+          const ChatInsight(id: 'ins-1', content: 'conteúdo'),
+        );
+        expect(midStream.messages.last.status, ChatMessageStatus.streaming);
+
+        fakeRepository.lastSendController!.add(right(const ChatDoneEvent()));
+        await fakeRepository.lastSendController!.close();
+        await sendFuture;
+      },
+    );
+
+    test(
+      'a second successful insight resolving while a prior one is still '
+      'visible (never dismissed) silently replaces it — the newer '
+      'result always wins',
+      () async {
+        await initInsightCubit(timeout: const Duration(seconds: 5));
+        for (var i = 0; i < 5; i++) {
+          await sendAndComplete(insightCubit, 'msg $i');
+        }
+        fakeRepository.resolveInsight(
+          0,
+          right(const ChatInsight(id: 'ins-1', content: 'primeiro')),
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          (insightCubit.state as ChatReady).activeInsight,
+          const ChatInsight(id: 'ins-1', content: 'primeiro'),
+        );
+
+        for (var i = 0; i < 5; i++) {
+          await sendAndComplete(insightCubit, 'more $i');
+        }
+        expect(fakeRepository.generateInsightCalls, hasLength(2));
+
+        fakeRepository.resolveInsight(
+          1,
+          right(const ChatInsight(id: 'ins-2', content: 'segundo')),
+        );
+        await Future<void>.delayed(Duration.zero);
+
+        expect(
+          (insightCubit.state as ChatReady).activeInsight,
+          const ChatInsight(id: 'ins-2', content: 'segundo'),
+        );
       },
     );
   });

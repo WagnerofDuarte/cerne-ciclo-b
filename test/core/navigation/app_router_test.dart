@@ -301,7 +301,12 @@ void testWidgets(String description, WidgetTesterCallback callback) {
     description,
     callback,
     cleanup: () async {
-      if (sl.isRegistered<ChatCubit>()) {
+      // Review fix: guards `isClosed` too, not just `isRegistered` — a
+      // double `close()` on an already-closed Cubit never resolves
+      // inside flutter_test's fake-async zone, freezing the suite (the
+      // exact hazard `app_drawer_test.dart`'s/`main_test.dart`'s own
+      // tearDown already guards against).
+      if (sl.isRegistered<ChatCubit>() && !sl<ChatCubit>().isClosed) {
         await sl<ChatCubit>().close();
       }
     },

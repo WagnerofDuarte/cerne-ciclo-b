@@ -140,8 +140,10 @@ class ChatRepositoryImpl implements ChatRepository {
     // [retryMessage] above): [Left] is unmapped; a [Right] is only ever
     // turned into a real [ChatInsight] when the backend's own `status`
     // is `'ready'` (RF08) — anything else (`generating`/`failed`/
-    // `dismissed`), or a `'ready'` response with no `content` (shouldn't
-    // happen, defensive), maps to `Right(null)` instead of a [Failure].
+    // `dismissed`), or a `'ready'` response with no non-blank `content`
+    // (shouldn't happen, defensive — `openapi.yaml` doesn't promise
+    // `minLength: 1` on this field), maps to `Right(null)` instead of a
+    // [Failure].
     final result = await _remoteDataSource.generateInsight(
       sessionId,
       triggerType: triggerType.wireValue,
@@ -150,7 +152,7 @@ class ChatRepositoryImpl implements ChatRepository {
     return result.match(
       (failure) => left(failure),
       (dto) => right(
-        dto.status == 'ready' && dto.content != null
+        dto.status == 'ready' && (dto.content?.trim().isNotEmpty ?? false)
             ? ChatInsight(id: dto.id, content: dto.content!)
             : null,
       ),

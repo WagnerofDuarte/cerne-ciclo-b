@@ -11,9 +11,13 @@ import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/network/access_token_provider.dart';
 import 'package:cerne/core/network/url_builder.dart';
 import 'package:cerne/features/chat/domain/entities/bookmark_state.dart';
+import 'package:cerne/features/chat/domain/entities/chat_insight.dart';
 import 'package:cerne/features/chat/domain/entities/chat_message.dart';
+import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
+import 'package:cerne/features/chat/domain/services/connectivity_watcher.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_state.dart';
+import 'package:cerne/features/entries/domain/usecases/save_chat_message_as_entry_use_case.dart';
 
 import '../../support/fake_path_provider_platform.dart';
 
@@ -31,6 +35,15 @@ class _FakeHttpClientAdapter implements HttpClientAdapter {
   final List<RequestOptions> requests = [];
   final List<ResponseBody Function()> _queue = [];
 
+  // spec-6-5 — `_fireInsightTrigger`'s own `chat-insight-create` POST
+  // fires unawaited, concurrently with whichever `chat-messages-send`
+  // POST is already in flight for that same `sendMessage()` call, so the
+  // two requests' real arrival order at this adapter isn't deterministic
+  // the way every other (sequential) call in this file is. Routed by a
+  // path substring instead of the shared FIFO `_queue` above, so each
+  // queue's own order stays independent of the other's.
+  final Map<String, List<ResponseBody Function()>> _routedQueue = {};
+
   void queueJsonResponse(int statusCode, Map<String, dynamic> body) {
     _queue.add(
       () => ResponseBody.fromString(
@@ -45,6 +58,35 @@ class _FakeHttpClientAdapter implements HttpClientAdapter {
 
   void queueErrorResponse(String code, String message, {int statusCode = 503}) {
     queueJsonResponse(statusCode, {
+      'code': code,
+      'message': message,
+      'retryable': true,
+    });
+  }
+
+  void queueResponseForPath(
+    String pathSubstring,
+    int statusCode,
+    Map<String, dynamic> body,
+  ) {
+    (_routedQueue[pathSubstring] ??= []).add(
+      () => ResponseBody.fromString(
+        jsonEncode(body),
+        statusCode,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        },
+      ),
+    );
+  }
+
+  void queueErrorResponseForPath(
+    String pathSubstring,
+    String code,
+    String message, {
+    int statusCode = 503,
+  }) {
+    queueResponseForPath(pathSubstring, statusCode, {
       'code': code,
       'message': message,
       'retryable': true,
@@ -72,6 +114,11 @@ class _FakeHttpClientAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     requests.add(options);
+    for (final entry in _routedQueue.entries) {
+      if (options.path.contains(entry.key) && entry.value.isNotEmpty) {
+        return entry.value.removeAt(0)();
+      }
+    }
     if (_queue.isEmpty) {
       throw StateError(
         'No queued response for ${options.method} ${options.path}',
@@ -110,6 +157,36 @@ Map<String, dynamic> _entryJson({
   'createdAt': '2026-01-01T00:00:00Z',
   'updatedAt': '2026-01-01T00:00:00Z',
 };
+
+/// `chat-insight-create`'s own response `data` shape (`InsightDto.
+/// fromJson`) — spec-6-5's own fixture, same shape `_sessionJson`/
+/// `_entryJson` already establish for their stories.
+Map<String, dynamic> _insightJson({
+  required String id,
+  required String sessionId,
+  required String triggerType,
+  required String status,
+  String? content,
+}) => {
+  'id': id,
+  'sessionId': sessionId,
+  'triggerType': triggerType,
+  'status': status,
+  'errorCode': null,
+  'content': content,
+  'dismissedAt': null,
+  'createdAt': '2026-01-01T00:00:00Z',
+};
+
+/// Queues a trivial one-token-then-done SSE response for a plain
+/// `sendMessage()` call that isn't itself the focus of the assertion —
+/// spec-6-5's own tests need several of these to drive the message-count
+/// window toward its threshold.
+void _queuePlainReply(_FakeHttpClientAdapter adapter, String reply) {
+  adapter.queueSseResponse([
+    'event: token\ndata: {"delta":"$reply"}\n\nevent: done\ndata: {}\n\n',
+  ]);
+}
 
 /// End-to-end coverage for spec-6-1's chat flow, driven through the real
 /// production object graph `sl` resolves for Home/Chat (the exact
@@ -652,6 +729,225 @@ void main() {
       expect(state.isOffline, isFalse);
       expect(state.messages[1].content, 'Entendo.');
       expect(state.messages[1].status, ChatMessageStatus.complete);
+    },
+  );
+
+  test(
+    'spec-6-5: reaching the message-count threshold (5 real sendMessage '
+    'calls) drives a genuine POST to chat-insight-create/{sessionId}, '
+    'unawaited alongside the 5th message\'s own chat-messages-send call, '
+    'with the real triggerType/triggerKey body and headers; a \'ready\' '
+    'response populates ChatReady.activeInsight -- none of the mocked '
+    'chat_cubit_test.dart coverage for this story drives the call through '
+    'the real ApiClient/Dio pipeline',
+    () async {
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+      adapter.queueJsonResponse(200, {
+        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+      });
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+
+      final cubit = sl<ChatCubit>();
+      await cubit.init();
+
+      for (var i = 0; i < 4; i++) {
+        _queuePlainReply(adapter, 'Resposta $i.');
+        await cubit.sendMessage('Mensagem $i');
+      }
+      expect(
+        adapter.requests.where((r) => r.path.contains('chat-insight-create')),
+        isEmpty,
+      );
+
+      adapter.queueResponseForPath(
+        'chat-insight-create',
+        200,
+        {
+          'data': _insightJson(
+            id: 'ins-1',
+            sessionId: 'session-1',
+            triggerType: 'message_count',
+            status: 'ready',
+            content: 'Você mencionou isso algumas vezes.',
+          ),
+        },
+      );
+      _queuePlainReply(adapter, 'Resposta final.');
+
+      await cubit.sendMessage('Mensagem final');
+      // Flushes the microtask hops `_fireInsightTrigger`'s own unawaited
+      // chain (isolatedSideEffect -> ChatRepository.generateInsight ->
+      // ChatRemoteDataSource -> ApiClient.post -> the real Dio/
+      // interceptor pipeline -> this fake adapter) needs to resolve and
+      // reach `_applyInsightResult` -- same convention `emitConnectivity`
+      // already uses for its own cross-channel hops.
+      for (var i = 0; i < 10; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      final state = cubit.state as ChatReady;
+      expect(
+        state.activeInsight,
+        const ChatInsight(
+          id: 'ins-1',
+          content: 'Você mencionou isso algumas vezes.',
+        ),
+      );
+
+      final insightRequest = adapter.requests.firstWhere(
+        (r) => r.path.contains('chat-insight-create'),
+      );
+      expect(
+        insightRequest.path,
+        sl<UrlBuilder>().build('chat-insight-create', ['session-1']),
+      );
+      expect(insightRequest.data, {
+        'triggerType': 'message_count',
+        'triggerKey': 'insight-0',
+      });
+      expect(insightRequest.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
+      expect(
+        insightRequest.headers['Authorization'],
+        'Bearer e2e-test-access-token',
+      );
+    },
+  );
+
+  test(
+    'spec-6-5: a failing chat-insight-create call -- mapped through the '
+    'real Dio/ApiClient error pipeline, never a fake repository Left the '
+    'way chat_cubit_test.dart exercises it -- never surfaces past the '
+    'fire-and-forget trigger: activeInsight stays null and the rest of '
+    'the Chat Session (composer, existing bubbles) stays fully usable',
+    () async {
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+      adapter.queueJsonResponse(200, {
+        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+      });
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+
+      final cubit = sl<ChatCubit>();
+      await cubit.init();
+
+      for (var i = 0; i < 4; i++) {
+        _queuePlainReply(adapter, 'Resposta $i.');
+        await cubit.sendMessage('Mensagem $i');
+      }
+
+      adapter.queueErrorResponseForPath(
+        'chat-insight-create',
+        'INTERNAL_ERROR',
+        'Falha ao gerar insight.',
+      );
+      _queuePlainReply(adapter, 'Resposta final.');
+
+      await cubit.sendMessage('Mensagem final');
+      for (var i = 0; i < 10; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      final state = cubit.state as ChatReady;
+      expect(state.activeInsight, isNull);
+      expect(state.isSending, isFalse);
+      expect(state.messages, hasLength(10));
+      expect(state.messages.last.content, 'Resposta final.');
+      expect(state.messages.last.status, ChatMessageStatus.complete);
+    },
+  );
+
+  test(
+    'spec-6-5 review fix: while the real connectivity_plus event-channel '
+    'pipeline reports "none", a fired inactivity trigger still closes/'
+    'reopens the window structurally but skips the network call entirely '
+    '-- no POST to chat-insight-create ever reaches the real transport, '
+    'and activeInsight stays null. Uncovered by chat_cubit_test.dart, '
+    'which only ever exercises this guard against a fake repository/'
+    'connectivity watcher, never the real event-channel + real ApiClient '
+    'pipeline together',
+    () async {
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+      adapter.queueJsonResponse(200, {
+        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+      });
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+
+      // A dedicated instance -- never `sl<ChatCubit>()`, which always
+      // carries production's 2-minute inactivity timeout -- wired to the
+      // exact same real `ChatRepository`/`ConnectivityWatcher` singletons
+      // `sl` already resolves for Home/Chat; only the inactivity timeout
+      // is shortened, the one documented test seam `chat_cubit.dart`'s
+      // own constructor comment calls out ("production never passes
+      // anything else"). Closed explicitly below since it was never
+      // registered with `sl`, so `resetCoreDependencies()` never disposes
+      // it.
+      final cubit = ChatCubit(
+        sl<ChatRepository>(),
+        sl<ConnectivityWatcher>(),
+        sl<SaveChatMessageAsEntryUseCase>(),
+        insightInactivityTimeout: const Duration(milliseconds: 30),
+      );
+      await cubit.init();
+
+      await emitConnectivity(['none']);
+      expect((cubit.state as ChatReady).isOffline, isTrue);
+
+      // Long enough for the short inactivity timer above to have fired
+      // at least once for real.
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      expect(
+        adapter.requests.where((r) => r.path.contains('chat-insight-create')),
+        isEmpty,
+      );
+      expect((cubit.state as ChatReady).activeInsight, isNull);
+
+      await cubit.close();
+    },
+  );
+
+  test(
+    'spec-6-5: dismissInsight() clears ChatReady.activeInsight with no '
+    'further request ever reaching the real transport -- no dismiss '
+    'endpoint exists in the contract (Boundaries)',
+    () async {
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+      adapter.queueJsonResponse(200, {
+        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+      });
+      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+
+      final cubit = sl<ChatCubit>();
+      await cubit.init();
+
+      for (var i = 0; i < 4; i++) {
+        _queuePlainReply(adapter, 'Resposta $i.');
+        await cubit.sendMessage('Mensagem $i');
+      }
+      adapter.queueResponseForPath(
+        'chat-insight-create',
+        200,
+        {
+          'data': _insightJson(
+            id: 'ins-1',
+            sessionId: 'session-1',
+            triggerType: 'message_count',
+            status: 'ready',
+            content: 'Um padrão notado.',
+          ),
+        },
+      );
+      _queuePlainReply(adapter, 'Resposta final.');
+      await cubit.sendMessage('Mensagem final');
+      for (var i = 0; i < 10; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect((cubit.state as ChatReady).activeInsight, isNotNull);
+
+      final requestCountBeforeDismiss = adapter.requests.length;
+      cubit.dismissInsight();
+
+      expect((cubit.state as ChatReady).activeInsight, isNull);
+      expect(adapter.requests, hasLength(requestCountBeforeDismiss));
     },
   );
 }

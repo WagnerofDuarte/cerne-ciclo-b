@@ -137,3 +137,35 @@ User-requested scope: e2e coverage for story 6.3 (dropped-stream resilience & of
 
 - Not covered here: a flapping-connectivity e2e case (rapid on/off/on) — already logged in spec-6-3 as a deferred, pre-existing architectural trade-off, not a gap introduced by this run.
 - No device/simulator or CI exists yet; revisit true on-device E2E once one is introduced (per `AGENTS.md`).
+
+---
+
+## Target (2026-11-06, second pass)
+
+Story 6.5 (proactive insight injection & failure isolation) is `done` in `sprint-status.yaml`, with two uncommitted round-2 review fixes on top (`_fireInsightTrigger`'s offline guard; `generateInsight`'s blank-content trim), both already covered by extensive `chat_cubit_test.dart` additions (+185 lines, a dedicated `'proactive insight — spec-6-5'` group against a fake `ChatRepository`/`ConnectivityWatcher`). `chat_flow_e2e_test.dart` (the real-pipeline tier) had zero coverage for this story — unlike 6.1/6.3/6.4, each already proven there. Inspecting the unit group specifically also surfaced that the offline-skip review fix has no coverage anywhere against a *real* `connectivity_plus` event channel + real `ApiClient`/`Dio` pipeline together — the unit tests only ever exercise it against fakes, and that guard only matters for the inactivity-timer trigger path (`sendMessage()` itself already blocks before incrementing the message-count window while `ChatReady.isOffline`, so the message-count trigger can structurally never fire offline).
+
+## Generated Tests
+
+### E2E Tests (real pipeline, faked HTTP transport + native channels only)
+
+- [x] `test/features/chat/chat_flow_e2e_test.dart` — 4 new cases, plus a routed-response extension to the file's own fake `HttpClientAdapter`:
+  - Added `queueResponseForPath`/`queueErrorResponseForPath` (keyed by a path substring, checked before falling back to the existing FIFO queue) — needed because `_fireInsightTrigger`'s own `chat-insight-create` POST fires unawaited, concurrently with whichever `chat-messages-send` POST is already in flight for that same `sendMessage()` call, so the two requests' real arrival order at the fake adapter isn't deterministic the way every other (sequential) call in this file is.
+  - "reaching the message-count threshold (5 real sendMessage calls) drives a genuine POST to chat-insight-create/{sessionId} ... a 'ready' response populates ChatReady.activeInsight" — asserts the real URL (`UrlBuilder`-built), the real `{triggerType, triggerKey}` body, and the real `apikey`/`Authorization` headers.
+  - "a failing chat-insight-create call ... mapped through the real Dio/ApiClient error pipeline ... never surfaces past the fire-and-forget trigger" — proves RNF09's never-throws mapping for this endpoint specifically, which no other test (unit or e2e) exercises against a real transport error.
+  - "review fix: while the real connectivity_plus event-channel pipeline reports 'none', a fired inactivity trigger ... skips the network call entirely" — a dedicated `ChatCubit` instance (not `sl<ChatCubit>()`, which always carries production's 2-minute timeout) constructed with a 30ms `insightInactivityTimeout` override against the same real `ChatRepository`/`ConnectivityWatcher` singletons, proving no request ever reaches the fake adapter while offline.
+  - "dismissInsight() clears ChatReady.activeInsight with no further request ever reaching the real transport" — a cheap real-transport confirmation of the "no dismiss endpoint exists" boundary.
+
+## Verification
+
+- `fvm flutter analyze` — zero issues (project-wide)
+- `fvm flutter test` — 1051/1051 passed (full suite, including all 4 new cases)
+
+## Coverage
+
+- Story 6.5 now has real-pipeline-tier proof for its message-count trigger, its real-transport failure isolation, and its `dismissInsight()` boundary — closing the same kind of per-story e2e gap this log has closed for 6.1/6.3 before it.
+- The offline-skip review fix (uncovered anywhere against a real connectivity channel before this run) now has a regression test that would fail if `_fireInsightTrigger`'s `if (_isOffline) return;` guard were ever removed.
+
+## Next Steps
+
+- Not covered here: the inactivity-trigger happy path (a real `'ready'` insight arriving via the real timer rather than the message-count race) — the message-count test above already proves the real transport/serialization boundary for `generateInsight`, and the timer-vs-counter race logic itself is already exhaustively covered at the unit tier (`chat_cubit_test.dart`'s own "Near-simultaneous"/"2 minutes idle" cases); adding it here would duplicate rather than close a gap.
+- No device/simulator or CI exists yet; revisit true on-device E2E once one is introduced (per `AGENTS.md`).
