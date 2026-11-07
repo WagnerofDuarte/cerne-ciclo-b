@@ -101,10 +101,14 @@ Future<void> setupCoreDependencies() async {
   // persisted locally), so unlike the call above this one needs no
   // `Hive.initFlutter()` ordering and isn't `async`.
   registerExportFeature();
-  // spec-8-1 — must run after `registerEntriesFeature()` above: `Dashboard
-  // Cubit` depends on the `PendingEntryWriteTracker` that registration
-  // provides (Code Map). No Hive box of its own either (Boundaries/Never:
-  // "cache the aggregate", AD-15 exclusion), so this isn't `async` either.
+  // spec-8-1 — called after `registerEntriesFeature()` above, since
+  // `DashboardCubit` depends on the `PendingEntryWriteTracker` that
+  // registration provides (Code Map); every registration involved is
+  // `registerLazySingleton`, though, so this call order isn't itself
+  // load-bearing (review finding, `dashboard_injection.dart`'s own doc
+  // comment) — `PendingEntryWriteTracker` is only resolved lazily, on
+  // first use. No Hive box of its own either (Boundaries/Never: "cache
+  // the aggregate", AD-15 exclusion), so this isn't `async` either.
   registerDashboardFeature();
 }
 

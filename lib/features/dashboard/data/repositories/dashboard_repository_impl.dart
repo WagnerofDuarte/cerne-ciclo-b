@@ -22,4 +22,13 @@ class DashboardRepositoryImpl implements DashboardRepository {
     final result = await _remoteDataSource.getAggregate(period: period);
     return result.map((dto) => dto.toDomain());
   }
+
+  /// spec-8-2 — same thin pass-through shape as [getAggregate] above.
+  @override
+  Future<Either<Failure, String>> getNarrative({
+    required String period,
+  }) async {
+    final result = await _remoteDataSource.getNarrative(period: period);
+    return result.map((dto) => dto.toDomain());
+  }
 }

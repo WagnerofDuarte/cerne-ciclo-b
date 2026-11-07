@@ -106,18 +106,91 @@ through to a real secure-storage write and a real
 Not applicable separately, same rationale as the export entry above —
 exercised through the same e2e suite.
 
+## Target feature: dashboard (story 8.1 — on-demand dashboard aggregation
+across entry counts)
+
+Chosen because it's the most recently implemented story (epic 8, the
+rest of which is still `backlog`), and — same gap pattern as auth
+above — had thorough per-layer and fake-repository widget coverage but
+no `*_flow_e2e_test.dart` of its own.
+
+- [x] `test/features/dashboard/dashboard_flow_e2e_test.dart` — 5 tests,
+  driven directly against the real, DI-resolved `DashboardCubit`
+  (`sl<DashboardCubit>()`, the exact instance `AccountSettingsScreen`
+  resolves via `app_router.dart`):
+  - Happy path: `load()` → genuine `dashboard-aggregate-get` GET
+    (`period: 'all'` query param, real `apikey`/bearer headers) → real
+    `DashboardAggregateDto.toDomain()` decode of a 3-bucket JSON
+    payload → `ResourceData` with `bucketCounts` in the exact backend
+    order.
+  - A response missing the required `totals` field → the real
+    `DashboardRemoteDataSource` try/catch → `ResourceError
+    (MalformedResponse)` (the local decode-failure path, distinct from
+    `Failure.fromCode`).
+  - A non-retryable `VALIDATION_ERROR` → real `Failure.fromCode` →
+    `ResourceError`, exactly one request (no `RetryInterceptor` retry).
+  - A retryable `NETWORK_TIMEOUT` → exhausts the real
+    `RetryInterceptor` policy (1 + `maxRetries` requests) before
+    surfacing as `ResourceError`.
+  - Acceptance Criteria ("entry created elsewhere while mounted ...
+    chart recomputes"), driven for real: a genuine `entries-create`
+    round trip through the exact shared `sl<PendingEntryWriteTracker>()`
+    singleton confirms a write, and `DashboardCubit`'s own constructor
+    subscription (wired by `registerDashboardFeature()`'s real call
+    order in `injection_container.dart`) reacts with a brand-new real
+    `dashboard-aggregate-get` fetch — with no test/screen code ever
+    calling `load()` a second time. Asserts exactly two
+    `dashboard-aggregate-get` requests left through the real transport.
+  - **(story 8.2 addition)** A `DashboardNarrativeCubit — spec-8-2
+    independent narrative fetch` group, same real DI-resolved pattern
+    (`sl<DashboardNarrativeCubit>()`), 3 tests: happy path (`load()` →
+    genuine `dashboard-narrative-get` GET, `period: 'all'`, real
+    headers → real `DashboardNarrativeDto.toDomain()` decode →
+    `ResourceData` with the narrative text); a response missing the
+    required `generatedAt` field → `ResourceError(MalformedResponse)`
+    (local decode-failure path); a non-retryable `VALIDATION_ERROR` →
+    `ResourceError`, exactly one request (no `RetryInterceptor` retry).
+
+This complements, and does not duplicate, existing coverage:
+`dashboard_cubit_test.dart`/`dashboard_narrative_cubit_test.dart`
+(hand-written fake `DashboardRepository`/`PendingEntryWriteTracker`,
+every I/O-matrix transition including the stale-in-flight generation
+guard), `dashboard_remote_data_source_test.dart` (mocked `ApiClient`,
+DTO decoding for both `getAggregate`/`getNarrative`),
+`dashboard_aggregate_dto_test.dart`/`dashboard_narrative_dto_test.dart`,
+`dashboard_repository_impl_test.dart`, and
+`account_settings_screen_test.dart`/`dashboard_chart_section_test.dart`
+(widget rendering against a fake repository, including the
+`initState`-calls-`load()`-unconditionally, screen-reader-announcement,
+and — story 8.2 — the gated narrative-error-announcement review
+findings). None of those drove a real `dashboard-aggregate-get`/
+`dashboard-narrative-get` round trip — real URL building, real
+headers, the real `RetryInterceptor` policy, the real DTO mapping off
+a real decoded JSON payload — nor proved that `DashboardCubit`'s
+constructor subscription actually reaches the exact shared
+`sl<PendingEntryWriteTracker>()` singleton a real `entries-create`
+confirms a write through.
+
+### API Tests
+
+Not applicable separately, same rationale as export/auth above —
+exercised through the same e2e suite.
+
 ## Verification
 
 - `fvm flutter analyze` — 0 issues (project-wide)
-- `fvm flutter test` — **1135/1135 passed**, no regressions in the
-  existing suite (export's own entry above was last verified at
-  1128/1128; the auth additions above account for the +7 difference —
-  4 new auth tests plus 3 already added by story 7.3 in between)
+- `fvm flutter test` — **1199/1199 passed**, no regressions in the
+  existing suite (story 8.2's additions — the 3-test narrative e2e
+  group above, plus the account-settings-screen announcement-gating
+  widget tests and the rest of its own unit/widget coverage — account
+  for the +24 difference from the prior 1175/1175 baseline)
 
 ## Coverage
 
 - Features with `*_flow_e2e_test.dart` coverage: capture, entries,
-  chat, export, **auth** (new)
+  chat, export, auth, **dashboard** (now covering both
+  `dashboard-aggregate-get` since story 8.1 and `dashboard-narrative-get`
+  since story 8.2's own addition to the same file)
 - Still missing this level of coverage: vault (biometric/PIN gate) —
   already `done`, revisit when its own review cycle comes up. Unlike
   the others, `VaultRepositoryImpl` makes zero network calls
@@ -129,8 +202,10 @@ exercised through the same e2e suite.
   real secure-storage channel without a key collision (`vault_pin` vs.
   `user_access_token`/`user_refresh_token`), which no current test
   exercises end to end.
-- Epic 8 (dashboard/profile/logout/account-deletion) is still
-  `backlog`, so e2e coverage for it is N/A for now.
+- Story 8.2 (narrative text) now has the same e2e treatment as 8.1
+  (see the `DashboardNarrativeCubit` group above). Epic 8 beyond that
+  — profile editing, logout, account deletion — is still `backlog`, so
+  e2e coverage for those is N/A for now.
 
 ## Next Steps
 

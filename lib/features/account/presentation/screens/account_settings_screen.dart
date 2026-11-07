@@ -7,18 +7,20 @@ import '../../../../core/resource.dart';
 import '../../../../core/widgets/back_arrow_header.dart';
 import '../../../dashboard/domain/entities/dashboard_aggregate.dart';
 import '../../../dashboard/presentation/cubit/dashboard_cubit.dart';
+import '../../../dashboard/presentation/cubit/dashboard_narrative_cubit.dart';
 import '../../../dashboard/presentation/widgets/dashboard_chart_section.dart';
 import '../cubit/account_settings_cubit.dart';
 
 /// Tela 6 — Configurações, Story 2.4's real build (Acceptance Criteria:
 /// "shows only the biometric toggle — minimal, Epic 8 extends it, never
 /// rebuilds it") extended by spec-8-1 with the "Sua evolução" chart
-/// section below the toggle. Replaces the former
-/// `ConfiguracoesPlaceholderScreen`.
+/// section below the toggle, and by spec-8-2 with its independent AI
+/// narrative fetch. Replaces the former `ConfiguracoesPlaceholderScreen`.
 class AccountSettingsScreen extends StatefulWidget {
   const AccountSettingsScreen({
     required this.cubit,
     required this.dashboardCubit,
+    required this.narrativeCubit,
     super.key,
   });
 
@@ -28,6 +30,12 @@ class AccountSettingsScreen extends StatefulWidget {
   /// `lazySingleton` like [cubit] (Code Map); this `StatefulWidget` never
   /// closes it either, same rationale [cubit]'s own doc already gives.
   final DashboardCubit dashboardCubit;
+
+  /// spec-8-2 — the chart section's own independent AI narrative fetch, a
+  /// second DI `lazySingleton` like [dashboardCubit] above (Boundaries:
+  /// "two independent fetches fired in parallel, neither awaiting the
+  /// other").
+  final DashboardNarrativeCubit narrativeCubit;
 
   @override
   State<AccountSettingsScreen> createState() => _AccountSettingsScreenState();
@@ -46,6 +54,9 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
     // fetch, never the singleton's stale state" (FR-09: "computed on
     // demand, never stale").
     widget.dashboardCubit.load();
+    // spec-8-2 — fired alongside the call above, neither awaiting the
+    // other (Boundaries: "two independent fetches fired in parallel").
+    widget.narrativeCubit.load();
   }
 
   // Review finding: mirrors `vault_lock_screen.dart`'s own `_announce` —
@@ -73,6 +84,10 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
         // `MeusRegistrosScreen` already uses for its own `cubit`/
         // `searchCubit` pair.
         BlocProvider.value(value: widget.dashboardCubit),
+        // spec-8-2 — makes `DashboardNarrativeCubit` available to
+        // `DashboardChartSection`'s own narrative section, same
+        // convention as `dashboardCubit` above.
+        BlocProvider.value(value: widget.narrativeCubit),
       ],
       child: Scaffold(
         backgroundColor: DesignTokens.colorSurfaceBg,
@@ -183,12 +198,55 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                     // this `State` already uses for the toggle's error,
                     // same "VoiceOver doesn't reliably treat a live-region
                     // update as an announcement on its own" rationale.
-                    BlocListener<DashboardCubit, Resource<DashboardAggregate>>(
-                      listener: (context, state) {
-                        if (state is ResourceError<DashboardAggregate>) {
-                          _announce(state.failure.message);
-                        }
-                      },
+                    MultiBlocListener(
+                      listeners: [
+                        BlocListener<
+                          DashboardCubit,
+                          Resource<DashboardAggregate>
+                        >(
+                          listener: (context, state) {
+                            if (state is ResourceError<DashboardAggregate>) {
+                              _announce(state.failure.message);
+                            }
+                          },
+                        ),
+                        // Spec Change Log (spec-8-2 amendment) — the
+                        // original unconditional version of this listener
+                        // could speak a narrative-failed announcement for
+                        // a user whose screen never shows the narrative
+                        // section at all (0/1/mid-range counts), in
+                        // tension with the adjacent frozen "Never: show
+                        // narrative text or its error for 0/1-count
+                        // states" line. Gated on `DashboardCubit`'s own
+                        // *current* state — read directly via
+                        // `context.read`, never merged with this
+                        // `Resource<String>` into one state object (the
+                        // "Never: couple the two Resources" line is
+                        // unaffected) — and announces the same fixed copy
+                        // the narrative section itself renders
+                        // (`DashboardChartSection.narrativeUnavailableMessage`)
+                        // rather than the raw, unsanitized `Failure.
+                        // message`, so VoiceOver and sighted users hear/
+                        // read the same wording for the same failure.
+                        BlocListener<DashboardNarrativeCubit, Resource<String>>(
+                          listener: (context, state) {
+                            if (state is! ResourceError<String>) {
+                              return;
+                            }
+                            final dashboardState = context
+                                .read<DashboardCubit>()
+                                .state;
+                            if (dashboardState
+                                    is ResourceData<DashboardAggregate> &&
+                                dashboardState.data.totalCount > 30) {
+                              _announce(
+                                DashboardChartSection
+                                    .narrativeUnavailableMessage,
+                              );
+                            }
+                          },
+                        ),
+                      ],
                       child: const DashboardChartSection(),
                     ),
                   ],

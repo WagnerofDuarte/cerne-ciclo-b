@@ -14,6 +14,7 @@ import '../../features/auth/presentation/screens/auth_screen.dart';
 import '../../features/chat/presentation/cubit/chat_cubit.dart';
 import '../../features/chat/presentation/screens/chat_screen.dart';
 import '../../features/dashboard/presentation/cubit/dashboard_cubit.dart';
+import '../../features/dashboard/presentation/cubit/dashboard_narrative_cubit.dart';
 import '../../features/entries/presentation/cubit/entries_search_cubit.dart';
 import '../../features/entries/presentation/cubit/entry_detail_cubit.dart';
 import '../../features/entries/presentation/cubit/meus_registros_cubit.dart';
@@ -138,6 +139,7 @@ GoRouter buildAppRouter({
         builder: (context, state) => AccountSettingsScreen(
           cubit: sl<AccountSettingsCubit>(),
           dashboardCubit: sl<DashboardCubit>(),
+          narrativeCubit: sl<DashboardNarrativeCubit>(),
         ),
       ),
     ],

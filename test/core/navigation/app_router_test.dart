@@ -28,6 +28,7 @@ import 'package:cerne/features/chat/presentation/screens/chat_screen.dart';
 import 'package:cerne/features/dashboard/domain/entities/dashboard_aggregate.dart';
 import 'package:cerne/features/dashboard/domain/repositories/dashboard_repository.dart';
 import 'package:cerne/features/dashboard/presentation/cubit/dashboard_cubit.dart';
+import 'package:cerne/features/dashboard/presentation/cubit/dashboard_narrative_cubit.dart';
 import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
@@ -136,6 +137,14 @@ class _FakeDashboardRepository implements DashboardRepository {
   Future<Either<Failure, DashboardAggregate>> getAggregate({
     required String period,
   }) async => right(const DashboardAggregate(totalCount: 0, bucketCounts: []));
+
+  // spec-8-2 — `/configuracoes`'s `GoRoute.builder` also resolves `sl<
+  // DashboardNarrativeCubit>()` now; same trivial-fake rationale as
+  // `getAggregate` above.
+  @override
+  Future<Either<Failure, String>> getNarrative({
+    required String period,
+  }) async => right('');
 }
 
 /// A trivial fake — mirrors `_FakeEntriesRepository` above: this suite's
@@ -363,6 +372,15 @@ void main() {
     // dashboard feature's own behavior.
     sl.registerLazySingleton<DashboardCubit>(
       () => DashboardCubit(
+        _FakeDashboardRepository(),
+        _UnusedPendingEntryWriteTracker(),
+      ),
+    );
+    // spec-8-2 — `/configuracoes`'s `GoRoute.builder` also resolves `sl<
+    // DashboardNarrativeCubit>()` now; same trivial-fake rationale as
+    // `DashboardCubit` above.
+    sl.registerLazySingleton<DashboardNarrativeCubit>(
+      () => DashboardNarrativeCubit(
         _FakeDashboardRepository(),
         _UnusedPendingEntryWriteTracker(),
       ),

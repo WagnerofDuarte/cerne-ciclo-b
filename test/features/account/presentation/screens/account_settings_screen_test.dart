@@ -13,10 +13,13 @@ import 'package:cerne/features/account/presentation/screens/account_settings_scr
 import 'package:cerne/features/dashboard/domain/entities/dashboard_aggregate.dart';
 import 'package:cerne/features/dashboard/domain/repositories/dashboard_repository.dart';
 import 'package:cerne/features/dashboard/presentation/cubit/dashboard_cubit.dart';
+import 'package:cerne/features/dashboard/presentation/cubit/dashboard_narrative_cubit.dart';
 import 'package:cerne/features/dashboard/presentation/widgets/dashboard_chart_section.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
+
+import '../../../../support/intercept_announcements.dart';
 
 /// Same plain (non-mocktail) fake shape as
 /// `account_settings_cubit_test.dart`'s own `_FakeAccountSettingsRepository`
@@ -86,10 +89,21 @@ class _FakeDashboardRepository implements DashboardRepository {
     const DashboardAggregate(totalCount: 0, bucketCounts: []),
   );
 
+  /// spec-8-2 — defaults to a harmless success, same rationale
+  /// [getAggregateResult] already gives: this suite's own job is the
+  /// biometric toggle/chart wiring, not the narrative's own behavior
+  /// (`dashboard_chart_section_test.dart`'s job).
+  Either<Failure, String> getNarrativeResult = right('');
+
   @override
   Future<Either<Failure, DashboardAggregate>> getAggregate({
     required String period,
   }) async => getAggregateResult;
+
+  @override
+  Future<Either<Failure, String>> getNarrative({
+    required String period,
+  }) async => getNarrativeResult;
 }
 
 /// A trivial fake `PendingEntryWriteTracker` — this suite never exercises
@@ -136,6 +150,19 @@ DashboardCubit _buildDashboardCubit({DashboardRepository? repository}) {
   return cubit;
 }
 
+/// spec-8-2 — mirrors [_buildDashboardCubit] above for the screen's own
+/// second, independent cubit (Code Map).
+DashboardNarrativeCubit _buildNarrativeCubit({
+  DashboardRepository? repository,
+}) {
+  final cubit = DashboardNarrativeCubit(
+    repository ?? _FakeDashboardRepository(),
+    _UnusedPendingEntryWriteTracker(),
+  );
+  addTearDown(() => cubit.close());
+  return cubit;
+}
+
 /// `/configuracoes`'s `BackArrowHeader` does `context.go('/')`
 /// (`back_arrow_header_test.dart`'s own rationale) — needs a real
 /// `GoRouter` ancestor to resolve, hence this minimal two-route wrapper
@@ -174,7 +201,11 @@ Future<(_FakeAccountSettingsRepository, AccountSettingsCubit)> _pumpScreen(
   addTearDown(fakeRepository.dispose);
 
   final router = _routerWith(
-    AccountSettingsScreen(cubit: cubit, dashboardCubit: _buildDashboardCubit()),
+    AccountSettingsScreen(
+      cubit: cubit,
+      dashboardCubit: _buildDashboardCubit(),
+      narrativeCubit: _buildNarrativeCubit(),
+    ),
   );
   addTearDown(router.dispose);
   await tester.pumpWidget(MaterialApp.router(routerConfig: router));
@@ -229,6 +260,7 @@ void main() {
         AccountSettingsScreen(
           cubit: cubit,
           dashboardCubit: _buildDashboardCubit(),
+          narrativeCubit: _buildNarrativeCubit(),
         ),
       );
       addTearDown(router.dispose);
@@ -316,6 +348,7 @@ void main() {
       AccountSettingsScreen(
         cubit: cubit,
         dashboardCubit: _buildDashboardCubit(),
+        narrativeCubit: _buildNarrativeCubit(),
       ),
     );
     addTearDown(router.dispose);
@@ -365,6 +398,7 @@ void main() {
         AccountSettingsScreen(
           cubit: accountCubit,
           dashboardCubit: dashboardCubit,
+          narrativeCubit: _buildNarrativeCubit(),
         ),
       );
       addTearDown(router.dispose);
@@ -380,6 +414,187 @@ void main() {
         find.text('Comece a registrar para ver sua evolução aqui'),
         findsNothing,
       );
+    },
+  );
+
+  testWidgets(
+    // Review finding (round 2): the new `BlocListener<DashboardCubit, '
+    // Resource<DashboardAggregate>>` announcing a `ResourceError` via '
+    // `_announce` (mirroring the biometric toggle\'s own announcement) '
+    // had no test — deleting it or inverting its condition would ship '
+    // silently.
+    'a DashboardCubit ResourceError sends the Failure\'s message as a real '
+    'screen-reader announcement, same as the biometric toggle\'s own '
+    'announcement',
+    (tester) async {
+      final announcements = interceptAnnouncements(tester);
+      final fakeDashboardRepository = _FakeDashboardRepository()
+        ..getAggregateResult = left(
+          const Failure.networkTimeout(message: 'Sem conexão com o gráfico'),
+        );
+      final dashboardCubit = _buildDashboardCubit(
+        repository: fakeDashboardRepository,
+      );
+      final fakeAccountRepository = _FakeAccountSettingsRepository();
+      final accountCubit = AccountSettingsCubit(fakeAccountRepository);
+      addTearDown(() => accountCubit.close());
+      addTearDown(fakeAccountRepository.dispose);
+
+      final router = _routerWith(
+        AccountSettingsScreen(
+          cubit: accountCubit,
+          dashboardCubit: dashboardCubit,
+          narrativeCubit: _buildNarrativeCubit(),
+        ),
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+      await tester.pumpAndSettle();
+
+      expect(announcements, contains('Sem conexão com o gráfico'));
+    },
+  );
+
+  testWidgets(
+    // Spec Change Log (spec-8-2 amendment, blind-hunter + verification-gap
+    // review finding): the original unconditional version of this listener
+    // would speak a narrative-failed announcement even for a user whose
+    // screen never renders the narrative section — proving the gate fires
+    // correctly is the mirror image of the "gate blocks" test right below.
+    'a narrative ResourceError announces the fixed narrative-unavailable '
+    'copy (never the raw Failure.message) when DashboardCubit\'s own state '
+    'is ResourceData with totalCount > 30 — the only state where the '
+    'narrative section is actually visible',
+    (tester) async {
+      final announcements = interceptAnnouncements(tester);
+      final fakeRepository = _FakeDashboardRepository()
+        ..getAggregateResult = right(
+          const DashboardAggregate(totalCount: 42, bucketCounts: [42]),
+        )
+        ..getNarrativeResult = left(
+          const Failure.networkTimeout(message: 'mensagem crua do narrative'),
+        );
+      final dashboardCubit = _buildDashboardCubit(repository: fakeRepository);
+      final narrativeCubit = _buildNarrativeCubit(repository: fakeRepository);
+      final fakeAccountRepository = _FakeAccountSettingsRepository();
+      final accountCubit = AccountSettingsCubit(fakeAccountRepository);
+      addTearDown(() => accountCubit.close());
+      addTearDown(fakeAccountRepository.dispose);
+
+      final router = _routerWith(
+        AccountSettingsScreen(
+          cubit: accountCubit,
+          dashboardCubit: dashboardCubit,
+          narrativeCubit: narrativeCubit,
+        ),
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+      await tester.pumpAndSettle();
+
+      expect(announcements, contains('Não foi possível gerar o balanço agora'));
+      expect(announcements, isNot(contains('mensagem crua do narrative')));
+    },
+  );
+
+  testWidgets(
+    // Mirror image of the test above: proves the gating condition from
+    // patch #1 actually gates, not just that it can fire — a narrative
+    // ResourceError must never be announced for a 0 or 1 totalCount, even
+    // though that's exactly the state the amendment was written to guard
+    // against (Spec Change Log: "a user with 30 or fewer entries hearing a
+    // spoken error about a paragraph that was never on screen").
+    'a narrative ResourceError never announces when DashboardCubit\'s own '
+    'totalCount is 0 or 1 — the narrative section is never shown for '
+    'either count, regardless of the narrative fetch\'s own result',
+    (tester) async {
+      for (final totalCount in [0, 1]) {
+        final announcements = interceptAnnouncements(tester);
+        final fakeRepository = _FakeDashboardRepository()
+          ..getAggregateResult = right(
+            DashboardAggregate(
+              totalCount: totalCount,
+              bucketCounts: totalCount == 0 ? [] : [1],
+            ),
+          )
+          ..getNarrativeResult = left(
+            const Failure.networkTimeout(message: 'mensagem crua do narrative'),
+          );
+        final dashboardCubit = _buildDashboardCubit(repository: fakeRepository);
+        final narrativeCubit = _buildNarrativeCubit(repository: fakeRepository);
+        final fakeAccountRepository = _FakeAccountSettingsRepository();
+        final accountCubit = AccountSettingsCubit(fakeAccountRepository);
+        addTearDown(() => accountCubit.close());
+        addTearDown(fakeAccountRepository.dispose);
+
+        final router = _routerWith(
+          AccountSettingsScreen(
+            cubit: accountCubit,
+            dashboardCubit: dashboardCubit,
+            narrativeCubit: narrativeCubit,
+          ),
+        );
+        addTearDown(router.dispose);
+        await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+        await tester.pumpAndSettle();
+
+        expect(
+          announcements,
+          isEmpty,
+          reason:
+              'totalCount=$totalCount must never announce a narrative '
+              'error — the narrative section is not rendered for this '
+              'count',
+        );
+      }
+    },
+  );
+
+  testWidgets(
+    // Review finding: the switch from a non-scrolling `Padding` to
+    // `Expanded` + `SingleChildScrollView` (round 2) was made specifically
+    // because the toggle plus the new chart section "can grow past the
+    // available height on a shorter device/larger text scale" (inline
+    // comment on the screen itself) — but nothing demonstrated that claim.
+    // A short viewport plus a large text-scale factor is the combination
+    // most likely to overflow; this proves the screen renders both the
+    // toggle and a populated chart under it without a RenderFlex overflow.
+    'the toggle and a populated chart both fit on a short viewport at a '
+    'large text-scale factor, with no RenderFlex overflow (review finding)',
+    (tester) async {
+      tester.view.physicalSize = const Size(360, 500);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      final fakeDashboardRepository = _FakeDashboardRepository()
+        ..getAggregateResult = right(
+          const DashboardAggregate(totalCount: 12, bucketCounts: [3, 0, 4, 5]),
+        );
+      final dashboardCubit = _buildDashboardCubit(
+        repository: fakeDashboardRepository,
+      );
+      final fakeAccountRepository = _FakeAccountSettingsRepository();
+      final accountCubit = AccountSettingsCubit(fakeAccountRepository);
+      addTearDown(() => accountCubit.close());
+      addTearDown(fakeAccountRepository.dispose);
+
+      final router = _routerWith(
+        AccountSettingsScreen(
+          cubit: accountCubit,
+          dashboardCubit: dashboardCubit,
+          narrativeCubit: _buildNarrativeCubit(),
+        ),
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(Switch), findsOneWidget);
+      expect(find.byType(DashboardChartBar), findsNWidgets(4));
+      expect(tester.takeException(), isNull);
     },
   );
 }

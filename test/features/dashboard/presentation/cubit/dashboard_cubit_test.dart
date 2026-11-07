@@ -63,6 +63,15 @@ class _FakeDashboardRepository implements DashboardRepository {
     }
     return Future.value(_results.removeAt(0));
   }
+
+  // spec-8-2 — this suite's `DashboardCubit` never reads `getNarrative`
+  // (that's `DashboardNarrativeCubit`'s own, `dashboard_narrative_cubit_
+  // test.dart`'s job); a trivial implementation satisfies the widened
+  // interface only.
+  @override
+  Future<Either<Failure, String>> getNarrative({
+    required String period,
+  }) async => throw UnimplementedError('not expected to be called');
 }
 
 /// A plain (non-mocktail) fake [PendingEntryWriteTracker] — [emitConfirmed]

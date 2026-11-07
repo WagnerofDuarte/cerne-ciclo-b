@@ -3,6 +3,7 @@ import 'package:fpdart/fpdart.dart';
 import '../../../../core/failure/failure.dart';
 import '../../../../core/network/api_client.dart';
 import '../models/dashboard_aggregate_dto.dart';
+import '../models/dashboard_narrative_dto.dart';
 
 /// The dashboard feature's one remote data source — `dashboard-aggregate-
 /// get`, called by `x-cerne-function` name only (AGENTS.md), [period] sent
@@ -25,6 +26,26 @@ class DashboardRemoteDataSource {
       try {
         final data = json['data'] as Map<String, dynamic>;
         return right(DashboardAggregateDto.fromJson(data));
+      } catch (error) {
+        return left(Failure.malformedResponse(message: error.toString()));
+      }
+    });
+  }
+
+  /// `dashboard-narrative-get` — spec-8-2, same `.get` + try/catch-to-
+  /// `malformedResponse` decode shape as [getAggregate] above, called by
+  /// `x-cerne-function` name only (AGENTS.md).
+  Future<Either<Failure, DashboardNarrativeDto>> getNarrative({
+    required String period,
+  }) async {
+    final result = await _apiClient.get(
+      'dashboard-narrative-get',
+      queryParameters: {'period': period},
+    );
+    return result.flatMap((json) {
+      try {
+        final data = json['data'] as Map<String, dynamic>;
+        return right(DashboardNarrativeDto.fromJson(data));
       } catch (error) {
         return left(Failure.malformedResponse(message: error.toString()));
       }

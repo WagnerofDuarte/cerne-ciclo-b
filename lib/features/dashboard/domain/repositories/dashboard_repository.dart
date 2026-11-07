@@ -19,4 +19,14 @@ abstract class DashboardRepository {
   Future<Either<Failure, DashboardAggregate>> getAggregate({
     required String period,
   });
+
+  /// Calls `dashboard-narrative-get` (`ApiClient.get`, [period] sent as the
+  /// one required `period` query parameter) — spec-8-2's own independent
+  /// second fetch, decoupled from [getAggregate] (Boundaries: "couple the
+  /// two `Resource`s into one state object" is explicitly `Never`). A thin
+  /// pass-through, no cache, same rationale [getAggregate]'s own doc gives.
+  /// `DashboardNarrativeCubit.load()` is this method's one call site,
+  /// always with `period: 'all'` (Boundaries: same fixed value as
+  /// [getAggregate]).
+  Future<Either<Failure, String>> getNarrative({required String period});
 }

@@ -798,4 +798,28 @@ class DesignTokens {
   /// `dashEmpty`; approximated with a built-in Material icon, same
   /// rationale [dialogIconSize]/[biometricIconSize] already use.
   static const double dashboardEmptyStateIconSize = 28;
+
+  /// Title-to-card gap (`gap:12px` on the column wrapping "Sua evolução"
+  /// and its card) and the non-empty card's own bar-row-to-message margin
+  /// (`margin-bottom:12px` in `dashNotEmpty`) — review finding: both were
+  /// built with [spacingSm] (8px), 4px short of this value; not on the
+  /// 4dp scale either, so it needs its own token like [dashboardCardPadding].
+  static const double dashboardSectionGap = 12;
+
+  /// spec-8-2 — the AI narrative paragraph's own text, and its "Não foi
+  /// possível gerar o balanço agora" error message, in the `dashNotEmpty`
+  /// block's `{{ narrativeText }}`/`narrativeFailed` markup — `font-
+  /// family:'Karla',sans-serif;font-size:13px;line-height:20px`. Not on
+  /// the existing type scale ([textLabelMd] is 13/18, one line-height
+  /// short), so it needs its own token like [dashboardCardPadding]/
+  /// [dashboardSectionGap] above. Colored with [colorTextSecondary]
+  /// (`#6B6255`, matching the markup's own inline color) by each call
+  /// site rather than baked in here, same convention every other
+  /// `textXxx` token in this class already follows.
+  static const TextStyle dashboardNarrativeTextStyle = TextStyle(
+    fontFamily: _fontKarla,
+    fontWeight: FontWeight.w400,
+    fontSize: 13,
+    height: 20 / 13,
+  );
 }

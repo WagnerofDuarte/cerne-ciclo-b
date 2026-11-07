@@ -7,22 +7,32 @@ import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/features/dashboard/domain/entities/dashboard_aggregate.dart';
 import 'package:cerne/features/dashboard/domain/repositories/dashboard_repository.dart';
 import 'package:cerne/features/dashboard/presentation/cubit/dashboard_cubit.dart';
+import 'package:cerne/features/dashboard/presentation/cubit/dashboard_narrative_cubit.dart';
 import 'package:cerne/features/dashboard/presentation/widgets/dashboard_chart_section.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 
-/// A plain (non-mocktail) fake — this suite only needs [result] to drive
-/// `cubit.load()` through a scriptable `Either`.
+/// A plain (non-mocktail) fake — this suite only needs [result]/
+/// [narrativeResult] to drive `cubit.load()`/`narrativeCubit.load()`
+/// through a scriptable `Either` each (spec-8-2: the two fetches are
+/// independent, never coupled into one state object).
 class _FakeDashboardRepository implements DashboardRepository {
   Either<Failure, DashboardAggregate> result = right(
     const DashboardAggregate(totalCount: 0, bucketCounts: []),
   );
 
+  Either<Failure, String> narrativeResult = right('narrative text');
+
   @override
   Future<Either<Failure, DashboardAggregate>> getAggregate({
     required String period,
   }) async => result;
+
+  @override
+  Future<Either<Failure, String>> getNarrative({
+    required String period,
+  }) async => narrativeResult;
 }
 
 /// A trivial fake `PendingEntryWriteTracker` — this suite drives `load()`
@@ -54,23 +64,34 @@ class _NoOpPendingEntryWriteTracker implements PendingEntryWriteTracker {
 void main() {
   late _FakeDashboardRepository fakeRepository;
   late DashboardCubit cubit;
+  late DashboardNarrativeCubit narrativeCubit;
 
   setUp(() {
     fakeRepository = _FakeDashboardRepository();
     cubit = DashboardCubit(fakeRepository, _NoOpPendingEntryWriteTracker());
+    narrativeCubit = DashboardNarrativeCubit(
+      fakeRepository,
+      _NoOpPendingEntryWriteTracker(),
+    );
   });
 
   tearDown(() async {
     if (!cubit.isClosed) {
       await cubit.close();
     }
+    if (!narrativeCubit.isClosed) {
+      await narrativeCubit.close();
+    }
   });
 
   Future<void> pumpSection(WidgetTester tester) async {
     await tester.pumpWidget(
       MaterialApp(
-        home: BlocProvider<DashboardCubit>.value(
-          value: cubit,
+        home: MultiBlocProvider(
+          providers: [
+            BlocProvider<DashboardCubit>.value(value: cubit),
+            BlocProvider<DashboardNarrativeCubit>.value(value: narrativeCubit),
+          ],
           child: const Scaffold(body: DashboardChartSection()),
         ),
       ),
@@ -229,6 +250,69 @@ void main() {
   );
 
   testWidgets(
+    // Review finding: the two existing ">30 entries" tests above use
+    // padded lengths (40 and 10) that are exact multiples of 10, so
+    // `chunkSize * 9 == padded.length` for both — the last bar's
+    // remainder-absorbing `_sum(padded, index, padded.length)` produces
+    // the identical result a naive, regressed `_sum(padded, index, index
+    // + chunkSize)` (no remainder absorption) would. Neither test can
+    // distinguish correct remainder absorption from that regression. A
+    // length not divisible by 10 (23, already >= 10 so no padding is
+    // involved either) is the only input shape that can.
+    'I/O matrix: ">30 entries" — the final bar absorbs the real remainder '
+    'left over by floor-division chunking, not just another fixed-width '
+    'chunk (round-2 fix: "remainder in the last chunk")',
+    (tester) async {
+      // 23 buckets of count 2 each (total 46, > 30). chunkSize = 23 ~/ 10
+      // == 2: the first 9 bars each sum 2 buckets (count 4), the 10th
+      // absorbs the 5-bucket remainder (count 10) — not another
+      // 2-bucket chunk (which would be count 4 and silently drop the
+      // last 3 buckets' counts from the chart).
+      final bucketCounts = List<int>.filled(23, 2);
+      fakeRepository.result = right(
+        DashboardAggregate(totalCount: 46, bucketCounts: bucketCounts),
+      );
+      await pumpSection(tester);
+      await cubit.load();
+      await tester.pump();
+
+      final bars = tester
+          .widgetList<DashboardChartBar>(find.byType(DashboardChartBar))
+          .toList();
+      expect(bars, hasLength(10));
+      for (final bar in bars.take(9)) {
+        expect(bar.heightFraction, closeTo(0.4, 1e-9)); // 4 / 10
+      }
+      expect(bars.last.heightFraction, 1.0); // 10 / 10
+    },
+  );
+
+  testWidgets(
+    // Review finding: only buckets.length >= 10 (40) and < 10 (3,
+    // padded) were tested — the exact length-10 boundary where `_pad`
+    // transitions from padding to a no-op pass-through was never pinned.
+    'I/O matrix: ">30 entries" — bucketCounts.length == 10 exactly is '
+    'passed straight through unpadded, one bar per original bucket',
+    (tester) async {
+      final bucketCounts = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+      fakeRepository.result = right(
+        DashboardAggregate(totalCount: 55, bucketCounts: bucketCounts),
+      );
+      await pumpSection(tester);
+      await cubit.load();
+      await tester.pump();
+
+      final bars = tester
+          .widgetList<DashboardChartBar>(find.byType(DashboardChartBar))
+          .toList();
+      expect(bars, hasLength(10));
+      for (var i = 0; i < bars.length; i++) {
+        expect(bars[i].heightFraction, closeTo(bucketCounts[i] / 10, 1e-9));
+      }
+    },
+  );
+
+  testWidgets(
     'boundary: totalCount == 30 renders one bar per bucket, no condensation '
     '(off-by-one guard against the >30 rule)',
     (tester) async {
@@ -321,5 +405,129 @@ void main() {
       findsNothing,
     );
     expect(find.byType(DashboardChartBar), findsOneWidget);
+  });
+
+  group('spec-8-2: the AI narrative paragraph, >30-only', () {
+    Future<void> pumpOver30(WidgetTester tester) async {
+      fakeRepository.result = right(
+        const DashboardAggregate(totalCount: 40, bucketCounts: [40]),
+      );
+      await pumpSection(tester);
+      await cubit.load();
+      await tester.pump();
+    }
+
+    testWidgets(
+      'I/O matrix: ">30 entries, narrative resolves" — the narrative text '
+      'renders below the chart',
+      (tester) async {
+        fakeRepository.narrativeResult = right('Seu balanço do período.');
+        await pumpOver30(tester);
+        await narrativeCubit.load();
+        await tester.pump();
+
+        expect(find.text('Seu balanço do período.'), findsOneWidget);
+        expect(find.byType(DashboardChartBar), findsNWidgets(10));
+      },
+    );
+
+    testWidgets(
+      'I/O matrix: ">30 entries, narrative fails" — the chart still renders '
+      'normally, plus a distinct "narrativa indisponível" message with a '
+      'working retry, never the 0/1-entry wording',
+      (tester) async {
+        fakeRepository.narrativeResult = left(
+          const Failure.networkTimeout(message: 'Sem conexão'),
+        );
+        await pumpOver30(tester);
+        await narrativeCubit.load();
+        await tester.pump();
+
+        expect(find.byType(DashboardChartBar), findsNWidgets(10));
+        expect(
+          find.text('Não foi possível gerar o balanço agora'),
+          findsOneWidget,
+        );
+        expect(find.text('tentar novamente'), findsOneWidget);
+        expect(
+          find.text('Comece a registrar para ver sua evolução aqui'),
+          findsNothing,
+        );
+        expect(
+          find.text('Ainda é cedo pra ver um padrão — volte em alguns dias.'),
+          findsNothing,
+        );
+
+        // Tapping "tentar novamente" re-calls narrativeCubit.load(), no
+        // crash (Boundaries: "re-calls narrativeCubit.load()").
+        fakeRepository.narrativeResult = right('Recuperado com sucesso.');
+        await tester.tap(find.text('tentar novamente'));
+        await tester.pump();
+
+        expect(find.text('Recuperado com sucesso.'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      'I/O matrix: "Narrative fetch pending" — Idle/Loading renders no '
+      'narrative section, so the chart never waits on it',
+      (tester) async {
+        await pumpOver30(tester);
+        // Deliberately never calls narrativeCubit.load() — stays Idle.
+
+        expect(find.byType(DashboardChartBar), findsNWidgets(10));
+        expect(
+          find.text('Não foi possível gerar o balanço agora'),
+          findsNothing,
+        );
+      },
+    );
+
+    testWidgets(
+      'I/O matrix: "0 or 1 entries" — the narrative fetch result is never '
+      'rendered, regardless of its own outcome, and the existing hardcoded '
+      'messages stay unchanged',
+      (tester) async {
+        fakeRepository.result = right(
+          const DashboardAggregate(totalCount: 0, bucketCounts: []),
+        );
+        fakeRepository.narrativeResult = right('Should never show.');
+        await pumpSection(tester);
+        await cubit.load();
+        await narrativeCubit.load();
+        await tester.pump();
+
+        expect(
+          find.text('Comece a registrar para ver sua evolução aqui'),
+          findsOneWidget,
+        );
+        expect(find.text('Should never show.'), findsNothing);
+        expect(
+          find.text('Não foi possível gerar o balanço agora'),
+          findsNothing,
+        );
+
+        fakeRepository.result = right(
+          const DashboardAggregate(totalCount: 1, bucketCounts: [1]),
+        );
+        fakeRepository.narrativeResult = left(
+          const Failure.networkTimeout(message: 'Sem conexão'),
+        );
+        await cubit.load();
+        await narrativeCubit.load();
+        await tester.pump();
+
+        expect(
+          find.text('Ainda é cedo pra ver um padrão — volte em alguns dias.'),
+          findsOneWidget,
+        );
+        expect(
+          find.text('Não foi possível gerar o balanço agora'),
+          findsNothing,
+        );
+        expect(find.text('tentar novamente'), findsNothing);
+      },
+    );
   });
 }
