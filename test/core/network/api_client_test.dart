@@ -403,81 +403,204 @@ void main() {
     },
   );
 
+  group('spec-7-2 — getRedirectLocation', () {
+    test('a 302 with a Location header -> Right(that URL), never auto-'
+        'followed (followRedirects: false means dio hands the 302 straight '
+        'back rather than chasing it into the signed-storage host)', () async {
+      final response = Response<dynamic>(
+        requestOptions: requestOptions,
+        statusCode: 302,
+        headers: Headers.fromMap({
+          'location': ['https://storage.example.com/signed'],
+        }),
+      );
+      when(
+        () => mockDio.get<dynamic>(
+          any(),
+          queryParameters: any(named: 'queryParameters'),
+          options: any(named: 'options'),
+        ),
+      ).thenAnswer((_) async => response);
+
+      final result = await apiClient.getRedirectLocation(
+        'export-download-get',
+        pathParams: ['job-1'],
+        queryParameters: {'format': 'pdf'},
+      );
+
+      expect(result.isRight(), isTrue);
+      result.match(
+        (_) => fail('expected Right'),
+        (url) => expect(url, 'https://storage.example.com/signed'),
+      );
+
+      final captured = verify(
+        () => mockDio.get<dynamic>(
+          captureAny(),
+          queryParameters: captureAny(named: 'queryParameters'),
+          options: any(named: 'options'),
+        ),
+      ).captured;
+      expect(captured[0], '$baseUrl/export-download-get/job-1');
+      expect(captured[1], {'format': 'pdf'});
+    });
+
+    test('a response with no Location header -> Left(MalformedResponse) '
+        '(I/O matrix: "Missing Location")', () async {
+      final response = Response<dynamic>(
+        requestOptions: requestOptions,
+        statusCode: 302,
+        headers: Headers(),
+      );
+      when(
+        () => mockDio.get<dynamic>(
+          any(),
+          queryParameters: any(named: 'queryParameters'),
+          options: any(named: 'options'),
+        ),
+      ).thenAnswer((_) async => response);
+
+      final result = await apiClient.getRedirectLocation(
+        'export-download-get',
+        pathParams: ['job-1'],
+      );
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
+
+    test('an error response (e.g. NOT_FOUND) still maps through the same '
+        '_mapDioException path every other method uses — the permissive '
+        'validateStatus only widens what counts as success, never changes '
+        'how a real error status is mapped', () async {
+      final dioError = DioException(
+        requestOptions: requestOptions,
+        response: Response(
+          requestOptions: requestOptions,
+          statusCode: 404,
+          data: {
+            'code': 'NOT_FOUND',
+            'message': 'Job not found',
+            'retryable': false,
+          },
+        ),
+        type: DioExceptionType.badResponse,
+      );
+      when(
+        () => mockDio.get<dynamic>(
+          any(),
+          queryParameters: any(named: 'queryParameters'),
+          options: any(named: 'options'),
+        ),
+      ).thenThrow(dioError);
+
+      final result = await apiClient.getRedirectLocation(
+        'export-download-get',
+        pathParams: ['job-1'],
+      );
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<NotFound>()),
+        (_) => fail('expected Left'),
+      );
+    });
+
+    test('a non-DioException thrown by dio -> Left(MalformedResponse), never '
+        'a crash', () async {
+      when(
+        () => mockDio.get<dynamic>(
+          any(),
+          queryParameters: any(named: 'queryParameters'),
+          options: any(named: 'options'),
+        ),
+      ).thenThrow(StateError('unexpected native failure'));
+
+      final result = await apiClient.getRedirectLocation(
+        'export-download-get',
+        pathParams: ['job-1'],
+      );
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
+  });
+
   group('spec-6-1 — postStream', () {
-    test(
-      'yields each decoded chunk as Right, in the order received',
-      () async {
-        final bodyStream = Stream<Uint8List>.fromIterable([
-          Uint8List.fromList(utf8.encode('event: token\n')),
-          Uint8List.fromList(utf8.encode('data: {"delta":"Hi"}\n\n')),
-        ]);
-        final response = Response<ResponseBody>(
-          requestOptions: requestOptions,
-          statusCode: 200,
-          data: ResponseBody(bodyStream, 200),
-        );
-        when(
-          () => mockDio.post<ResponseBody>(
-            any(),
-            data: any(named: 'data'),
-            options: any(named: 'options'),
-          ),
-        ).thenAnswer((_) async => response);
+    test('yields each decoded chunk as Right, in the order received', () async {
+      final bodyStream = Stream<Uint8List>.fromIterable([
+        Uint8List.fromList(utf8.encode('event: token\n')),
+        Uint8List.fromList(utf8.encode('data: {"delta":"Hi"}\n\n')),
+      ]);
+      final response = Response<ResponseBody>(
+        requestOptions: requestOptions,
+        statusCode: 200,
+        data: ResponseBody(bodyStream, 200),
+      );
+      when(
+        () => mockDio.post<ResponseBody>(
+          any(),
+          data: any(named: 'data'),
+          options: any(named: 'options'),
+        ),
+      ).thenAnswer((_) async => response);
 
-        final chunks = await apiClient
-            .postStream('chat-messages-send', data: {'content': 'hi'})
-            .toList();
+      final chunks = await apiClient
+          .postStream('chat-messages-send', data: {'content': 'hi'})
+          .toList();
 
-        expect(chunks, hasLength(2));
-        expect(chunks[0].isRight(), isTrue);
-        expect(chunks[1].isRight(), isTrue);
-        final combined = chunks
-            .map((either) => either.getRight().toNullable())
-            .join();
-        expect(combined, 'event: token\ndata: {"delta":"Hi"}\n\n');
-      },
-    );
+      expect(chunks, hasLength(2));
+      expect(chunks[0].isRight(), isTrue);
+      expect(chunks[1].isRight(), isTrue);
+      final combined = chunks
+          .map((either) => either.getRight().toNullable())
+          .join();
+      expect(combined, 'event: token\ndata: {"delta":"Hi"}\n\n');
+    });
 
-    test(
-      'review finding: a multi-byte UTF-8 character split across two raw '
-      'chunk boundaries decodes correctly, not as replacement characters '
-      '— this app\'s primary language (pt-BR) uses multi-byte characters '
-      '(e.g. "ã") constantly, and dio\'s own chunk boundaries split on '
-      'byte count, not on character boundaries',
-      () async {
-        // 'ã' is the 2-byte UTF-8 sequence 0xC3 0xA3 — split with the
-        // first byte ending chunk 1 and the second byte starting chunk 2,
-        // deliberately severing the character across the boundary.
-        final part1 = Uint8List.fromList([
-          ...utf8.encode('data: {"delta":"am'),
-          0xC3,
-        ]);
-        final part2 = Uint8List.fromList([0xA3, ...utf8.encode('"}\n\n')]);
-        final bodyStream = Stream<Uint8List>.fromIterable([part1, part2]);
-        final response = Response<ResponseBody>(
-          requestOptions: requestOptions,
-          statusCode: 200,
-          data: ResponseBody(bodyStream, 200),
-        );
-        when(
-          () => mockDio.post<ResponseBody>(
-            any(),
-            data: any(named: 'data'),
-            options: any(named: 'options'),
-          ),
-        ).thenAnswer((_) async => response);
+    test('review finding: a multi-byte UTF-8 character split across two raw '
+        'chunk boundaries decodes correctly, not as replacement characters '
+        '— this app\'s primary language (pt-BR) uses multi-byte characters '
+        '(e.g. "ã") constantly, and dio\'s own chunk boundaries split on '
+        'byte count, not on character boundaries', () async {
+      // 'ã' is the 2-byte UTF-8 sequence 0xC3 0xA3 — split with the
+      // first byte ending chunk 1 and the second byte starting chunk 2,
+      // deliberately severing the character across the boundary.
+      final part1 = Uint8List.fromList([
+        ...utf8.encode('data: {"delta":"am'),
+        0xC3,
+      ]);
+      final part2 = Uint8List.fromList([0xA3, ...utf8.encode('"}\n\n')]);
+      final bodyStream = Stream<Uint8List>.fromIterable([part1, part2]);
+      final response = Response<ResponseBody>(
+        requestOptions: requestOptions,
+        statusCode: 200,
+        data: ResponseBody(bodyStream, 200),
+      );
+      when(
+        () => mockDio.post<ResponseBody>(
+          any(),
+          data: any(named: 'data'),
+          options: any(named: 'options'),
+        ),
+      ).thenAnswer((_) async => response);
 
-        final chunks = await apiClient
-            .postStream('chat-messages-send', data: {'content': 'hi'})
-            .toList();
+      final chunks = await apiClient
+          .postStream('chat-messages-send', data: {'content': 'hi'})
+          .toList();
 
-        final combined = chunks
-            .map((either) => either.getRight().toNullable() ?? '')
-            .join();
-        expect(combined, 'data: {"delta":"amã"}\n\n');
-        expect(combined, isNot(contains('�')));
-      },
-    );
+      final combined = chunks
+          .map((either) => either.getRight().toNullable() ?? '')
+          .join();
+      expect(combined, 'data: {"delta":"amã"}\n\n');
+      expect(combined, isNot(contains('�')));
+    });
 
     test('a null response.data -> a single Left(MalformedResponse)', () async {
       final response = Response<ResponseBody>(
@@ -504,33 +627,30 @@ void main() {
       );
     });
 
-    test(
-      'a DioException with no response at all -> Left(NetworkOffline), same '
-      'mapping as the non-streaming methods',
-      () async {
-        final dioError = DioException(
-          requestOptions: requestOptions,
-          type: DioExceptionType.connectionError,
-        );
-        when(
-          () => mockDio.post<ResponseBody>(
-            any(),
-            data: any(named: 'data'),
-            options: any(named: 'options'),
-          ),
-        ).thenThrow(dioError);
+    test('a DioException with no response at all -> Left(NetworkOffline), same '
+        'mapping as the non-streaming methods', () async {
+      final dioError = DioException(
+        requestOptions: requestOptions,
+        type: DioExceptionType.connectionError,
+      );
+      when(
+        () => mockDio.post<ResponseBody>(
+          any(),
+          data: any(named: 'data'),
+          options: any(named: 'options'),
+        ),
+      ).thenThrow(dioError);
 
-        final chunks = await apiClient
-            .postStream('chat-messages-send', data: {'content': 'hi'})
-            .toList();
+      final chunks = await apiClient
+          .postStream('chat-messages-send', data: {'content': 'hi'})
+          .toList();
 
-        expect(chunks, hasLength(1));
-        chunks.single.match(
-          (failure) => expect(failure, isA<NetworkOffline>()),
-          (_) => fail('expected Left'),
-        );
-      },
-    );
+      expect(chunks, hasLength(1));
+      chunks.single.match(
+        (failure) => expect(failure, isA<NetworkOffline>()),
+        (_) => fail('expected Left'),
+      );
+    });
 
     test(
       'a non-2xx response whose body is a stream-typed ResponseBody still '
@@ -578,119 +698,110 @@ void main() {
       },
     );
 
-    test(
-      'review finding: an in-band AUTH_EXPIRED on the stream path notifies '
-      'SessionExpiryNotifier exactly once, same as the non-stream '
-      '_mapDioException path (Story 1.5)',
-      () async {
-        final bearerRequestOptions = RequestOptions(
-          path: '$baseUrl/chat-messages-send/session-1',
-        );
-        final errorBodyStream = Stream<Uint8List>.fromIterable([
-          Uint8List.fromList(
-            utf8.encode(
-              jsonEncode({
-                'code': 'AUTH_EXPIRED',
-                'message': 'Session expired',
-                'retryable': false,
-              }),
-            ),
+    test('review finding: an in-band AUTH_EXPIRED on the stream path notifies '
+        'SessionExpiryNotifier exactly once, same as the non-stream '
+        '_mapDioException path (Story 1.5)', () async {
+      final bearerRequestOptions = RequestOptions(
+        path: '$baseUrl/chat-messages-send/session-1',
+      );
+      final errorBodyStream = Stream<Uint8List>.fromIterable([
+        Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'code': 'AUTH_EXPIRED',
+              'message': 'Session expired',
+              'retryable': false,
+            }),
           ),
-        ]);
-        final errorResponse = Response<ResponseBody>(
-          requestOptions: bearerRequestOptions,
-          statusCode: 401,
-          data: ResponseBody(errorBodyStream, 401),
-        );
-        final dioError = DioException(
-          requestOptions: bearerRequestOptions,
-          response: errorResponse,
-          type: DioExceptionType.badResponse,
-        );
-        when(
-          () => mockDio.post<ResponseBody>(
-            any(),
-            data: any(named: 'data'),
-            options: any(named: 'options'),
-          ),
-        ).thenThrow(dioError);
+        ),
+      ]);
+      final errorResponse = Response<ResponseBody>(
+        requestOptions: bearerRequestOptions,
+        statusCode: 401,
+        data: ResponseBody(errorBodyStream, 401),
+      );
+      final dioError = DioException(
+        requestOptions: bearerRequestOptions,
+        response: errorResponse,
+        type: DioExceptionType.badResponse,
+      );
+      when(
+        () => mockDio.post<ResponseBody>(
+          any(),
+          data: any(named: 'data'),
+          options: any(named: 'options'),
+        ),
+      ).thenThrow(dioError);
 
-        final chunks = await apiClient
-            .postStream(
-              'chat-messages-send',
-              pathParams: ['session-1'],
-              data: {'content': 'hi'},
-            )
-            .toList();
+      final chunks = await apiClient
+          .postStream(
+            'chat-messages-send',
+            pathParams: ['session-1'],
+            data: {'content': 'hi'},
+          )
+          .toList();
 
-        expect(chunks, hasLength(1));
-        chunks.single.match(
-          (failure) => expect(failure, isA<AuthExpired>()),
-          (_) => fail('expected Left'),
-        );
-        verify(() => mockSessionExpiryNotifier.notifyExpired()).called(1);
-      },
-    );
+      expect(chunks, hasLength(1));
+      chunks.single.match(
+        (failure) => expect(failure, isA<AuthExpired>()),
+        (_) => fail('expected Left'),
+      );
+      verify(() => mockSessionExpiryNotifier.notifyExpired()).called(1);
+    });
 
-    test(
-      'a non-2xx response whose body cannot be decoded as {code, message} '
-      'falls back to the generic mapping, never throwing',
-      () async {
-        final errorBodyStream = Stream<Uint8List>.fromIterable([
-          Uint8List.fromList(utf8.encode('not json at all')),
-        ]);
-        final errorResponse = Response<ResponseBody>(
-          requestOptions: requestOptions,
-          statusCode: 500,
-          data: ResponseBody(errorBodyStream, 500),
-        );
-        final dioError = DioException(
-          requestOptions: requestOptions,
-          response: errorResponse,
-          type: DioExceptionType.badResponse,
-        );
-        when(
-          () => mockDio.post<ResponseBody>(
-            any(),
-            data: any(named: 'data'),
-            options: any(named: 'options'),
-          ),
-        ).thenThrow(dioError);
+    test('a non-2xx response whose body cannot be decoded as {code, message} '
+        'falls back to the generic mapping, never throwing', () async {
+      final errorBodyStream = Stream<Uint8List>.fromIterable([
+        Uint8List.fromList(utf8.encode('not json at all')),
+      ]);
+      final errorResponse = Response<ResponseBody>(
+        requestOptions: requestOptions,
+        statusCode: 500,
+        data: ResponseBody(errorBodyStream, 500),
+      );
+      final dioError = DioException(
+        requestOptions: requestOptions,
+        response: errorResponse,
+        type: DioExceptionType.badResponse,
+      );
+      when(
+        () => mockDio.post<ResponseBody>(
+          any(),
+          data: any(named: 'data'),
+          options: any(named: 'options'),
+        ),
+      ).thenThrow(dioError);
 
-        final chunks = await apiClient
-            .postStream('chat-messages-send', data: {'content': 'hi'})
-            .toList();
+      final chunks = await apiClient
+          .postStream('chat-messages-send', data: {'content': 'hi'})
+          .toList();
 
-        expect(chunks, hasLength(1));
-        chunks.single.match(
-          (failure) => expect(failure, isA<MalformedResponse>()),
-          (_) => fail('expected Left'),
-        );
-      },
-    );
+      expect(chunks, hasLength(1));
+      chunks.single.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
 
-    test(
-      'a non-DioException thrown by dio -> Left(MalformedResponse), never a '
-      'crash',
-      () async {
-        when(
-          () => mockDio.post<ResponseBody>(
-            any(),
-            data: any(named: 'data'),
-            options: any(named: 'options'),
-          ),
-        ).thenThrow(StateError('unexpected native failure'));
+    test('a non-DioException thrown by dio -> Left(MalformedResponse), never a '
+        'crash', () async {
+      when(
+        () => mockDio.post<ResponseBody>(
+          any(),
+          data: any(named: 'data'),
+          options: any(named: 'options'),
+        ),
+      ).thenThrow(StateError('unexpected native failure'));
 
-        final chunks = await apiClient
-            .postStream('chat-messages-send', data: {'content': 'hi'})
-            .toList();
+      final chunks = await apiClient
+          .postStream('chat-messages-send', data: {'content': 'hi'})
+          .toList();
 
-        expect(chunks, hasLength(1));
-        chunks.single.match(
-          (failure) => expect(failure, isA<MalformedResponse>()),
-          (_) => fail('expected Left'),
-        );
-      },
-    );
+      expect(chunks, hasLength(1));
+      chunks.single.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
   });
 }

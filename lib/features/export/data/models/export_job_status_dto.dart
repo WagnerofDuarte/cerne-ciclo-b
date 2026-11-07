@@ -7,8 +7,10 @@ part 'export_job_status_dto.g.dart';
 
 /// `export.status.get`'s own response `data` (`openapi.yaml:1495-1539`) —
 /// decodes every field the contract declares, even [narrativeErrorCode]/
-/// [downloadAvailable] which this story never reads (both belong to
-/// Story 7.2's download wiring) — kept here so the DTO always mirrors the
+/// [downloadAvailable], which [toState] still never reads: the download
+/// button's enabled/disabled treatment is driven entirely by which
+/// [ExportJobState] `status` itself maps to (`ExportJobState.dataReady`/
+/// `.done`), never by this flag — kept here so the DTO always mirrors the
 /// full contract shape, not just today's consumer.
 @JsonSerializable()
 class ExportJobStatusDto {
@@ -53,11 +55,12 @@ class ExportJobStatusDto {
       case 'pending':
         return const ExportJobState.preparing();
       case 'processing':
-      case 'data_ready':
-        // Design Notes — `data_ready` folds into `generating`'s own
-        // visual here, no case of its own (lighting it up is Story
-        // 7.2's job).
         return const ExportJobState.generating();
+      case 'data_ready':
+        // spec-7-2 — its own state now: same progress-bar/text treatment
+        // as `generating`, plus the raw-data button rendered already
+        // enabled (`ExportJobState.dataReady`'s own doc).
+        return const ExportJobState.dataReady();
       case 'done':
         return ExportJobState.done(
           narrativeStatus == 'done'
@@ -77,9 +80,7 @@ class ExportJobStatusDto {
         // the contract's own enum is closed) never crashes the poll loop
         // (RNF09) — surfaces as a terminal error instead.
         return ExportJobState.error(
-          Failure.malformedResponse(
-            message: 'Unknown export status: $status',
-          ),
+          Failure.malformedResponse(message: 'Unknown export status: $status'),
         );
     }
   }

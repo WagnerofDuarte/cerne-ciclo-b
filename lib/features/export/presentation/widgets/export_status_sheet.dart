@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/design_tokens.dart';
+import '../../../../core/failure/failure.dart';
 import '../../../../core/widgets/app_button.dart';
 import '../../domain/entities/export_job_state.dart';
 import '../cubit/export_job_cubit.dart';
@@ -97,18 +98,25 @@ class ExportStatusSheet extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                ..._contentFor(state),
-                const SizedBox(height: DesignTokens.spacingXs),
-                Center(
-                  child: GestureDetector(
-                    onTap: () => Navigator.of(context).pop(),
-                    child: Text(
-                      'Fechar',
-                      style: DesignTokens.textMonoCaption.copyWith(
-                        color: DesignTokens.colorTextSecondary,
-                      ),
-                    ),
+                // Review finding (blind-hunter layer) — `liveRegion: true`
+                // so a screen reader announces each poll-driven stage
+                // change (Pendente → Processando → Concluído/Erro) instead
+                // of staying silent until the user manually re-explores
+                // the sheet.
+                Semantics(
+                  liveRegion: true,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: _contentFor(context, cubit, state),
                   ),
+                ),
+                const SizedBox(height: DesignTokens.spacingXs),
+                AppButton(
+                  label: 'Fechar',
+                  variant: AppButtonVariant.textGhost,
+                  textColor: DesignTokens.colorTextSecondary,
+                  onPressed: () => Navigator.of(context).pop(),
                 ),
               ],
             );
@@ -119,25 +127,52 @@ class ExportStatusSheet extends StatelessWidget {
   }
 }
 
+/// The spinner/text/progress-bar sequence [ExportJobGenerating] and
+/// [ExportJobState.dataReady] render identically (review finding, code
+/// review patch item 7 — the two cases below previously duplicated this
+/// verbatim) — `data_ready` is the exact same "narrative still generating"
+/// visual, just with an enabled download button appended beneath it.
+const _generatingSequence = <Widget>[
+  _StatusSpinner(),
+  SizedBox(height: DesignTokens.exportStatusContentGap),
+  _StatusText('Gerando resumo com IA...'),
+  SizedBox(height: DesignTokens.exportStatusContentGap),
+  _StatusProgressBar(),
+];
+
 /// Builds this sheet's own per-state content, above the always-present
 /// "Fechar" link — a plain top-level function (not a `switch` expression
 /// return type juggling `Widget` vs `List<Widget>`) so each case can emit
 /// more than one widget (icon + text + progress bar/buttons) without an
-/// extra wrapping `Column` per case.
-List<Widget> _contentFor(ExportJobState state) => switch (state) {
+/// extra wrapping `Column` per case. [context]/[cubit] are only actually
+/// used by the two cases that render a live download button
+/// ([ExportJobDataReady]/[ExportJobDone]) — threaded through every case
+/// regardless, so the `switch` stays one expression.
+List<Widget> _contentFor(
+  BuildContext context,
+  ExportJobCubit cubit,
+  ExportJobState state,
+) => switch (state) {
   ExportJobPreparing() => const [
     _StatusSpinner(),
     SizedBox(height: DesignTokens.exportStatusContentGap),
     _StatusText('Preparando exportação...'),
   ],
-  ExportJobGenerating() => const [
-    _StatusSpinner(),
-    SizedBox(height: DesignTokens.exportStatusContentGap),
-    _StatusText('Gerando resumo com IA...'),
-    SizedBox(height: DesignTokens.exportStatusContentGap),
-    _StatusProgressBar(),
+  ExportJobGenerating() => _generatingSequence,
+  ExportJobDataReady() => [
+    ..._generatingSequence,
+    const SizedBox(height: DesignTokens.exportStatusContentGap),
+    AppButton(
+      label: 'Baixar dados brutos',
+      variant: AppButtonVariant.secondaryOutline,
+      onPressed: () => _handleDownload(context, cubit.downloadRawData),
+    ),
   ],
-  ExportJobDone(outcome: final outcome) => _doneContent(outcome),
+  ExportJobDone(outcome: final outcome) => _doneContent(
+    context,
+    cubit,
+    outcome,
+  ),
   ExportJobError() => const [
     Icon(
       Icons.error_outline,
@@ -161,9 +196,13 @@ List<Widget> _contentFor(ExportJobState state) => switch (state) {
 };
 
 /// `ExportJobDone`'s own two flavors (I/O matrix's "Concluído" vs.
-/// "Narrativa falhou/pulada" rows). Both buttons stay disabled this story
-/// (Never: "wire the real download... Story 7.2").
-List<Widget> _doneContent(ExportOutcome outcome) {
+/// "Narrativa falhou/pulada" rows) — spec-7-2: both buttons now wired to a
+/// real download via [_handleDownload], never `onPressed: null`.
+List<Widget> _doneContent(
+  BuildContext context,
+  ExportJobCubit cubit,
+  ExportOutcome outcome,
+) {
   if (outcome == ExportOutcome.narrativeReady) {
     return [
       const Icon(
@@ -176,15 +215,18 @@ List<Widget> _doneContent(ExportOutcome outcome) {
       const SizedBox(height: DesignTokens.exportStatusContentGap),
       Row(
         children: [
-          const Expanded(
-            child: AppButton(label: 'Baixar PDF', onPressed: null),
+          Expanded(
+            child: AppButton(
+              label: 'Baixar PDF',
+              onPressed: () => _handleDownload(context, cubit.downloadPdf),
+            ),
           ),
           const SizedBox(width: DesignTokens.exportStatusButtonGap),
-          const Expanded(
+          Expanded(
             child: AppButton(
               label: 'Baixar dados brutos',
               variant: AppButtonVariant.secondaryOutline,
-              onPressed: null,
+              onPressed: () => _handleDownload(context, cubit.downloadRawData),
             ),
           ),
         ],
@@ -204,12 +246,34 @@ List<Widget> _doneContent(ExportOutcome outcome) {
       color: DesignTokens.colorError,
     ),
     const SizedBox(height: DesignTokens.exportStatusContentGap),
-    const AppButton(
+    AppButton(
       label: 'Baixar dados brutos',
       variant: AppButtonVariant.secondaryOutline,
-      onPressed: null,
+      onPressed: () => _handleDownload(context, cubit.downloadRawData),
     ),
   ];
+}
+
+/// Routes a download-button tap through [download] (`cubit.downloadPdf`/
+/// `cubit.downloadRawData`, bound), then surfaces whatever `Failure` it
+/// resolves to — if any — as an inline `SnackBar`, mirroring
+/// `_onExportTap`'s own create-failure pattern
+/// (`meus_registros_screen.dart`). Reads the outcome straight off
+/// [download]'s own return value (review finding, code review patch
+/// item 6 — a shared mutable field on the cubit, written by the cubit and
+/// mutated by this widget, broke encapsulation and was racy under a rapid
+/// double-tap); never touches [ExportJobCubit.state]/rebuilds the sheet's
+/// own job-status content (Boundaries).
+Future<void> _handleDownload(
+  BuildContext context,
+  Future<Failure?> Function() download,
+) async {
+  final failure = await download();
+  if (failure == null || !context.mounted) {
+    return;
+  }
+  ScaffoldMessenger.of(context)
+      .showSnackBar(SnackBar(content: Text(failure.message)));
 }
 
 /// Pendente/Processando's own spinner — `cerne-prototype.html`'s spinning

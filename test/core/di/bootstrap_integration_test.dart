@@ -26,6 +26,8 @@ import 'package:cerne/features/entries/domain/services/pending_entry_write_track
 import 'package:cerne/features/entries/presentation/cubit/entries_search_cubit.dart';
 import 'package:cerne/features/entries/presentation/cubit/entry_detail_cubit.dart';
 import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
+import 'package:cerne/features/export/domain/repositories/export_repository.dart';
+import 'package:cerne/features/export/presentation/cubit/export_job_cubit.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 
 import '../../support/fake_path_provider_platform.dart';
@@ -274,35 +276,51 @@ void main() {
     },
   );
 
-  test(
-    'setupCoreDependencies also wires the chat feature (spec-6-1) — a '
-    'broken registration/dependency cycle (including the two Hive boxes) '
-    'must surface here, not only at real app launch (review finding: no '
-    'test anywhere else resolves the real registered graph — the feature '
-    'unit tests inject fakes straight into constructors, and the '
-    'navigation tests unregister-and-replace ChatCubit before ever '
-    'resolving it)',
-    () {
-      expect(sl.isRegistered<ChatRepository>(), isTrue);
+  test('setupCoreDependencies also wires the chat feature (spec-6-1) — a '
+      'broken registration/dependency cycle (including the two Hive boxes) '
+      'must surface here, not only at real app launch (review finding: no '
+      'test anywhere else resolves the real registered graph — the feature '
+      'unit tests inject fakes straight into constructors, and the '
+      'navigation tests unregister-and-replace ChatCubit before ever '
+      'resolving it)', () {
+    expect(sl.isRegistered<ChatRepository>(), isTrue);
 
-      // Actually resolves the whole chain (ChatCubit -> ChatRepository ->
-      // ChatRemoteDataSource/Box<Map> -> ApiClient/Dio) rather than just
-      // checking the registration exists — same rationale as every other
-      // forced resolution above.
-      expect(() => sl<ChatCubit>(), returnsNormally);
+    // Actually resolves the whole chain (ChatCubit -> ChatRepository ->
+    // ChatRemoteDataSource/Box<Map> -> ApiClient/Dio) rather than just
+    // checking the registration exists — same rationale as every other
+    // forced resolution above.
+    expect(() => sl<ChatCubit>(), returnsNormally);
 
-      // The two `Box<Map>` singletons are disambiguated only by
-      // `instanceName` (same static type) — resolving each by its own
-      // name and checking `Box.name` against it catches a swapped-
-      // argument mistake in `registerChatFeature()` that `fvm flutter
-      // analyze` cannot (review finding's own demonstration).
-      final sessionsBox = sl<Box<Map>>(instanceName: chatSessionsBoxName);
-      final messagesBox = sl<Box<Map>>(instanceName: chatMessagesBoxName);
-      expect(sessionsBox.name, chatSessionsBoxName);
-      expect(messagesBox.name, chatMessagesBoxName);
-      expect(sessionsBox, isNot(same(messagesBox)));
-    },
-  );
+    // The two `Box<Map>` singletons are disambiguated only by
+    // `instanceName` (same static type) — resolving each by its own
+    // name and checking `Box.name` against it catches a swapped-
+    // argument mistake in `registerChatFeature()` that `fvm flutter
+    // analyze` cannot (review finding's own demonstration).
+    final sessionsBox = sl<Box<Map>>(instanceName: chatSessionsBoxName);
+    final messagesBox = sl<Box<Map>>(instanceName: chatMessagesBoxName);
+    expect(sessionsBox.name, chatSessionsBoxName);
+    expect(messagesBox.name, chatMessagesBoxName);
+    expect(sessionsBox, isNot(same(messagesBox)));
+  });
+
+  test('setupCoreDependencies also wires the export feature (spec-7-1) — a '
+      'broken registration/dependency cycle must surface here, not only at '
+      'real app launch (review finding: no other test resolves the real '
+      'registered graph — the cubit/data-source unit tests inject fakes '
+      'straight into constructors, and the screen widget tests override '
+      'ExportJobCubit before ever resolving it)', () async {
+    expect(sl.isRegistered<ExportRepository>(), isTrue);
+
+    // `ExportJobCubit` is a `registerFactory` (Code Map: one-shot-cubit
+    // precedent), not a singleton — resolving it twice must return two
+    // distinct, independently closable instances, same rationale as
+    // `TextEntryCubit`'s own forced resolution above.
+    final first = sl<ExportJobCubit>();
+    final second = sl<ExportJobCubit>();
+    expect(first, isNot(same(second)));
+    await first.close();
+    await second.close();
+  });
 
   test(
     'secure storage read/write round-trips through the DI-resolved instance',

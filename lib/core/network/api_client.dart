@@ -32,9 +32,9 @@ class ApiClient {
     required Dio dio,
     required UrlBuilder urlBuilder,
     required SessionExpiryNotifier sessionExpiryNotifier,
-  })  : _dio = dio,
-        _urlBuilder = urlBuilder,
-        _sessionExpiryNotifier = sessionExpiryNotifier;
+  }) : _dio = dio,
+       _urlBuilder = urlBuilder,
+       _sessionExpiryNotifier = sessionExpiryNotifier;
 
   final Dio _dio;
   final UrlBuilder _urlBuilder;
@@ -44,49 +44,88 @@ class ApiClient {
     String function, {
     List<String> pathParams = const [],
     Map<String, dynamic>? queryParameters,
-  }) =>
-      _send(
-        () => _dio.get<Map<String, dynamic>>(
-          _urlBuilder.build(function, pathParams),
-          queryParameters: queryParameters,
-        ),
-      );
+  }) => _send(
+    () => _dio.get<Map<String, dynamic>>(
+      _urlBuilder.build(function, pathParams),
+      queryParameters: queryParameters,
+    ),
+  );
 
   Future<Either<Failure, Map<String, dynamic>>> post(
     String function, {
     List<String> pathParams = const [],
     Object? data,
-  }) =>
-      _send(
-        () => _dio.post<Map<String, dynamic>>(
-          _urlBuilder.build(function, pathParams),
-          data: data,
-        ),
-      );
+  }) => _send(
+    () => _dio.post<Map<String, dynamic>>(
+      _urlBuilder.build(function, pathParams),
+      data: data,
+    ),
+  );
 
   Future<Either<Failure, Map<String, dynamic>>> patch(
     String function, {
     List<String> pathParams = const [],
     Object? data,
-  }) =>
-      _send(
-        () => _dio.patch<Map<String, dynamic>>(
-          _urlBuilder.build(function, pathParams),
-          data: data,
-        ),
-      );
+  }) => _send(
+    () => _dio.patch<Map<String, dynamic>>(
+      _urlBuilder.build(function, pathParams),
+      data: data,
+    ),
+  );
 
   Future<Either<Failure, Map<String, dynamic>>> delete(
     String function, {
     List<String> pathParams = const [],
     Object? data,
-  }) =>
-      _send(
-        () => _dio.delete<Map<String, dynamic>>(
-          _urlBuilder.build(function, pathParams),
-          data: data,
+  }) => _send(
+    () => _dio.delete<Map<String, dynamic>>(
+      _urlBuilder.build(function, pathParams),
+      data: data,
+    ),
+  );
+
+  /// spec-7-2 — `export-download-get`'s own shape: the real payload is the
+  /// `302` response's `Location` header (a signed Storage URL), never a
+  /// JSON body. `followRedirects: false` stops dio from auto-following
+  /// into that signed-storage host itself (Boundaries); the permissive
+  /// `validateStatus` (anything below 400) keeps dio from throwing on the
+  /// `302` the way its own default validator (`>= 200 && < 300`) would.
+  /// `responseType` is deliberately left at its default — an *error*
+  /// response (>= 400) still decodes as JSON, so `_mapDioException`/
+  /// `dioErrorCodeOf` keep mapping it exactly as they do for every other
+  /// call on this façade, unchanged.
+  ///
+  /// A `302` with no `Location` header (shouldn't happen — the contract's
+  /// own response is declared as exactly this) maps to
+  /// [Failure.malformedResponse] rather than returning an empty/null URL
+  /// (RNF09, I/O matrix: "Missing Location").
+  Future<Either<Failure, String>> getRedirectLocation(
+    String function, {
+    List<String> pathParams = const [],
+    Map<String, dynamic>? queryParameters,
+  }) async {
+    try {
+      final response = await _dio.get<dynamic>(
+        _urlBuilder.build(function, pathParams),
+        queryParameters: queryParameters,
+        options: Options(
+          followRedirects: false,
+          validateStatus: (status) => status != null && status < 400,
         ),
       );
+      final location = response.headers.value('location');
+      if (location == null) {
+        return left(
+          const Failure.malformedResponse(message: 'Missing Location header'),
+        );
+      }
+      return right(location);
+    } on DioException catch (e) {
+      return left(_mapDioException(e));
+    } catch (e) {
+      return left(Failure.malformedResponse(message: e.toString()));
+    }
+  }
 
   /// spec-6-1 — streaming companion to [post]: sent with
   /// `ResponseType.stream` so the SSE response body never gets buffered

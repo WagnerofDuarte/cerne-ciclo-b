@@ -2,8 +2,11 @@ import 'dart:async';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../core/failure/failure.dart';
+import '../../domain/entities/export_download_format.dart';
 import '../../domain/entities/export_job_state.dart';
 import '../../domain/repositories/export_repository.dart';
+import '../../domain/services/download_opener.dart';
 
 /// Drives `ExportStatusSheet` (spec-7-1) — a fresh, `get_it`-factory-
 /// scoped instance per download-icon tap (Code Map: the `registerFactory`
@@ -17,9 +20,11 @@ import '../../domain/repositories/export_repository.dart';
 /// implies (`openapi.yaml`), so no separate "creating..." state is needed
 /// before [start]'s own `createJob` call resolves.
 class ExportJobCubit extends Cubit<ExportJobState> {
-  ExportJobCubit(this._repository) : super(const ExportJobState.preparing());
+  ExportJobCubit(this._repository, this._downloadOpener)
+    : super(const ExportJobState.preparing());
 
   final ExportRepository _repository;
+  final DownloadOpener _downloadOpener;
 
   /// Design Notes — fixed poll cadence (docs/input is silent on this):
   /// the server job always reaches a terminal state, so no client
@@ -128,6 +133,75 @@ class ExportJobCubit extends Cubit<ExportJobState> {
       state is ExportJobDone ||
       state is ExportJobError ||
       state is ExportJobEmptyPeriod;
+
+  /// Review finding (code review, patch item 3) — mirrors [_pollInFlight]:
+  /// without this guard, a rapid double-tap on a download button (or one
+  /// tap on each of the two "done" buttons in quick succession) could fire
+  /// two overlapping [_download] calls, each with its own
+  /// `getDownloadUrl`/`DownloadOpener.open` pair in flight at once. A
+  /// second call arriving while one is still in flight is a no-op —
+  /// resolves to `null` (no failure to surface) without touching the
+  /// repository or the opener at all.
+  bool _downloadInFlight = false;
+
+  /// "Baixar PDF" — see [_download].
+  Future<Failure?> downloadPdf() => _download(ExportDownloadFormat.pdf);
+
+  /// "Baixar dados brutos" — see [_download].
+  Future<Failure?> downloadRawData() => _download(ExportDownloadFormat.raw);
+
+  /// Resolves [format]'s signed download URL (`export-download-get`) and
+  /// hands it to [_downloadOpener] to open externally — never buffered in
+  /// this app (Boundaries). Returns `null` on success, or the `Failure`
+  /// that explains why otherwise — `ExportStatusSheet._handleDownload`
+  /// awaits this return value directly, rather than reading it back off a
+  /// side-channel field (review finding: a shared mutable field, written
+  /// by the cubit and mutated by the widget, broke encapsulation and was
+  /// racy before [_downloadInFlight] existed).
+  Future<Failure?> _download(ExportDownloadFormat format) async {
+    if (_downloadInFlight) {
+      return null;
+    }
+    _downloadInFlight = true;
+    try {
+      final jobId = _jobId;
+      if (jobId == null) {
+        // Shouldn't happen — every download button only ever renders once
+        // `start()` has already stored a jobId — but silently reporting
+        // success here would be indistinguishable from a real one
+        // (review finding, patch item 4).
+        return const Failure.malformedResponse(
+          message: 'Não foi possível abrir o arquivo.',
+        );
+      }
+      final result = await _repository.getDownloadUrl(jobId, format: format);
+      if (isClosed) {
+        return null;
+      }
+      return await result.match((failure) async => failure, (url) async {
+        try {
+          final opened = await _downloadOpener.open(url);
+          return opened
+              ? null
+              : const Failure.malformedResponse(
+                  message: 'Não foi possível abrir o arquivo.',
+                );
+        } catch (_) {
+          // [DownloadOpener]'s own contract never promises it won't throw
+          // — the real `UrlLauncherDownloadOpener` already catches
+          // internally, but nothing enforces that on the port itself
+          // (review finding, patch item 5). RNF09: never let a thrown
+          // exception escape uncaught out of `_handleDownload`'s own
+          // unguarded `await`.
+          return const Failure.malformedResponse(
+            message: 'Não foi possível abrir o arquivo.',
+          );
+        }
+      });
+    } finally {
+      _downloadInFlight = false;
+    }
+  }
 
   @override
   Future<void> close() {

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart' hide State;
 import 'package:go_router/go_router.dart';
@@ -34,8 +35,10 @@ import 'package:cerne/features/entries/presentation/widgets/entries_search_bar.d
 import 'package:cerne/features/entries/presentation/widgets/entry_record_card.dart';
 import 'package:cerne/features/entries/presentation/widgets/entry_skeleton_card.dart';
 import 'package:cerne/features/entries/presentation/widgets/sync_badge.dart';
+import 'package:cerne/features/export/domain/entities/export_download_format.dart';
 import 'package:cerne/features/export/domain/entities/export_job_state.dart';
 import 'package:cerne/features/export/domain/repositories/export_repository.dart';
+import 'package:cerne/features/export/domain/services/download_opener.dart';
 import 'package:cerne/features/export/presentation/cubit/export_job_cubit.dart';
 
 /// Same tiny fake `expiry_overlay_host_test.dart` uses — gives synchronous
@@ -331,8 +334,7 @@ class _UnusedMediaRepository implements MediaRepository {
 /// `export_job_cubit_test.dart` already uses for `ExportRepository`.
 class _FakeExportRepository implements ExportRepository {
   Either<Failure, String> createJobResult = right('job-1');
-  final List<({DateTime periodStart, DateTime periodEnd})> createJobCalls =
-      [];
+  final List<({DateTime periodStart, DateTime periodEnd})> createJobCalls = [];
 
   @override
   Future<Either<Failure, String>> createJob({
@@ -346,6 +348,20 @@ class _FakeExportRepository implements ExportRepository {
   @override
   Future<Either<Failure, ExportJobState>> getStatus(String jobId) async =>
       right(const ExportJobState.generating());
+
+  @override
+  Future<Either<Failure, String>> getDownloadUrl(
+    String jobId, {
+    required ExportDownloadFormat format,
+  }) async => right('https://storage.example.com/signed');
+}
+
+/// spec-7-2 — this suite never exercises the download buttons themselves
+/// (that's `export_status_sheet_test.dart`'s job); a no-op stub is enough
+/// to satisfy `ExportJobCubit`'s now-required constructor param.
+class _NoopDownloadOpener implements DownloadOpener {
+  @override
+  Future<bool> open(String url) async => true;
 }
 
 /// spec-5-1 — every `MeusRegistrosScreen` construction in this file now
@@ -371,6 +387,41 @@ Future<MeusRegistrosCubit> _pumpScreen(
   addTearDown(cubit.close);
   await tester.pumpWidget(
     MaterialApp(
+      home: MeusRegistrosScreen(
+        cubit: cubit,
+        searchCubit: _searchCubitFor(fakeRepository),
+      ),
+    ),
+  );
+  return cubit;
+}
+
+/// Review finding (verification-gap layer) — mirrors `_pumpScreen` above,
+/// but with the exact `locale`/`localizationsDelegates`/`supportedLocales`
+/// trio `main.dart`'s `CerneApp` pins to `pt_BR`, so a test can actually
+/// combine that real config with the one widget it exists for
+/// (`showDateRangePicker`). `_pumpScreen`'s own bare `MaterialApp` never
+/// exercises this — Flutter's locale resolution defaults to English
+/// without it, same gap the date-picker localization fix itself exists to
+/// close.
+Future<MeusRegistrosCubit> _pumpScreenWithLocale(
+  WidgetTester tester,
+  _FakeEntriesRepository fakeRepository,
+) async {
+  final cubit = MeusRegistrosCubit(
+    fakeRepository,
+    _FakePendingEntryWriteTracker(),
+  );
+  addTearDown(cubit.close);
+  await tester.pumpWidget(
+    MaterialApp(
+      locale: const Locale('pt', 'BR'),
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [Locale('pt', 'BR')],
       home: MeusRegistrosScreen(
         cubit: cubit,
         searchCubit: _searchCubitFor(fakeRepository),
@@ -1610,27 +1661,26 @@ void main() {
   });
 
   group('export entry point (spec-7-1)', () {
-    testWidgets(
-      'tapping the download icon opens the period picker',
-      (tester) async {
-        await resetCoreDependencies();
-        sl.registerFactory<ExportJobCubit>(
-          () => ExportJobCubit(_FakeExportRepository()),
-        );
-        addTearDown(resetCoreDependencies);
+    testWidgets('tapping the download icon opens the period picker', (
+      tester,
+    ) async {
+      await resetCoreDependencies();
+      sl.registerFactory<ExportJobCubit>(
+        () => ExportJobCubit(_FakeExportRepository(), _NoopDownloadOpener()),
+      );
+      addTearDown(resetCoreDependencies);
 
-        final fakeRepository = _FakeEntriesRepository()
-          ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+      final fakeRepository = _FakeEntriesRepository()
+        ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
 
-        await _pumpScreen(tester, fakeRepository);
-        await tester.pumpAndSettle();
+      await _pumpScreen(tester, fakeRepository);
+      await tester.pumpAndSettle();
 
-        await tester.tap(find.byIcon(Icons.download_outlined));
-        await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.download_outlined));
+      await tester.pumpAndSettle();
 
-        expect(find.byType(DateRangePickerDialog), findsOneWidget);
-      },
-    );
+      expect(find.byType(DateRangePickerDialog), findsOneWidget);
+    });
 
     testWidgets(
       'confirming the pre-filled period creates the export job and opens '
@@ -1639,7 +1689,7 @@ void main() {
         await resetCoreDependencies();
         final exportRepository = _FakeExportRepository();
         sl.registerFactory<ExportJobCubit>(
-          () => ExportJobCubit(exportRepository),
+          () => ExportJobCubit(exportRepository, _NoopDownloadOpener()),
         );
         addTearDown(resetCoreDependencies);
 
@@ -1683,18 +1733,50 @@ void main() {
       },
     );
 
+    testWidgets('a create failure shows a SnackBar with the mapped message and '
+        'never opens the export sheet (Boundaries: "Create fails -> inline '
+        'error, sheet never opens")', (tester) async {
+      await resetCoreDependencies();
+      final exportRepository = _FakeExportRepository()
+        ..createJobResult = left(
+          const Failure.networkOffline(message: 'Sem conexão.'),
+        );
+      sl.registerFactory<ExportJobCubit>(
+        () => ExportJobCubit(exportRepository, _NoopDownloadOpener()),
+      );
+      addTearDown(resetCoreDependencies);
+
+      final fakeRepository = _FakeEntriesRepository()
+        ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+
+      await _pumpScreen(tester, fakeRepository);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.download_outlined));
+      await tester.pumpAndSettle();
+
+      final confirmButton = find
+          .descendant(
+            of: find.byType(DateRangePickerDialog),
+            matching: find.byType(TextButton),
+          )
+          .last;
+      await tester.tap(confirmButton);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sem conexão.'), findsOneWidget);
+      expect(find.text('Preparando exportação...'), findsNothing);
+    });
+
     testWidgets(
-      'a create failure shows a SnackBar with the mapped message and '
-      'never opens the export sheet (Boundaries: "Create fails -> inline '
-      'error, sheet never opens")',
+      'a rapid double-tap on the download icon opens the period picker '
+      'only once (review finding: verification-gap layer — the sibling '
+      '_navigatingToDetail guard above has exactly this kind of test, '
+      '_exportInFlight had none)',
       (tester) async {
         await resetCoreDependencies();
-        final exportRepository = _FakeExportRepository()
-          ..createJobResult = left(
-            const Failure.networkOffline(message: 'Sem conexão.'),
-          );
         sl.registerFactory<ExportJobCubit>(
-          () => ExportJobCubit(exportRepository),
+          () => ExportJobCubit(_FakeExportRepository(), _NoopDownloadOpener()),
         );
         addTearDown(resetCoreDependencies);
 
@@ -1704,21 +1786,64 @@ void main() {
         await _pumpScreen(tester, fakeRepository);
         await tester.pumpAndSettle();
 
+        // Two taps before the first picker settles — `tester.tap` alone
+        // doesn't pump, so both land while `_exportInFlight` is still
+        // `true` from the first tap's own synchronous guard-set, exactly
+        // mirroring the `_navigatingToDetail` double-tap test above.
+        await tester.tap(find.byIcon(Icons.download_outlined));
         await tester.tap(find.byIcon(Icons.download_outlined));
         await tester.pumpAndSettle();
 
-        final confirmButton = find
-            .descendant(
-              of: find.byType(DateRangePickerDialog),
-              matching: find.byType(TextButton),
-            )
-            .last;
-        await tester.tap(confirmButton);
-        await tester.pumpAndSettle();
+        expect(find.byType(DateRangePickerDialog), findsOneWidget);
 
-        expect(find.text('Sem conexão.'), findsOneWidget);
-        expect(find.text('Preparando exportação...'), findsNothing);
+        // Dismiss the one picker that did open so the test ends clean —
+        // its calendar-mode dialog has no textual "Cancel" button (see
+        // the pt_BR test below), only this "Fechar"/"Close" AppBar icon,
+        // found by its icon widget type rather than locale-specific
+        // tooltip text.
+        final closeButton = find
+            .byWidgetPredicate(
+              (widget) =>
+                  widget is IconButton && widget.icon is CloseButtonIcon,
+            )
+            .first;
+        await tester.tap(closeButton);
+        await tester.pumpAndSettle();
       },
     );
+
+    testWidgets('the period picker renders in pt_BR when the app locale is '
+        'configured (review finding: main.dart\'s locale pin, which exists '
+        "only to fix this picker's English fallback, had no test exercising "
+        'it together with the picker)', (tester) async {
+      await resetCoreDependencies();
+      sl.registerFactory<ExportJobCubit>(
+        () => ExportJobCubit(_FakeExportRepository(), _NoopDownloadOpener()),
+      );
+      addTearDown(resetCoreDependencies);
+
+      final fakeRepository = _FakeEntriesRepository()
+        ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+
+      await _pumpScreenWithLocale(tester, fakeRepository);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.download_outlined));
+      await tester.pumpAndSettle();
+
+      // `MaterialLocalizationPt.saveButtonLabel` ('Salvar') — would read
+      // 'Save' instead without the locale config this test pins.
+      // (`showDateRangePicker`'s own calendar-mode dialog has no textual
+      // "Cancel" button at all — dismissal is the "Fechar" close icon in
+      // its AppBar — so this story's one PT-BR fix is best verified
+      // against its confirm action's own label.)
+      expect(
+        find.descendant(
+          of: find.byType(DateRangePickerDialog),
+          matching: find.text('Salvar'),
+        ),
+        findsOneWidget,
+      );
+    });
   });
 }

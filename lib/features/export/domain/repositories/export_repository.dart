@@ -1,6 +1,7 @@
 import 'package:fpdart/fpdart.dart';
 
 import '../../../../core/failure/failure.dart';
+import '../entities/export_download_format.dart';
 import '../entities/export_job_state.dart';
 
 /// The export feature's one port (RNF06) — `features/export/presentation`
@@ -28,4 +29,17 @@ abstract class ExportRepository {
   /// `Right(ExportJobState.error(...))`/`Right(ExportJobState.
   /// emptyPeriod())`, never as a `Left`.
   Future<Either<Failure, ExportJobState>> getStatus(String jobId);
+
+  /// Calls `export-download-get` (`ApiClient.getRedirectLocation`, [jobId]
+  /// trailing, [format] as the `format` query parameter) — returns the
+  /// signed Storage URL carried in the `302`'s `Location` header, never
+  /// the body of a followed redirect (Boundaries: "never auto-follow into
+  /// the signed-storage host"). `Left` here covers a transport failure, a
+  /// backend error response, and a missing `Location` header alike — all
+  /// three are surfaced by `ExportJobCubit` the same way (Design Notes: an
+  /// inline `SnackBar`, never a job-status state mutation).
+  Future<Either<Failure, String>> getDownloadUrl(
+    String jobId, {
+    required ExportDownloadFormat format,
+  });
 }

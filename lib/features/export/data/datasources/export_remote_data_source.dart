@@ -2,6 +2,7 @@ import 'package:fpdart/fpdart.dart';
 
 import '../../../../core/failure/failure.dart';
 import '../../../../core/network/api_client.dart';
+import '../../domain/entities/export_download_format.dart';
 import '../models/export_job_status_dto.dart';
 
 /// The export feature's one remote data source — `export-summary-create`/
@@ -75,4 +76,18 @@ class ExportRemoteDataSource {
       }
     });
   }
+
+  /// `export-download-get` — [jobId] trailing, [format] sent as the
+  /// `format` query parameter (`.name`, matching the contract's own enum
+  /// values verbatim). `ApiClient.getRedirectLocation` already owns the
+  /// `302`-vs-error distinction (Code Map) — this is a thin pass-through,
+  /// no mapping logic of its own.
+  Future<Either<Failure, String>> getDownloadUrl(
+    String jobId, {
+    required ExportDownloadFormat format,
+  }) => _apiClient.getRedirectLocation(
+    'export-download-get',
+    pathParams: [jobId],
+    queryParameters: {'format': format.name},
+  );
 }

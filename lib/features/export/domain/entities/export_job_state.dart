@@ -1,14 +1,15 @@
 import '../../../../core/failure/failure.dart';
 
-/// spec-7-1 — the export job's own progress, modeled as its own sealed
-/// domain entity (AD-12: never force `status`+`narrativeStatus` into
-/// `Resource<T>`), mirroring `BookmarkState`'s own shape: sealed, with
-/// `const factory` constructors declared on the base class so call sites
-/// read as `ExportJobState.preparing()` rather than naming each subclass
-/// directly. Exactly the 5 states `docs/input/backend/export-screen-
-/// states.md`'s own status×narrativeStatus×downloadAvailable table
-/// collapses into (`data_ready` folds into [ExportJobState.generating],
-/// Design Notes — no case of its own here).
+/// spec-7-1/spec-7-2 — the export job's own progress, modeled as its own
+/// sealed domain entity (AD-12: never force `status`+`narrativeStatus`
+/// into `Resource<T>`), mirroring `BookmarkState`'s own shape: sealed,
+/// with `const factory` constructors declared on the base class so call
+/// sites read as `ExportJobState.preparing()` rather than naming each
+/// subclass directly. Exactly the 6 states `docs/input/backend/export-
+/// screen-states.md`'s own status×narrativeStatus×downloadAvailable table
+/// collapses into — `data_ready` got its own [ExportJobState.dataReady]
+/// case in spec-7-2, once its own download button had something real to
+/// wire.
 ///
 /// Never persisted (AD-15: ephemeral, polled live) — lives only on
 /// `ExportJobCubit.state`.
@@ -21,11 +22,17 @@ sealed class ExportJobState {
   /// separate "creating..." state is needed before that call resolves.
   const factory ExportJobState.preparing() = ExportJobPreparing;
 
-  /// `status in {processing, data_ready}` — progress bar, "Gerando resumo
-  /// com IA...". `data_ready` renders identically to `processing` here
-  /// (Design Notes/Never: lighting up its own download-enabled treatment
-  /// is Story 7.2's job).
+  /// `status: 'processing'` — progress bar, "Gerando resumo com IA...",
+  /// no download of any kind yet.
   const factory ExportJobState.generating() = ExportJobGenerating;
+
+  /// `status: 'data_ready'` — spec-7-2's own state: the raw export file
+  /// is ready to download while `narrativeStatus` is still `processing`
+  /// underneath it. Renders the same progress-bar/text treatment as
+  /// [ExportJobState.generating], plus the "Baixar dados brutos" button
+  /// rendered already enabled beneath (no PDF button here — a PDF folds
+  /// the narrative in, which isn't done yet).
+  const factory ExportJobState.dataReady() = ExportJobDataReady;
 
   /// `status: 'done'` — [outcome] distinguishes "Concluído" (narrative
   /// succeeded, both download buttons shown) from "Narrativa falhou/
@@ -80,17 +87,32 @@ class ExportJobGenerating extends ExportJobState {
   String toString() => 'ExportJobGenerating()';
 }
 
+/// See [ExportJobState.dataReady]'s own doc — mirrors [ExportJobPreparing]'s
+/// no-field shape.
+class ExportJobDataReady extends ExportJobState {
+  const ExportJobDataReady();
+
+  @override
+  bool operator ==(Object other) => other is ExportJobDataReady;
+
+  @override
+  int get hashCode => (ExportJobDataReady).hashCode;
+
+  @override
+  String toString() => 'ExportJobDataReady()';
+}
+
 /// [ExportJobDone]'s own two flavors — never a boolean, so a third future
 /// outcome (unlikely, but the taxonomy's own `narrativeStatus` enum has
 /// exactly `done`/`failed`/`skipped`, the latter two collapsing here into
 /// one) never silently reads as the wrong one of only two choices.
 enum ExportOutcome {
-  /// `narrativeStatus: 'done'` — "Resumo pronto", PDF + raw buttons
-  /// (disabled this story; Story 7.2 wires the taps).
+  /// `narrativeStatus: 'done'` — "Resumo pronto", both the PDF and the
+  /// raw-data buttons enabled (spec-7-2).
   narrativeReady,
 
-  /// `narrativeStatus in {failed, skipped}` — only the raw-data button
-  /// (disabled this story), copy scoped to the narrative failure, not a
+  /// `narrativeStatus in {failed, skipped}` — only the raw-data button,
+  /// enabled (spec-7-2), copy scoped to the narrative failure, not a
   /// job-wide error.
   narrativeUnavailable,
 }
@@ -102,7 +124,8 @@ class ExportJobDone extends ExportJobState {
 
   @override
   bool operator ==(Object other) =>
-      identical(this, other) || (other is ExportJobDone && other.outcome == outcome);
+      identical(this, other) ||
+      (other is ExportJobDone && other.outcome == outcome);
 
   @override
   int get hashCode => outcome.hashCode;
@@ -123,7 +146,8 @@ class ExportJobError extends ExportJobState {
 
   @override
   bool operator ==(Object other) =>
-      identical(this, other) || (other is ExportJobError && other.failure == failure);
+      identical(this, other) ||
+      (other is ExportJobError && other.failure == failure);
 
   @override
   int get hashCode => failure.hashCode;

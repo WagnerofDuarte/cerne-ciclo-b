@@ -1,6 +1,7 @@
 import 'package:fpdart/fpdart.dart';
 
 import '../../../../core/failure/failure.dart';
+import '../../domain/entities/export_download_format.dart';
 import '../../domain/entities/export_job_state.dart';
 import '../../domain/repositories/export_repository.dart';
 import '../datasources/export_remote_data_source.dart';
@@ -28,4 +29,10 @@ class ExportRepositoryImpl implements ExportRepository {
     final result = await _remoteDataSource.getStatus(jobId);
     return result.map((dto) => dto.toState());
   }
+
+  @override
+  Future<Either<Failure, String>> getDownloadUrl(
+    String jobId, {
+    required ExportDownloadFormat format,
+  }) => _remoteDataSource.getDownloadUrl(jobId, format: format);
 }
