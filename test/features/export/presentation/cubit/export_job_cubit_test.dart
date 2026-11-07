@@ -525,10 +525,10 @@ void main() {
       });
     });
 
-    test('review finding (patch item 3): a second download call arriving '
-        'while the first is still in flight is a no-op — _downloadInFlight '
-        'stops it from ever reaching the repository/opener, mirroring '
-        '_pollInFlight\'s own overlap guard', () {
+    test('review finding (patch item 3): a second call for the SAME format '
+        'arriving while the first is still in flight is a no-op — '
+        '_downloadsInFlight stops it from ever reaching the '
+        'repository/opener, mirroring _pollInFlight\'s own overlap guard', () {
       fakeAsync((async) {
         unawaited(cubit.start(periodStart: periodStart, periodEnd: periodEnd));
         async.flushMicrotasks();
@@ -541,11 +541,11 @@ void main() {
         var secondCompleted = false;
         unawaited(cubit.downloadPdf().then((value) => firstResult = value));
         async.flushMicrotasks();
-        // The first call is now in flight, gated open on the repository
-        // call. A second call arriving now must never reach the
-        // repository or the opener at all.
+        // The first "Baixar PDF" call is now in flight, gated open on the
+        // repository call. A second call for the SAME format arriving now
+        // must never reach the repository or the opener at all.
         unawaited(
-          cubit.downloadRawData().then((value) {
+          cubit.downloadPdf().then((value) {
             secondResult = value;
             secondCompleted = true;
           }),
@@ -561,6 +561,67 @@ void main() {
         async.flushMicrotasks();
         expect(firstResult, isNull);
         expect(downloadOpener.openCalls, hasLength(1));
+      });
+    });
+
+    test('review finding (round 2): a download for the OTHER format '
+        'arriving while one is still in flight is NOT blocked — the two '
+        'formats are guarded independently, since both "Baixar PDF"/'
+        '"Baixar dados brutos" can be enabled and tapped at the same time '
+        'in the narrativeReady outcome', () {
+      fakeAsync((async) {
+        unawaited(cubit.start(periodStart: periodStart, periodEnd: periodEnd));
+        async.flushMicrotasks();
+
+        final gate = Completer<void>();
+        repository.delayNextGetDownloadUrl = gate;
+
+        Failure? firstResult;
+        Failure? secondResult;
+        unawaited(cubit.downloadPdf().then((value) => firstResult = value));
+        async.flushMicrotasks();
+        // The "Baixar PDF" call is now in flight, gated open on the
+        // repository call. A concurrent "Baixar dados brutos" tap must
+        // still reach the repository/opener on its own.
+        unawaited(
+          cubit.downloadRawData().then((value) => secondResult = value),
+        );
+        async.flushMicrotasks();
+
+        expect(repository.getDownloadUrlCalls, hasLength(2));
+        expect(downloadOpener.openCalls, hasLength(1));
+
+        gate.complete();
+        async.flushMicrotasks();
+        expect(firstResult, isNull);
+        expect(secondResult, isNull);
+        expect(downloadOpener.openCalls, hasLength(2));
+      });
+    });
+
+    test('review finding (round 2): closing the cubit while a download is '
+        'already in flight still lets the opener hand the signed URL off '
+        'to the OS — dismissing the sheet mid-download must not silently '
+        'drop the file', () {
+      fakeAsync((async) {
+        unawaited(cubit.start(periodStart: periodStart, periodEnd: periodEnd));
+        async.flushMicrotasks();
+
+        final gate = Completer<void>();
+        repository.delayNextGetDownloadUrl = gate;
+
+        Failure? result;
+        unawaited(cubit.downloadRawData().then((value) => result = value));
+        async.flushMicrotasks();
+
+        unawaited(cubit.close());
+        async.flushMicrotasks();
+
+        gate.complete();
+        async.flushMicrotasks();
+
+        expect(downloadOpener.openCalls, hasLength(1));
+        expect(result, isNull);
       });
     });
   });

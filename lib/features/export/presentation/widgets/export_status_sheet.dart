@@ -112,11 +112,18 @@ class ExportStatusSheet extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: DesignTokens.spacingXs),
-                AppButton(
-                  label: 'Fechar',
-                  variant: AppButtonVariant.textGhost,
-                  textColor: DesignTokens.colorTextSecondary,
-                  onPressed: () => Navigator.of(context).pop(),
+                // Review finding (round 2) — the outer Column's own
+                // `CrossAxisAlignment.stretch` stretches any direct child
+                // to full width; `Center` restores "Fechar"'s previous
+                // small, centered-link footprint instead of a full-width
+                // button bar.
+                Center(
+                  child: AppButton(
+                    label: 'Fechar',
+                    variant: AppButtonVariant.textGhost,
+                    textColor: DesignTokens.colorTextSecondary,
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
                 ),
               ],
             );

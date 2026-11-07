@@ -67,6 +67,32 @@ baseline_commit: '753d448f4e84e41655e9291a5efd56999154bf6b'
 - Given the narrative fails/is skipped at `status=done`, then "Baixar dados brutos" stays enabled, error copy stays scoped to the narrative.
 - Given the narrative succeeds at `status=done`, then both "Baixar PDF" and "Baixar dados brutos" are enabled and tappable.
 
+### Review Findings
+
+_Code review (lib/ group, 2026-11-07) — chunked review; test/ and docs/metadata groups pending in follow-up rounds._
+
+- [x] [Review][Patch] Single `_downloadInFlight` flag blocks cross-format concurrent downloads silently [lib/features/export/presentation/cubit/export_job_cubit.dart:145] — fixed: keyed by format (`Set<ExportDownloadFormat>`); also dropped the `isClosed` short-circuit before `DownloadOpener.open` so dismissing the sheet mid-download no longer silently aborts it
+- [x] [Review][Patch] Dismissing the sheet before a download resolves silently aborts the `DownloadOpener.open` call [lib/features/export/presentation/cubit/export_job_cubit.dart:178] — fixed alongside the item above
+- [x] [Review][Patch] Duplicated failure-message literal repeated 3x in `_download` instead of a shared constant [lib/features/export/presentation/cubit/export_job_cubit.dart:174] — fixed: extracted `_downloadFailureMessage`
+- [x] [Review][Patch] Empty-string `Location` header is not rejected as missing (only `null` is checked) [lib/core/network/api_client.dart:117] — fixed: `location == null || location.isEmpty`
+- [x] [Review][Patch] "Fechar" button lost its `Center` wrap and now stretches full-width under `CrossAxisAlignment.stretch` [lib/features/export/presentation/widgets/export_status_sheet.dart:115] — fixed: re-wrapped in `Center`
+- [x] [Review][Defer] Inconsistent SnackBar message tone (PT copy vs. raw Dio message) [lib/features/export/presentation/widgets/export_status_sheet.dart:271] — deferred, pre-existing (mirrors `_onExportTap`'s own established pattern)
+- [x] [Review][Defer] `getRedirectLocation`'s generic `catch (e)` buckets a client-side bug with a genuine backend contract violation [lib/core/network/api_client.dart:125] — deferred, pre-existing (mirrors `_send`'s own established pattern)
+- [x] [Review][Defer] `followRedirects: false` is never actually exercised by existing tests — both the mocked unit test and the e2e fake adapter bypass `Options.followRedirects` [test/core/network/api_client_test.dart:406, test/features/export/export_flow_e2e_test.dart:385] — deferred, carry forward to the test/ group review round
+
+_Code review (test/ group, 2026-11-07) — round 2 of the chunked review; docs/metadata group still pending._
+
+- [x] [Review][Patch] `url_launcher_download_opener_test.dart`'s `setUp` overwrites the static `UrlLauncherPlatform.instance` with no `tearDown` restoring it, and the "external-application mode" test never actually captures/asserts `LaunchOptions.mode` [test/features/export/data/services/url_launcher_download_opener_test.dart:40] — fixed: added `tearDown` restoring the original instance and a `capturedOptions`/`PreferredLaunchMode.externalApplication` assertion
+- [x] [Review][Patch] `export_status_sheet_test.dart`'s "Dados prontos"/"Concluído" tests check `getDownloadUrlCalls` after tapping a download button but never `downloadOpener.openCalls` — a broken URL→opener hand-off would pass undetected [test/features/export/presentation/widgets/export_status_sheet_test.dart:216,181] — fixed: added the missing `openCalls` assertions to both
+- [x] [Review][Patch] No test exercises a raw-data download failure's `SnackBar` in the `narrativeUnavailable` state (only a PDF-download failure is tested, in `narrativeReady`) [test/features/export/presentation/widgets/export_status_sheet_test.dart:224] — fixed: added that test
+- [x] [Review][Patch] `export_remote_data_source_test.dart`'s "sends format=raw" test never asserts the decoded return value, only `verify(...).called(1)` [test/features/export/data/datasources/export_remote_data_source_test.dart:1176] — fixed: added the `Right`/URL assertion
+- [x] [Review][Patch] `bootstrap_integration_test.dart`'s new export-wiring test has no explicit assertion that `DownloadOpener` is registered — a broken binding would only surface as an incidental exception from `sl<ExportJobCubit>()` [test/core/di/bootstrap_integration_test.dart:80] — fixed: added `sl.isRegistered<DownloadOpener>()` assertion
+- [x] [Review][Patch] `export_flow_e2e_test.dart`'s `getRedirectLocation` group calls `sl<ApiClient>().getRedirectLocation(...)` directly, bypassing `ExportRepositoryImpl`/`ExportJobCubit` entirely — no e2e test drives `downloadPdf()`/`downloadRawData()` through the real DI graph the way the create/poll flow already is [test/features/export/export_flow_e2e_test.dart:386] — fixed: added a `download` group with 2 new e2e tests (success through the full real chain + a NOT_FOUND failure), faking `UrlLauncherPlatform.instance` so `sl<DownloadOpener>()`'s real `UrlLauncherDownloadOpener` never reaches a native channel
+
+_Code review (docs/metadata group, 2026-11-07) — round 3 of the chunked review, closing it out._
+
+- [x] [Review][Patch] `tests/test-summary.md` has no `Target feature` entry documenting spec-7-2's own e2e additions (`getRedirectLocation`/`download` groups) — its only export entry is a leftover, uncommitted spec-7-1 artifact (per this story's own commit message); the "Coverage" section also conflated "auth/vault missing e2e coverage" with the unrelated "epic 8 is backlog" fact [_bmad-output/implementation-artifacts/tests/test-summary.md:69] — fixed: separated the two facts and cross-referenced the undocumented 7.2 e2e work
+
 ## Spec Change Log
 
 ## Design Notes

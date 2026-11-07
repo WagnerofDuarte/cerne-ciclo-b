@@ -214,9 +214,19 @@ void main() {
         ),
       ).thenAnswer((_) async => right('https://storage.example.com/signed'));
 
-      await dataSource.getDownloadUrl(
+      final result = await dataSource.getDownloadUrl(
         'job-1',
         format: ExportDownloadFormat.raw,
+      );
+
+      // Review finding (code review, test/ group round 2) — only
+      // `verify(...).called(1)` was checked below; the decoded return
+      // value itself was never asserted on this path, unlike its `pdf`
+      // sibling test.
+      expect(result.isRight(), isTrue);
+      result.match(
+        (_) => fail('expected Right'),
+        (url) => expect(url, 'https://storage.example.com/signed'),
       );
 
       verify(

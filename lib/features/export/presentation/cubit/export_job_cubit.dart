@@ -134,15 +134,21 @@ class ExportJobCubit extends Cubit<ExportJobState> {
       state is ExportJobError ||
       state is ExportJobEmptyPeriod;
 
-  /// Review finding (code review, patch item 3) — mirrors [_pollInFlight]:
-  /// without this guard, a rapid double-tap on a download button (or one
-  /// tap on each of the two "done" buttons in quick succession) could fire
-  /// two overlapping [_download] calls, each with its own
-  /// `getDownloadUrl`/`DownloadOpener.open` pair in flight at once. A
-  /// second call arriving while one is still in flight is a no-op —
-  /// resolves to `null` (no failure to surface) without touching the
-  /// repository or the opener at all.
-  bool _downloadInFlight = false;
+  /// Review finding (code review, patch item 3), keyed by [format] —
+  /// mirrors [_pollInFlight]: without this guard, a rapid double-tap on
+  /// the *same* download button could fire two overlapping [_download]
+  /// calls for it, each with its own `getDownloadUrl`/`DownloadOpener.open`
+  /// pair in flight at once. Keyed per-format (review finding, round 2 —
+  /// a single shared flag silently dropped a legitimate, concurrent tap on
+  /// the *other* format's button while the first was still in flight,
+  /// since both "Baixar PDF"/"Baixar dados brutos" can be enabled at the
+  /// same time in the `narrativeReady` outcome) so the two formats never
+  /// block each other. A second call for an already-in-flight format is a
+  /// no-op — resolves to `null` (no failure to surface) without touching
+  /// the repository or the opener at all.
+  final Set<ExportDownloadFormat> _downloadsInFlight = {};
+
+  static const _downloadFailureMessage = 'Não foi possível abrir o arquivo.';
 
   /// "Baixar PDF" — see [_download].
   Future<Failure?> downloadPdf() => _download(ExportDownloadFormat.pdf);
@@ -157,12 +163,12 @@ class ExportJobCubit extends Cubit<ExportJobState> {
   /// awaits this return value directly, rather than reading it back off a
   /// side-channel field (review finding: a shared mutable field, written
   /// by the cubit and mutated by the widget, broke encapsulation and was
-  /// racy before [_downloadInFlight] existed).
+  /// racy before [_downloadsInFlight] existed).
   Future<Failure?> _download(ExportDownloadFormat format) async {
-    if (_downloadInFlight) {
+    if (_downloadsInFlight.contains(format)) {
       return null;
     }
-    _downloadInFlight = true;
+    _downloadsInFlight.add(format);
     try {
       final jobId = _jobId;
       if (jobId == null) {
@@ -171,20 +177,23 @@ class ExportJobCubit extends Cubit<ExportJobState> {
         // success here would be indistinguishable from a real one
         // (review finding, patch item 4).
         return const Failure.malformedResponse(
-          message: 'Não foi possível abrir o arquivo.',
+          message: _downloadFailureMessage,
         );
       }
       final result = await _repository.getDownloadUrl(jobId, format: format);
-      if (isClosed) {
-        return null;
-      }
+      // Review finding (round 2) — [_downloadOpener.open] is a pure
+      // side-effect handoff to the OS; it never touches [state]/[emit], so
+      // there's no encapsulation reason to skip it once [isClosed] (unlike
+      // [_poll]'s own `isClosed` guard, which exists specifically to avoid
+      // emitting after disposal). Short-circuiting here used to silently
+      // drop the user's download the instant they dismissed the sheet.
       return await result.match((failure) async => failure, (url) async {
         try {
           final opened = await _downloadOpener.open(url);
           return opened
               ? null
               : const Failure.malformedResponse(
-                  message: 'Não foi possível abrir o arquivo.',
+                  message: _downloadFailureMessage,
                 );
         } catch (_) {
           // [DownloadOpener]'s own contract never promises it won't throw
@@ -194,12 +203,12 @@ class ExportJobCubit extends Cubit<ExportJobState> {
           // exception escape uncaught out of `_handleDownload`'s own
           // unguarded `await`.
           return const Failure.malformedResponse(
-            message: 'Não foi possível abrir o arquivo.',
+            message: _downloadFailureMessage,
           );
         }
       });
     } finally {
-      _downloadInFlight = false;
+      _downloadsInFlight.remove(format);
     }
   }
 

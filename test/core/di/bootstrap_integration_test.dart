@@ -27,6 +27,7 @@ import 'package:cerne/features/entries/presentation/cubit/entries_search_cubit.d
 import 'package:cerne/features/entries/presentation/cubit/entry_detail_cubit.dart';
 import 'package:cerne/features/entries/presentation/cubit/meus_registros_cubit.dart';
 import 'package:cerne/features/export/domain/repositories/export_repository.dart';
+import 'package:cerne/features/export/domain/services/download_opener.dart';
 import 'package:cerne/features/export/presentation/cubit/export_job_cubit.dart';
 import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 
@@ -310,6 +311,11 @@ void main() {
       'straight into constructors, and the screen widget tests override '
       'ExportJobCubit before ever resolving it)', () async {
     expect(sl.isRegistered<ExportRepository>(), isTrue);
+    // Review finding (code review, test/ group round 2) — only
+    // `ExportRepository`'s registration was asserted by name; a broken
+    // `DownloadOpener` binding would have only surfaced as an incidental
+    // exception from `sl<ExportJobCubit>()` below, not a named failure.
+    expect(sl.isRegistered<DownloadOpener>(), isTrue);
 
     // `ExportJobCubit` is a `registerFactory` (Code Map: one-shot-cubit
     // precedent), not a singleton — resolving it twice must return two

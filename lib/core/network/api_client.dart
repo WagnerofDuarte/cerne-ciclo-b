@@ -114,7 +114,7 @@ class ApiClient {
         ),
       );
       final location = response.headers.value('location');
-      if (location == null) {
+      if (location == null || location.isEmpty) {
         return left(
           const Failure.malformedResponse(message: 'Missing Location header'),
         );

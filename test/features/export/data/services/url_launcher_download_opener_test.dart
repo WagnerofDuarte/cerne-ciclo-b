@@ -18,6 +18,7 @@ class _FakeUrlLauncherPlatform extends UrlLauncherPlatform {
   bool launchResult = true;
   Object? thrownError;
   String? capturedUrl;
+  LaunchOptions? capturedOptions;
 
   @override
   LinkDelegate? get linkDelegate => null;
@@ -25,6 +26,7 @@ class _FakeUrlLauncherPlatform extends UrlLauncherPlatform {
   @override
   Future<bool> launchUrl(String url, LaunchOptions options) async {
     capturedUrl = url;
+    capturedOptions = options;
     final error = thrownError;
     if (error != null) {
       throw error;
@@ -36,11 +38,20 @@ class _FakeUrlLauncherPlatform extends UrlLauncherPlatform {
 void main() {
   late _FakeUrlLauncherPlatform fakePlatform;
   late UrlLauncherDownloadOpener opener;
+  // Review finding (code review, test/ group round 2) — without saving
+  // and restoring the real instance, this file's `setUp` would leave the
+  // static `UrlLauncherPlatform.instance` overwritten for every test that
+  // runs after this file in the same process.
+  final originalPlatform = UrlLauncherPlatform.instance;
 
   setUp(() {
     fakePlatform = _FakeUrlLauncherPlatform();
     UrlLauncherPlatform.instance = fakePlatform;
     opener = UrlLauncherDownloadOpener();
+  });
+
+  tearDown(() {
+    UrlLauncherPlatform.instance = originalPlatform;
   });
 
   test('a successful launch returns true, with the external-application mode '
@@ -49,6 +60,13 @@ void main() {
 
     expect(result, isTrue);
     expect(fakePlatform.capturedUrl, 'https://storage.example.com/signed');
+    // Review finding (code review, test/ group round 2) — the test name's
+    // own claim ("external-application mode always requested") was never
+    // actually verified against the real argument passed through.
+    expect(
+      fakePlatform.capturedOptions?.mode,
+      PreferredLaunchMode.externalApplication,
+    );
   });
 
   test('the platform reporting it could not launch (false) is returned '

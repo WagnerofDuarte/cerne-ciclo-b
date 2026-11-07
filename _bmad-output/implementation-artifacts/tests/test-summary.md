@@ -38,6 +38,18 @@ this level of coverage; export did not.
     function (previously only exercised in isolation or against a fake
     repository, never through the real Dio pipeline).
 
+- [x] `test/core/network/api_client_test.dart` / `test/features/export/
+  export_flow_e2e_test.dart` — closed a test-pinning gap flagged by
+  spec-7-2's round-2 code review (`deferred-work.md`): the mocked unit
+  test now captures the `options` argument to `getRedirectLocation`'s
+  `Dio.get` call and asserts `followRedirects == false` and the
+  permissive `validateStatus` boundary (302 true / 400 false); the e2e
+  test now asserts `followRedirects` on the request that actually
+  reached the fake transport adapter, after passing through the real
+  header + retry interceptor chain. Previously, flipping or dropping
+  `followRedirects: false` in `ApiClient.getRedirectLocation` would not
+  have failed either test.
+
 This complements, and does not duplicate, existing coverage:
 `export_job_cubit_test.dart` (fake repository, I/O-matrix transitions),
 `export_remote_data_source_test.dart` (mocked `ApiClient`, DTO
@@ -59,23 +71,32 @@ this pattern).
 - `fvm flutter analyze` — 0 issues
 - `dart format --set-exit-if-changed` — clean (after one auto-format
   pass)
-- `fvm flutter test` — **1100/1100 passed**, no regressions in the
+- `fvm flutter test` — **1128/1128 passed**, no regressions in the
   existing suite
 
 ## Coverage
 
 - Features with `*_flow_e2e_test.dart` coverage: capture, entries,
   chat, **export** (new)
-- Still missing this level of coverage: auth, account, vault (epic 8 —
-  dashboard/profile/logout/account-deletion — is still `backlog`, so
-  N/A for now)
+- Still missing this level of coverage: auth (login/refresh/expired-
+  session recovery), vault (biometric/PIN gate) — both already `done`,
+  revisit when their own review cycles come up
+- Epic 8 (dashboard/profile/logout/account-deletion) is still `backlog`,
+  so e2e coverage for it is N/A for now — unrelated to the auth/vault
+  gap above (review finding, code review of spec-7-2, docs/metadata
+  group — this bullet previously conflated the two)
 
 ## Next Steps
 
 - Consider the same real-pipeline e2e treatment for auth (login/refresh/
   expired-session recovery) and vault (biometric/PIN gate) when their
   own review cycles come up.
-- Story 7.2 (independent raw-data download) will need its own e2e
-  additions once the download taps are wired for real — this suite's
-  "done" tests intentionally only assert the disabled-button state that
-  exists today.
+- This entry (story 7.1) predates story 7.2's own e2e additions — the
+  `getRedirectLocation` group and the `download` group (`downloadPdf()`/
+  `downloadRawData()` through the real DI graph) in the same
+  `export_flow_e2e_test.dart`, added across spec-7-2's own commit and
+  its code review — have no `Target feature` entry of their own above
+  (review finding, code review of spec-7-2, docs/metadata group: this
+  file was committed late, as a leftover uncommitted spec-7-1 artifact,
+  per spec-7-2's own commit message — nothing has documented 7.2's own
+  e2e work here yet).

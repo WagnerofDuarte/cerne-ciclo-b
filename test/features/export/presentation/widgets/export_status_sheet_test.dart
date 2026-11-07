@@ -182,6 +182,14 @@ void main() {
         ExportDownloadFormat.pdf,
         ExportDownloadFormat.raw,
       ]);
+      // Review finding (code review, test/ group round 2) — only
+      // `getDownloadUrlCalls` was checked after this second tap; a broken
+      // hand-off from the resolved URL to the opener would have passed
+      // undetected.
+      expect(downloadOpener.openCalls, [
+        'https://storage.example.com/signed',
+        'https://storage.example.com/signed',
+      ]);
     },
   );
 
@@ -211,9 +219,18 @@ void main() {
       );
       expect(rawButton.onPressed, isNotNull);
 
+      // A single pump() (not pumpAndSettle()) — this state's poll Timer is
+      // still live (non-terminal), so pumpAndSettle() would loop against
+      // it. Every fake in this chain (getDownloadUrl/open) resolves with
+      // no real delay, so one pump()'s microtask flush is enough to carry
+      // the tap all the way through to the opener.
       await tester.tap(find.text('Baixar dados brutos'));
       await tester.pump();
       expect(repository.getDownloadUrlCalls, [ExportDownloadFormat.raw]);
+      // Review finding (code review, test/ group round 2) — only
+      // `getDownloadUrlCalls` was checked; a broken hand-off from the
+      // resolved URL to the opener would have passed undetected.
+      expect(downloadOpener.openCalls, ['https://storage.example.com/signed']);
 
       // Non-terminal state: the cubit's own poll Timer is still live.
       await cubit.close();
@@ -281,6 +298,35 @@ void main() {
       await tester.pumpAndSettle();
       expect(repository.getDownloadUrlCalls, [ExportDownloadFormat.raw]);
       expect(downloadOpener.openCalls, ['https://storage.example.com/signed']);
+    },
+  );
+
+  testWidgets(
+    'a raw-data download failure in narrativeUnavailable (the state with '
+    'no PDF button at all) shows the same inline SnackBar and never '
+    "mutates the sheet's own job-status content (review finding, code "
+    'review test/ group round 2 — only the PDF-download-failure path in '
+    'narrativeReady was covered before)',
+    (tester) async {
+      repository.getStatusResults.add(
+        right(const ExportJobState.done(ExportOutcome.narrativeUnavailable)),
+      );
+      repository.getDownloadUrlResults.add(
+        left(const Failure.notFound(message: 'Arquivo não encontrado.')),
+      );
+      await cubit.start(
+        periodStart: DateTime(2026, 1, 1),
+        periodEnd: DateTime(2026, 1, 31),
+      );
+      await _pumpSheet(tester, cubit);
+      await _advancePastOnePoll(tester);
+
+      await tester.tap(find.text('Baixar dados brutos'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Arquivo não encontrado.'), findsOneWidget);
+      expect(find.textContaining('a narrativa falhou'), findsOneWidget);
+      expect(cubit.state, isA<ExportJobDone>());
     },
   );
 

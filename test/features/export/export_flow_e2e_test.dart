@@ -6,6 +6,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive_ce.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
+import 'package:url_launcher_platform_interface/link.dart';
+import 'package:url_launcher_platform_interface/url_launcher_platform_interface.dart';
 
 import 'package:cerne/core/di/injection_container.dart';
 import 'package:cerne/core/failure/failure.dart';
@@ -63,6 +65,30 @@ class _FakeHttpClientAdapter implements HttpClientAdapter {
 
   @override
   void close({bool force = false}) {}
+}
+
+/// Review finding (code review, test/ group round 2) — the pre-existing
+/// `getRedirectLocation` group below drives `sl<ApiClient>()` directly,
+/// never the real `ExportJobCubit.downloadPdf`/`downloadRawData` ->
+/// `ExportRepositoryImpl` chain, so the DI wiring for the download feature
+/// itself had no e2e coverage. `sl<DownloadOpener>()` resolves to the
+/// real, `url_launcher`-backed `UrlLauncherDownloadOpener` — faking
+/// `UrlLauncherPlatform.instance` (the same seam
+/// `url_launcher_download_opener_test.dart` fakes) lets this file drive
+/// the whole chain for real without ever reaching a native platform
+/// channel.
+class _FakeUrlLauncherPlatform extends UrlLauncherPlatform {
+  bool launchResult = true;
+  String? capturedUrl;
+
+  @override
+  LinkDelegate? get linkDelegate => null;
+
+  @override
+  Future<bool> launchUrl(String url, LaunchOptions options) async {
+    capturedUrl = url;
+    return launchResult;
+  }
 }
 
 /// `export-status-get`'s own response `data` shape (`ExportJobStatusDto.
@@ -160,6 +186,8 @@ void main() {
 
   late FakePathProviderPlatform fakePathProvider;
   late _FakeHttpClientAdapter adapter;
+  late _FakeUrlLauncherPlatform fakeUrlLauncher;
+  final originalUrlLauncherPlatform = UrlLauncherPlatform.instance;
 
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -169,6 +197,8 @@ void main() {
         );
     fakePathProvider = FakePathProviderPlatform();
     PathProviderPlatform.instance = fakePathProvider;
+    fakeUrlLauncher = _FakeUrlLauncherPlatform();
+    UrlLauncherPlatform.instance = fakeUrlLauncher;
 
     await resetCoreDependencies();
     await setupCoreDependencies();
@@ -191,6 +221,7 @@ void main() {
     await Hive.close();
     await resetCoreDependencies();
     await fakePathProvider.cleanUp();
+    UrlLauncherPlatform.instance = originalUrlLauncherPlatform;
   });
 
   test('happy path: start() fires a genuine POST to export-summary-create '
@@ -415,6 +446,16 @@ void main() {
           request.headers['Authorization'],
           'Bearer e2e-test-access-token',
         );
+        expect(
+          request.followRedirects,
+          isFalse,
+          reason:
+              'pins the one setting that stops dio auto-following the '
+              '302 into the signed-storage host (Boundaries) all the way '
+              'through the real header + retry interceptor chain to the '
+              'transport adapter — a dropped or flipped setting on either '
+              'interceptor would not otherwise fail this test',
+        );
       },
     );
 
@@ -443,6 +484,96 @@ void main() {
       // this also confirms the call wasn't retried into a second
       // request.
       expect(adapter.requests, hasLength(1));
+    });
+  });
+
+  group('download (code review, test/ group round 2)', () {
+    test('downloadPdf()/downloadRawData() drive the real ExportJobCubit -> '
+        'ExportRepositoryImpl -> ExportRemoteDataSource -> ApiClient -> Dio '
+        'chain (same DI graph MeusRegistrosScreen resolves), landing the '
+        'signed URL on the real UrlLauncherDownloadOpener — not just '
+        "ApiClient.getRedirectLocation in isolation, the way the pre-existing "
+        "group above does", () async {
+      adapter.queueJsonResponse(202, {
+        'data': {'jobId': 'job-7'},
+      });
+      adapter.queueJsonResponse(200, {
+        'data': _statusJson(
+          jobId: 'job-7',
+          status: 'done',
+          narrativeStatus: 'done',
+          entryCount: 3,
+          downloadAvailable: true,
+        ),
+      });
+
+      final cubit = sl<ExportJobCubit>();
+      addTearDown(cubit.close);
+      await cubit.start(
+        periodStart: DateTime(2026, 1, 1),
+        periodEnd: DateTime(2026, 1, 31),
+      );
+      await _waitForState(cubit, (s) => s is ExportJobDone);
+
+      adapter.queueRedirectResponse('https://storage.example.com/signed-pdf');
+      final pdfFailure = await cubit.downloadPdf();
+
+      expect(pdfFailure, isNull);
+      final pdfRequest = adapter.requests.last;
+      expect(
+        pdfRequest.path,
+        sl<UrlBuilder>().build('export-download-get', ['job-7']),
+      );
+      expect(pdfRequest.queryParameters, {'format': 'pdf'});
+      expect(
+        fakeUrlLauncher.capturedUrl,
+        'https://storage.example.com/signed-pdf',
+      );
+
+      adapter.queueRedirectResponse('https://storage.example.com/signed-raw');
+      final rawFailure = await cubit.downloadRawData();
+
+      expect(rawFailure, isNull);
+      expect(adapter.requests.last.queryParameters, {'format': 'raw'});
+      expect(
+        fakeUrlLauncher.capturedUrl,
+        'https://storage.example.com/signed-raw',
+      );
+    });
+
+    test('a download failure (e.g. NOT_FOUND from export-download-get) '
+        'propagates through the real chain as the Failure downloadPdf() '
+        'returns, and the OS launcher is never reached', () async {
+      adapter.queueJsonResponse(202, {
+        'data': {'jobId': 'job-8'},
+      });
+      adapter.queueJsonResponse(200, {
+        'data': _statusJson(
+          jobId: 'job-8',
+          status: 'done',
+          narrativeStatus: 'done',
+          entryCount: 1,
+          downloadAvailable: true,
+        ),
+      });
+
+      final cubit = sl<ExportJobCubit>();
+      addTearDown(cubit.close);
+      await cubit.start(
+        periodStart: DateTime(2026, 1, 1),
+        periodEnd: DateTime(2026, 1, 31),
+      );
+      await _waitForState(cubit, (s) => s is ExportJobDone);
+
+      adapter.queueJsonResponse(404, {
+        'code': 'NOT_FOUND',
+        'message': 'Job not found',
+        'retryable': false,
+      });
+      final failure = await cubit.downloadPdf();
+
+      expect(failure, isA<NotFound>());
+      expect(fakeUrlLauncher.capturedUrl, isNull);
     });
   });
 }
