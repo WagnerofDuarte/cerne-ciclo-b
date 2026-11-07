@@ -763,4 +763,39 @@ class DesignTokens {
   /// Gap between the "Baixar PDF"/"Baixar dados brutos" buttons on
   /// Concluído — `gap:10px`.
   static const double exportStatusButtonGap = 10;
+
+  // ---------------------------------------------------------------------
+  // Dashboard (spec-8-1) — "Sua evolução" chart section on Configurações;
+  // `cerne-prototype.html`'s own `dashEmpty`/`dashNotEmpty` blocks (Tela
+  // 6). Every other visual value this section needs — card background/
+  // radius/elevation, section title style, bar color, bar-to-bar gap —
+  // already matches an existing color/radius/elevation/typography/spacing
+  // token above and is reused directly rather than duplicated here.
+  // ---------------------------------------------------------------------
+
+  /// The non-empty chart card's own fixed bar area — `height:100px` in
+  /// `dashNotEmpty`; every bar's own height is this value times its
+  /// count/max-count ratio (Boundaries: "Bar height ∝ count / max count
+  /// shown").
+  static const double dashboardBarAreaHeight = 100;
+
+  /// Each bar's own top corners — `border-radius:4px 4px 0 0`; the bottom
+  /// stays square since a bar sits flush against the chart's own
+  /// baseline.
+  static const double dashboardBarRadius = 4;
+
+  /// Empty-state card's icon-to-text gap — `gap:10px` in `dashEmpty`; not
+  /// on the 4dp spacing scale.
+  static const double dashboardEmptyStateGap = 10;
+
+  /// The non-empty chart card's own padding — `padding:20px` in
+  /// `dashNotEmpty`; the empty-state card uses a different value
+  /// ([spacingLg], 24px — already matches, reused as-is), so this one
+  /// isn't on the 4dp scale either and needs its own token.
+  static const double dashboardCardPadding = 20;
+
+  /// Empty-state `ph-chart-line-up` icon — `font-size:28px` in
+  /// `dashEmpty`; approximated with a built-in Material icon, same
+  /// rationale [dialogIconSize]/[biometricIconSize] already use.
+  static const double dashboardEmptyStateIconSize = 28;
 }

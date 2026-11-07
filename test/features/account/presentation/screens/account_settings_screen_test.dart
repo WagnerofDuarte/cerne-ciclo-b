@@ -10,6 +10,13 @@ import 'package:cerne/core/widgets/back_arrow_header.dart';
 import 'package:cerne/features/account/domain/repositories/account_settings_repository.dart';
 import 'package:cerne/features/account/presentation/cubit/account_settings_cubit.dart';
 import 'package:cerne/features/account/presentation/screens/account_settings_screen.dart';
+import 'package:cerne/features/dashboard/domain/entities/dashboard_aggregate.dart';
+import 'package:cerne/features/dashboard/domain/repositories/dashboard_repository.dart';
+import 'package:cerne/features/dashboard/presentation/cubit/dashboard_cubit.dart';
+import 'package:cerne/features/dashboard/presentation/widgets/dashboard_chart_section.dart';
+import 'package:cerne/features/entries/domain/entities/entry.dart';
+import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
+import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 
 /// Same plain (non-mocktail) fake shape as
 /// `account_settings_cubit_test.dart`'s own `_FakeAccountSettingsRepository`
@@ -69,6 +76,66 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
   }
 }
 
+/// spec-8-1 — a trivial fake [DashboardRepository]: this suite only needs
+/// `AccountSettingsScreen.initState`'s own unconditional `dashboardCubit.
+/// load()` call to resolve without throwing (`dashboard_cubit_test.dart`/
+/// `dashboard_chart_section_test.dart` already cover the chart's own
+/// behavior in isolation) — defaults to the zero-entries shape.
+class _FakeDashboardRepository implements DashboardRepository {
+  Either<Failure, DashboardAggregate> getAggregateResult = right(
+    const DashboardAggregate(totalCount: 0, bucketCounts: []),
+  );
+
+  @override
+  Future<Either<Failure, DashboardAggregate>> getAggregate({
+    required String period,
+  }) async => getAggregateResult;
+}
+
+/// A trivial fake `PendingEntryWriteTracker` — this suite never exercises
+/// spec-8-1's own `confirmedWrites` recompute path, only that
+/// `DashboardCubit`'s constructor subscription resolves without throwing.
+class _UnusedPendingEntryWriteTracker implements PendingEntryWriteTracker {
+  @override
+  Future<Either<Failure, Entry>> create({
+    required String content,
+    required EntrySource source,
+    int? mediaDurationSeconds,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<void> retry(String tempId) async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<List<PendingEntryWrite>> get pendingWrites => const Stream.empty();
+
+  @override
+  Stream<({String tempId, Entry entry})> get confirmedWrites =>
+      const Stream.empty();
+
+  @override
+  Future<void> dispose() async {}
+}
+
+/// Builds a fresh [DashboardCubit] and registers it for teardown — every
+/// test below needs one to satisfy `AccountSettingsScreen`'s widened
+/// constructor (spec-8-1), even the ones that otherwise only exercise the
+/// biometric toggle. [repository] defaults to a fresh
+/// [_FakeDashboardRepository] (the zero-entries shape); a caller that needs
+/// to configure [_FakeDashboardRepository.getAggregateResult] *before*
+/// `AccountSettingsScreen.initState`'s own `load()` call fires (review
+/// finding: proving that call actually happens, not just that it doesn't
+/// throw) passes its own instance in instead.
+DashboardCubit _buildDashboardCubit({DashboardRepository? repository}) {
+  final cubit = DashboardCubit(
+    repository ?? _FakeDashboardRepository(),
+    _UnusedPendingEntryWriteTracker(),
+  );
+  addTearDown(() => cubit.close());
+  return cubit;
+}
+
 /// `/configuracoes`'s `BackArrowHeader` does `context.go('/')`
 /// (`back_arrow_header_test.dart`'s own rationale) — needs a real
 /// `GoRouter` ancestor to resolve, hence this minimal two-route wrapper
@@ -106,7 +173,9 @@ Future<(_FakeAccountSettingsRepository, AccountSettingsCubit)> _pumpScreen(
   addTearDown(() => cubit.close());
   addTearDown(fakeRepository.dispose);
 
-  final router = _routerWith(AccountSettingsScreen(cubit: cubit));
+  final router = _routerWith(
+    AccountSettingsScreen(cubit: cubit, dashboardCubit: _buildDashboardCubit()),
+  );
   addTearDown(router.dispose);
   await tester.pumpWidget(MaterialApp.router(routerConfig: router));
 
@@ -121,8 +190,11 @@ Future<(_FakeAccountSettingsRepository, AccountSettingsCubit)> _pumpScreen(
 /// and interaction in isolation.
 void main() {
   testWidgets(
-    'shows the header titled Configurações and exactly one switch — no '
-    'other content (AC: "shows only the biometric toggle")',
+    // Review finding (round 2): renamed from "...exactly one switch — no '
+    // other content (AC: shows only the biometric toggle)" — spec-8-1 now
+    // also renders the "Sua evolução" chart section on this same screen,
+    // so that title no longer reflects what the screen actually shows.
+    'shows the biometric toggle and the dashboard chart section',
     (tester) async {
       await _pumpScreen(tester);
 
@@ -130,6 +202,7 @@ void main() {
       expect(find.text('Configurações'), findsOneWidget);
       expect(find.byType(Switch), findsOneWidget);
       expect(find.text('Entrar com biometria'), findsOneWidget);
+      expect(find.text('Sua evolução'), findsOneWidget);
     },
   );
 
@@ -152,7 +225,12 @@ void main() {
       addTearDown(() => cubit.close());
       addTearDown(fakeRepository.dispose);
 
-      final router = _routerWith(AccountSettingsScreen(cubit: cubit));
+      final router = _routerWith(
+        AccountSettingsScreen(
+          cubit: cubit,
+          dashboardCubit: _buildDashboardCubit(),
+        ),
+      );
       addTearDown(router.dispose);
       await tester.pumpWidget(MaterialApp.router(routerConfig: router));
 
@@ -234,7 +312,12 @@ void main() {
     // `AccountSettingsScreen` (and its own `State`, calling `initState`
     // again) built around the SAME, still-singleton cubit — exactly
     // what a fresh `GoRoute.builder` call would produce.
-    final router = _routerWith(AccountSettingsScreen(cubit: cubit));
+    final router = _routerWith(
+      AccountSettingsScreen(
+        cubit: cubit,
+        dashboardCubit: _buildDashboardCubit(),
+      ),
+    );
     addTearDown(router.dispose);
     await tester.pumpWidget(MaterialApp.router(routerConfig: router));
 
@@ -253,6 +336,50 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Home'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'Boundaries: "AccountSettingsScreen.initState calls dashboardCubit.'
+    'load() unconditionally" — mounting the real screen drives a real '
+    'fetch on its own, with no test code ever calling load() itself; '
+    'configuring a non-default repository result before the screen is '
+    'even pumped and seeing it rendered is the only way to tell initState '
+    'actually fired it (review finding: every other test here either '
+    'calls load() itself or only exercises the default zero-entries '
+    'fake, neither of which proves this)',
+    (tester) async {
+      final fakeDashboardRepository = _FakeDashboardRepository()
+        ..getAggregateResult = right(
+          const DashboardAggregate(totalCount: 5, bucketCounts: [2, 1, 2]),
+        );
+      final dashboardCubit = _buildDashboardCubit(
+        repository: fakeDashboardRepository,
+      );
+      final fakeAccountRepository = _FakeAccountSettingsRepository();
+      final accountCubit = AccountSettingsCubit(fakeAccountRepository);
+      addTearDown(() => accountCubit.close());
+      addTearDown(fakeAccountRepository.dispose);
+
+      final router = _routerWith(
+        AccountSettingsScreen(
+          cubit: accountCubit,
+          dashboardCubit: dashboardCubit,
+        ),
+      );
+      addTearDown(router.dispose);
+      // Deliberately never calls `dashboardCubit.load()` from this test —
+      // only `AccountSettingsScreen.initState`'s own unconditional call
+      // can be what resolves `fakeDashboardRepository`'s pre-configured
+      // Right into the rendered chart below.
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DashboardChartBar), findsNWidgets(3));
+      expect(
+        find.text('Comece a registrar para ver sua evolução aqui'),
+        findsNothing,
+      );
     },
   );
 }

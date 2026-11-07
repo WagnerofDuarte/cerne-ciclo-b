@@ -21,6 +21,8 @@ import 'package:cerne/features/capture/presentation/cubit/text_entry_cubit.dart'
 import 'package:cerne/features/chat/chat_injection.dart';
 import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
+import 'package:cerne/features/dashboard/domain/repositories/dashboard_repository.dart';
+import 'package:cerne/features/dashboard/presentation/cubit/dashboard_cubit.dart';
 import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
 import 'package:cerne/features/entries/presentation/cubit/entries_search_cubit.dart';
@@ -326,6 +328,24 @@ void main() {
     expect(first, isNot(same(second)));
     await first.close();
     await second.close();
+  });
+
+  test('setupCoreDependencies also wires the dashboard feature (spec-8-1) — '
+      'a broken registration/dependency cycle (including the shared '
+      'PendingEntryWriteTracker subscription, which must already be '
+      'registered by registerEntriesFeature() by the time this runs) must '
+      'surface here, not only at real app launch', () async {
+    expect(sl.isRegistered<DashboardRepository>(), isTrue);
+
+    // `DashboardCubit` is a `lazySingleton` (Code Map), like
+    // `AccountSettingsCubit`/`MeusRegistrosCubit` above — resolving it
+    // must not throw, and resolving it twice must return the exact same
+    // instance. Its constructor subscribes to the shared
+    // `PendingEntryWriteTracker.confirmedWrites` — a broken registration
+    // order would surface as an exception here.
+    expect(sl.isRegistered<DashboardCubit>(), isTrue);
+    expect(() => sl<DashboardCubit>(), returnsNormally);
+    expect(sl<DashboardCubit>(), same(sl<DashboardCubit>()));
   });
 
   test(

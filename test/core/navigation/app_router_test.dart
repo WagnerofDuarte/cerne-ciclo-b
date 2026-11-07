@@ -25,6 +25,9 @@ import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
 import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
 import 'package:cerne/features/chat/presentation/cubit/chat_cubit.dart';
 import 'package:cerne/features/chat/presentation/screens/chat_screen.dart';
+import 'package:cerne/features/dashboard/domain/entities/dashboard_aggregate.dart';
+import 'package:cerne/features/dashboard/domain/repositories/dashboard_repository.dart';
+import 'package:cerne/features/dashboard/presentation/cubit/dashboard_cubit.dart';
 import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
@@ -121,6 +124,18 @@ class _UnusedPendingEntryWriteTracker implements PendingEntryWriteTracker {
 
   @override
   Future<void> dispose() async {}
+}
+
+/// A trivial fake — this suite's `/configuracoes`'s `GoRoute.builder` now
+/// also resolves `sl<DashboardCubit>()` (spec-8-1); `AccountSettingsScreen.
+/// initState`'s own unconditional `dashboardCubit.load()` call just needs
+/// to resolve without throwing — `dashboard_cubit_test.dart` already
+/// covers the cubit's own behavior against a more capable fake.
+class _FakeDashboardRepository implements DashboardRepository {
+  @override
+  Future<Either<Failure, DashboardAggregate>> getAggregate({
+    required String period,
+  }) async => right(const DashboardAggregate(totalCount: 0, bucketCounts: []));
 }
 
 /// A trivial fake — mirrors `_FakeEntriesRepository` above: this suite's
@@ -341,6 +356,16 @@ void main() {
     // test can also drive it through the cubit if ever needed.
     sl.registerLazySingleton<AccountSettingsCubit>(
       () => AccountSettingsCubit(fakeAccountSettingsRepository),
+    );
+    // spec-8-1 — `/configuracoes`'s `GoRoute.builder` also resolves `sl<
+    // DashboardCubit>()` now; same trivial-fake rationale as
+    // `AccountSettingsCubit` above — this suite never exercises the
+    // dashboard feature's own behavior.
+    sl.registerLazySingleton<DashboardCubit>(
+      () => DashboardCubit(
+        _FakeDashboardRepository(),
+        _UnusedPendingEntryWriteTracker(),
+      ),
     );
     // `/meus-registros`'s `GoRoute.builder` resolves `sl<
     // MeusRegistrosCubit>()` (spec-4-1) — same rationale as `AuthCubit`/

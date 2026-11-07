@@ -8,6 +8,7 @@ import '../../features/account/account_injection.dart';
 import '../../features/auth/auth_injection.dart';
 import '../../features/capture/capture_injection.dart';
 import '../../features/chat/chat_injection.dart';
+import '../../features/dashboard/dashboard_injection.dart';
 import '../../features/entries/entries_injection.dart';
 import '../../features/export/export_injection.dart';
 import '../../features/vault/vault_injection.dart';
@@ -100,6 +101,11 @@ Future<void> setupCoreDependencies() async {
   // persisted locally), so unlike the call above this one needs no
   // `Hive.initFlutter()` ordering and isn't `async`.
   registerExportFeature();
+  // spec-8-1 — must run after `registerEntriesFeature()` above: `Dashboard
+  // Cubit` depends on the `PendingEntryWriteTracker` that registration
+  // provides (Code Map). No Hive box of its own either (Boundaries/Never:
+  // "cache the aggregate", AD-15 exclusion), so this isn't `async` either.
+  registerDashboardFeature();
 }
 
 /// Test/teardown helper — resets the single `get_it` instance so each test
