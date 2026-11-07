@@ -192,7 +192,11 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
   /// `SnackBar` with the mapped `Failure.message` instead, and the
   /// one-shot cubit is closed immediately rather than left to
   /// `ExportStatusSheet.show()`'s own disposal (which never runs, since
-  /// the sheet itself never opens on this path).
+  /// the sheet itself never opens on this path). spec-7-3's one
+  /// exception: an `EXPORT_EMPTY_PERIOD` create failure makes
+  /// `ExportJobCubit.start()` return `true` instead, so it falls through
+  /// to the same `ExportStatusSheet.show()` call below and opens
+  /// directly on "Período vazio".
   Future<void> _onExportTap() async {
     if (_exportInFlight) {
       return;

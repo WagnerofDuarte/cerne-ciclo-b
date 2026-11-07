@@ -21,10 +21,12 @@ import '../cubit/export_job_cubit.dart';
 /// Reduce-Motion-aware `durationSheetUp` entrance/exit) — Code Map.
 /// [cubit] is a fresh, `get_it`-factory-scoped instance the caller has
 /// already started (`ExportJobCubit.start()`) before ever showing this
-/// sheet (Boundaries: "Create fails → inline error, sheet never opens") —
-/// closed here, once the sheet is gone, mirroring `InsertionModal.
-/// show()`'s own cubit-disposal convention; the caller never has to
-/// remember to do this itself.
+/// sheet (Boundaries: "Create fails → inline error, sheet never opens" —
+/// except an `ExportEmptyPeriod` create failure, spec-7-3, which opens
+/// this sheet directly on "Período vazio" instead) — closed here, once
+/// the sheet is gone, mirroring `InsertionModal.show()`'s own
+/// cubit-disposal convention; the caller never has to remember to do
+/// this itself.
 class ExportStatusSheet extends StatelessWidget {
   const ExportStatusSheet({required this.cubit, super.key});
 

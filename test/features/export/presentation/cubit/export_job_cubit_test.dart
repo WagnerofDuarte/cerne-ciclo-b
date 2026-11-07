@@ -192,6 +192,31 @@ void main() {
         expect(repository.getStatusCalls, isEmpty);
       });
     });
+
+    test('spec-7-3: Create rejects synchronously with EXPORT_EMPTY_PERIOD '
+        '-> emits emptyPeriod and returns true (sheet opens directly on '
+        '"Período vazio"), and never starts polling', () {
+      fakeAsync((async) {
+        repository.createJobResult = left(
+          const Failure.exportEmptyPeriod(message: 'Nenhum registro.'),
+        );
+
+        bool? started;
+        unawaited(
+          cubit
+              .start(periodStart: periodStart, periodEnd: periodEnd)
+              .then((value) => started = value),
+        );
+        async.flushMicrotasks();
+
+        expect(started, isTrue);
+        expect(cubit.state, isA<ExportJobEmptyPeriod>());
+
+        // No jobId was ever stored, so no poll ever fires either.
+        async.elapse(onePoll);
+        expect(repository.getStatusCalls, isEmpty);
+      });
+    });
   });
 
   group('polling (I/O matrix rows)', () {

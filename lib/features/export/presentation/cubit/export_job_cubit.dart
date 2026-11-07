@@ -61,7 +61,11 @@ class ExportJobCubit extends Cubit<ExportJobState> {
   /// emitted as [ExportJobState.error] so the caller can read [state] for
   /// [Failure.message] without this method also having to hand back the
   /// raw `Failure` itself (the `Either<Failure, T>` shape, RNF09, is the
-  /// repository's own contract, not every cubit method's).
+  /// repository's own contract, not every cubit method's). spec-7-3's one
+  /// exception: an [ExportEmptyPeriod] create failure returns `true` and
+  /// emits [ExportJobState.emptyPeriod] instead — the backend rejects a
+  /// zero-Entry period synchronously, before a `jobId` ever exists, so
+  /// the sheet opens directly on "Período vazio" with no job underneath.
   Future<bool> start({
     required DateTime periodStart,
     required DateTime periodEnd,
@@ -75,6 +79,16 @@ class ExportJobCubit extends Cubit<ExportJobState> {
     }
     return result.match(
       (failure) {
+        // spec-7-3: `export-summary-create` rejects a zero-Entry period
+        // synchronously (400, non-retryable, never issues a `jobId`) —
+        // distinct from `_poll`'s own `EXPORT_EMPTY_PERIOD` handling
+        // (which starts from an already-issued `jobId`). Special-cased
+        // here via an `is` check on the existing `ExportEmptyPeriod`
+        // (AD-3) rather than a new `Failure` subtype or a string check.
+        if (failure is ExportEmptyPeriod) {
+          emit(const ExportJobState.emptyPeriod());
+          return true;
+        }
         emit(ExportJobState.error(failure));
         return false;
       },

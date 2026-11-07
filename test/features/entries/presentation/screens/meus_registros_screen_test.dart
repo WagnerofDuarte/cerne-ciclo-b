@@ -1769,6 +1769,55 @@ void main() {
     });
 
     testWidgets(
+      'spec-7-3: a create-time EXPORT_EMPTY_PERIOD rejection is the one '
+      'create-failure exception — it opens the real sheet directly on '
+      '"Período vazio" instead of the generic SnackBar',
+      (tester) async {
+        await resetCoreDependencies();
+        final exportRepository = _FakeExportRepository()
+          ..createJobResult = left(
+            const Failure.exportEmptyPeriod(message: 'Nenhum registro.'),
+          );
+        sl.registerFactory<ExportJobCubit>(
+          () => ExportJobCubit(exportRepository, _NoopDownloadOpener()),
+        );
+        addTearDown(resetCoreDependencies);
+
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byIcon(Icons.download_outlined));
+        await tester.pumpAndSettle();
+
+        final confirmButton = find
+            .descendant(
+              of: find.byType(DateRangePickerDialog),
+              matching: find.byType(TextButton),
+            )
+            .last;
+        await tester.tap(confirmButton);
+        await tester.pumpAndSettle();
+
+        // The sheet opened directly on "Período vazio" — fixed copy,
+        // never the raw Failure.message (ExportJobEmptyPeriod carries no
+        // Failure of its own) — not the generic error SnackBar.
+        expect(find.text('Nenhum registro nesse período.'), findsOneWidget);
+        expect(find.byType(SnackBar), findsNothing);
+        expect(find.text('Não foi possível solicitar a exportação.'),
+            findsNothing);
+
+        // Closes the sheet before the test ends, same as the happy-path
+        // test above.
+        await tester.tap(find.text('Fechar'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 250));
+      },
+    );
+
+    testWidgets(
       'a rapid double-tap on the download icon opens the period picker '
       'only once (review finding: verification-gap layer — the sibling '
       '_navigatingToDetail guard above has exactly this kind of test, '

@@ -351,6 +351,39 @@ void main() {
     },
   );
 
+  test(
+    'spec-7-3: export-summary-create itself rejects synchronously with '
+    '400 EXPORT_EMPTY_PERIOD (never issues a jobId) -> the real '
+    'Failure.fromCode -> ExportJobCubit.start() create-failure branch '
+    'maps it to ExportJobState.emptyPeriod(), returns true, and '
+    'export-status-get is never requested',
+    () async {
+      adapter.queueJsonResponse(400, {
+        'code': 'EXPORT_EMPTY_PERIOD',
+        'message': 'Nenhum registro nesse período.',
+        'retryable': false,
+      });
+
+      final cubit = sl<ExportJobCubit>();
+      addTearDown(cubit.close);
+
+      final started = await cubit.start(
+        periodStart: DateTime(2026, 1, 1),
+        periodEnd: DateTime(2026, 1, 31),
+      );
+
+      expect(started, isTrue);
+      expect(cubit.state, isA<ExportJobEmptyPeriod>());
+
+      // Exactly one request ever left (the create call) — no jobId was
+      // ever issued, so `start()`'s ExportEmptyPeriod branch never calls
+      // `_startPolling()` and no Timer exists to fire a second request
+      // later (unlike the RATE_LIMITED-never-retried test below, which
+      // waits out a real Timer that genuinely got scheduled).
+      expect(adapter.requests, hasLength(1));
+    },
+  );
+
   test('Erro: a job-level status error with a non-empty-period errorCode '
       '(AI_GENERATION_TIMEOUT) maps through the real Failure.fromCode to '
       'ExportJobState.error — generic, terminal, no download', () async {
