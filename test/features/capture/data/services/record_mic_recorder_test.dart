@@ -54,163 +54,146 @@ void main() {
     }
   });
 
-  test('hasPermission() forwards AudioRecorder.hasPermission() verbatim', () async {
-    when(() => mockRecorder.hasPermission()).thenAnswer((_) async => true);
+  test(
+    'hasPermission() forwards AudioRecorder.hasPermission() verbatim',
+    () async {
+      when(() => mockRecorder.hasPermission()).thenAnswer((_) async => true);
 
-    expect(await recorder.hasPermission(), isTrue);
-  });
+      expect(await recorder.hasPermission(), isTrue);
+    },
+  );
 
   group('start()', () {
-    test(
-      'starts the real recorder with a 16kHz mono wav config, writing to '
-      'a fresh file under the temp dir',
-      () async {
-        when(
-          () => mockRecorder.start(any(), path: any(named: 'path')),
-        ).thenAnswer((_) async {});
+    test('starts the real recorder with a 16kHz mono wav config, writing to '
+        'a fresh file under the temp dir', () async {
+      when(() => mockRecorder.start(any(), path: any(named: 'path')))
+          .thenAnswer((_) async {});
 
-        await recorder.start();
+      await recorder.start();
 
-        final captured = verify(
-          () => mockRecorder.start(
-            captureAny(),
-            path: captureAny(named: 'path'),
-          ),
-        ).captured;
-        final config = captured[0] as record_pkg.RecordConfig;
-        final path = captured[1] as String;
-        expect(config.encoder, record_pkg.AudioEncoder.wav);
-        expect(config.sampleRate, 16000);
-        expect(config.numChannels, 1);
-        expect(path, startsWith(tempDir.path));
-        expect(path, endsWith('.wav'));
-      },
-    );
+      final captured = verify(
+        () => mockRecorder.start(captureAny(), path: captureAny(named: 'path')),
+      ).captured;
+      final config = captured[0] as record_pkg.RecordConfig;
+      final path = captured[1] as String;
+      expect(config.encoder, record_pkg.AudioEncoder.wav);
+      expect(config.sampleRate, 16000);
+      expect(config.numChannels, 1);
+      expect(path, startsWith(tempDir.path));
+      expect(path, endsWith('.wav'));
+    });
   });
 
   group('stop()', () {
+    test('after start(), returns the real output path and a duration (whole '
+        'seconds, never negative)', () async {
+      when(() => mockRecorder.start(any(), path: any(named: 'path')))
+          .thenAnswer((_) async {});
+      when(() => mockRecorder.stop()).thenAnswer((_) async => '/tmp/out.wav');
+
+      await recorder.start();
+      final result = await recorder.stop();
+
+      expect(result, isNotNull);
+      expect(result!.path, '/tmp/out.wav');
+      expect(result.durationSeconds, greaterThanOrEqualTo(0));
+    });
+
     test(
-      'after start(), returns the real output path and a duration (whole '
-      'seconds, never negative)',
+      'with no prior start() -> null, even if the plugin returns a path',
       () async {
-        when(
-          () => mockRecorder.start(any(), path: any(named: 'path')),
-        ).thenAnswer((_) async {});
-        when(() => mockRecorder.stop()).thenAnswer((_) async => '/tmp/out.wav');
+        when(() => mockRecorder.stop())
+            .thenAnswer((_) async => '/tmp/stale.wav');
+
+        final result = await recorder.stop();
+
+        expect(result, isNull);
+      },
+    );
+
+    test(
+      'the plugin itself returning null (nothing captured) -> null',
+      () async {
+        when(() => mockRecorder.start(any(), path: any(named: 'path')))
+            .thenAnswer((_) async {});
+        when(() => mockRecorder.stop()).thenAnswer((_) async => null);
 
         await recorder.start();
         final result = await recorder.stop();
 
-        expect(result, isNotNull);
-        expect(result!.path, '/tmp/out.wav');
-        expect(result.durationSeconds, greaterThanOrEqualTo(0));
+        expect(result, isNull);
       },
     );
 
-    test('with no prior start() -> null, even if the plugin returns a path', () async {
-      when(() => mockRecorder.stop()).thenAnswer((_) async => '/tmp/stale.wav');
+    test('a backward clock jump between start() and stop() (DST/NTP '
+        'correction) floors durationSeconds at 0, never negative (Review '
+        'finding: the existing happy-path test above can never drive this '
+        'branch, since the real wall clock never moves backward during a '
+        'test run)', () async {
+      final clockReadings = [
+        DateTime(2026, 1, 1, 12, 0, 10), // start()'s _startedAt
+        DateTime(2026, 1, 1, 12, 0, 0), // stop()'s read — 10s earlier
+      ];
+      final clockRecorder = RecordMicRecorder(
+        recorder: mockRecorder,
+        now: () => clockReadings.removeAt(0),
+      );
+      when(() => mockRecorder.start(any(), path: any(named: 'path')))
+          .thenAnswer((_) async {});
+      when(() => mockRecorder.stop()).thenAnswer((_) async => '/tmp/out.wav');
 
-      final result = await recorder.stop();
+      await clockRecorder.start();
+      final result = await clockRecorder.stop();
 
-      expect(result, isNull);
+      expect(result!.durationSeconds, 0);
     });
-
-    test('the plugin itself returning null (nothing captured) -> null', () async {
-      when(
-        () => mockRecorder.start(any(), path: any(named: 'path')),
-      ).thenAnswer((_) async {});
-      when(() => mockRecorder.stop()).thenAnswer((_) async => null);
-
-      await recorder.start();
-      final result = await recorder.stop();
-
-      expect(result, isNull);
-    });
-
-    test(
-      'a backward clock jump between start() and stop() (DST/NTP '
-      'correction) floors durationSeconds at 0, never negative (Review '
-      'finding: the existing happy-path test above can never drive this '
-      'branch, since the real wall clock never moves backward during a '
-      'test run)',
-      () async {
-        final clockReadings = [
-          DateTime(2026, 1, 1, 12, 0, 10), // start()'s _startedAt
-          DateTime(2026, 1, 1, 12, 0, 0), // stop()'s read — 10s earlier
-        ];
-        final clockRecorder = RecordMicRecorder(
-          recorder: mockRecorder,
-          now: () => clockReadings.removeAt(0),
-        );
-        when(
-          () => mockRecorder.start(any(), path: any(named: 'path')),
-        ).thenAnswer((_) async {});
-        when(() => mockRecorder.stop()).thenAnswer((_) async => '/tmp/out.wav');
-
-        await clockRecorder.start();
-        final result = await clockRecorder.stop();
-
-        expect(result!.durationSeconds, 0);
-      },
-    );
   });
 
-  test(
-    'cancel() forwards to AudioRecorder.cancel() and deletes the '
-    'in-progress recording file itself (review finding: previously only '
-    'asserted the plugin was called, never that the file this class\'s '
-    'own doc comment promises to discard is actually gone)',
-    () async {
-      when(
-        () => mockRecorder.start(
-          captureAny(),
-          path: captureAny(named: 'path'),
-        ),
-      ).thenAnswer((_) async {});
-      when(() => mockRecorder.cancel()).thenAnswer((_) async {});
-      await recorder.start();
-      final path =
-          verify(
-                () => mockRecorder.start(
-                  captureAny(),
-                  path: captureAny(named: 'path'),
-                ),
-              ).captured.last
-              as String;
-      // Simulates the plugin having actually written the file by now.
-      File(path).createSync();
-      expect(File(path).existsSync(), isTrue);
+  test('cancel() forwards to AudioRecorder.cancel() and deletes the '
+      'in-progress recording file itself (review finding: previously only '
+      'asserted the plugin was called, never that the file this class\'s '
+      'own doc comment promises to discard is actually gone)', () async {
+    when(
+      () => mockRecorder.start(captureAny(), path: captureAny(named: 'path')),
+    ).thenAnswer((_) async {});
+    when(() => mockRecorder.cancel()).thenAnswer((_) async {});
+    await recorder.start();
+    final path =
+        verify(
+              () => mockRecorder.start(
+                captureAny(),
+                path: captureAny(named: 'path'),
+              ),
+            ).captured.last
+            as String;
+    // Simulates the plugin having actually written the file by now.
+    File(path).createSync();
+    expect(File(path).existsSync(), isTrue);
 
-      await recorder.cancel();
+    await recorder.cancel();
 
-      verify(() => mockRecorder.cancel()).called(1);
-      expect(File(path).existsSync(), isFalse);
-    },
-  );
+    verify(() => mockRecorder.cancel()).called(1);
+    expect(File(path).existsSync(), isFalse);
+  });
 
   group('amplitudeStream', () {
-    test(
-      'normalizes AudioRecorder.onAmplitudeChanged dBFS into a 0.0-1.0 '
-      'range, with no package:record Amplitude type ever crossing the '
-      'MicRecorder boundary',
-      () async {
-        when(
-          () => mockRecorder.onAmplitudeChanged(any()),
-        ).thenAnswer(
-          (_) => Stream.fromIterable([
-            record_pkg.Amplitude(current: -45, max: 0),
-            record_pkg.Amplitude(current: 0, max: 0),
-            record_pkg.Amplitude(current: -100, max: 0),
-          ]),
-        );
+    test('normalizes AudioRecorder.onAmplitudeChanged dBFS into a 0.0-1.0 '
+        'range, with no package:record Amplitude type ever crossing the '
+        'MicRecorder boundary', () async {
+      when(() => mockRecorder.onAmplitudeChanged(any())).thenAnswer(
+        (_) => Stream.fromIterable([
+          record_pkg.Amplitude(current: -45, max: 0),
+          record_pkg.Amplitude(current: 0, max: 0),
+          record_pkg.Amplitude(current: -100, max: 0),
+        ]),
+      );
 
-        final values = await recorder.amplitudeStream.toList();
+      final values = await recorder.amplitudeStream.toList();
 
-        expect(values[0], closeTo(0.0, 0.0001));
-        expect(values[1], closeTo(1.0, 0.0001));
-        // Below the -45dBFS floor clamps to the same 0.0 as exactly -45.
-        expect(values[2], closeTo(0.0, 0.0001));
-      },
-    );
+      expect(values[0], closeTo(0.0, 0.0001));
+      expect(values[1], closeTo(1.0, 0.0001));
+      // Below the -45dBFS floor clamps to the same 0.0 as exactly -45.
+      expect(values[2], closeTo(0.0, 0.0001));
+    });
   });
 }

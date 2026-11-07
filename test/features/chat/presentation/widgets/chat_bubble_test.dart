@@ -18,9 +18,8 @@ Future<void> _pump(
   await tester.pumpWidget(
     Builder(
       builder: (outerContext) => MediaQuery(
-        data: MediaQuery.of(outerContext).copyWith(
-          disableAnimations: disableAnimations,
-        ),
+        data: MediaQuery.of(outerContext)
+            .copyWith(disableAnimations: disableAnimations),
         child: MaterialApp(
           home: Scaffold(
             body: ChatBubble(
@@ -89,27 +88,29 @@ void main() {
         expect(decoration.color, DesignTokens.colorSurfaceElevated);
         final radius = decoration.borderRadius! as BorderRadius;
         expect(radius.bottomLeft, Radius.zero);
-        expect(radius.bottomRight, const Radius.circular(DesignTokens.radiusMd));
+        expect(
+          radius.bottomRight,
+          const Radius.circular(DesignTokens.radiusMd),
+        );
         expect(decoration.boxShadow, DesignTokens.elevation1);
       },
     );
 
-    testWidgets(
-      'streaming state shows a blinking cursor by default',
-      (tester) async {
-        await _pump(
-          tester,
-          const ChatUiMessage(
-            id: '1',
-            role: ChatMessageRole.assistant,
-            content: 'Gerando',
-            status: ChatMessageStatus.streaming,
-          ),
-        );
+    testWidgets('streaming state shows a blinking cursor by default', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        const ChatUiMessage(
+          id: '1',
+          role: ChatMessageRole.assistant,
+          content: 'Gerando',
+          status: ChatMessageStatus.streaming,
+        ),
+      );
 
-        expect(find.text('▏'), findsOneWidget);
-      },
-    );
+      expect(find.text('▏'), findsOneWidget);
+    });
 
     testWidgets(
       'Reduce Motion (disableAnimations) skips the cursor entirely, text '
@@ -131,51 +132,47 @@ void main() {
       },
     );
 
-    testWidgets(
-      'complete state shows no cursor',
-      (tester) async {
-        await _pump(
-          tester,
-          const ChatUiMessage(
-            id: '1',
-            role: ChatMessageRole.assistant,
-            content: 'Pronto',
-            status: ChatMessageStatus.complete,
-          ),
-        );
+    testWidgets('complete state shows no cursor', (tester) async {
+      await _pump(
+        tester,
+        const ChatUiMessage(
+          id: '1',
+          role: ChatMessageRole.assistant,
+          content: 'Pronto',
+          status: ChatMessageStatus.complete,
+        ),
+      );
 
-        expect(find.text('▏'), findsNothing);
-      },
-    );
+      expect(find.text('▏'), findsNothing);
+    });
 
-    testWidgets(
-      'spec-6-3: failed state shows the tap-to-retry copy above the '
-      'timestamp caption (never in place of it), text is never cleared',
-      (tester) async {
-        await _pump(
-          tester,
-          const ChatUiMessage(
-            id: '1',
-            role: ChatMessageRole.assistant,
-            content: 'resposta parcial',
-            status: ChatMessageStatus.failed,
-          ),
-        );
+    testWidgets('spec-6-3: failed state shows the tap-to-retry copy above the '
+        'timestamp caption (never in place of it), text is never cleared', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        const ChatUiMessage(
+          id: '1',
+          role: ChatMessageRole.assistant,
+          content: 'resposta parcial',
+          status: ChatMessageStatus.failed,
+        ),
+      );
 
-        expect(find.textContaining('resposta parcial'), findsOneWidget);
-        expect(
-          find.text('Falha ao gerar resposta — toque para tentar novamente'),
-          findsOneWidget,
-        );
-        // Correction: `cerne-prototype.html`'s own `{{ msg.time }}` span is
-        // unconditional — a failed bubble still shows the timestamp
-        // caption right below the retry note, never hidden behind it.
-        expect(find.text('agora'), findsOneWidget);
-        // No cursor either — streaming and failed are mutually exclusive
-        // visible states.
-        expect(find.text('▏'), findsNothing);
-      },
-    );
+      expect(find.textContaining('resposta parcial'), findsOneWidget);
+      expect(
+        find.text('Falha ao gerar resposta — toque para tentar novamente'),
+        findsOneWidget,
+      );
+      // Correction: `cerne-prototype.html`'s own `{{ msg.time }}` span is
+      // unconditional — a failed bubble still shows the timestamp
+      // caption right below the retry note, never hidden behind it.
+      expect(find.text('agora'), findsOneWidget);
+      // No cursor either — streaming and failed are mutually exclusive
+      // visible states.
+      expect(find.text('▏'), findsNothing);
+    });
 
     testWidgets(
       'spec-6-3: tapping the retry copy invokes onRetry — tap target is '
@@ -200,17 +197,16 @@ void main() {
         expect(tapped, isTrue);
 
         final semantics = tester.getSemantics(
-          find.ancestor(
-            of: find.text(
-              'Falha ao gerar resposta — toque para tentar novamente',
-            ),
-            matching: find.byWidgetPredicate((w) => w is Semantics),
-          ).first,
+          find
+              .ancestor(
+                of: find.text(
+                  'Falha ao gerar resposta — toque para tentar novamente',
+                ),
+                matching: find.byWidgetPredicate((w) => w is Semantics),
+              )
+              .first,
         );
-        expect(
-          semantics.flagsCollection.isButton,
-          isTrue,
-        );
+        expect(semantics.flagsCollection.isButton, isTrue);
 
         final constrainedBoxes = tester.widgetList<ConstrainedBox>(
           find.ancestor(
@@ -299,121 +295,106 @@ void main() {
       },
     );
 
-    testWidgets(
-      'idle: outline icon, neutral color',
-      (tester) async {
-        await _pump(
-          tester,
-          const ChatUiMessage(
-            id: '1',
-            role: ChatMessageRole.user,
-            content: 'Oi',
-            status: ChatMessageStatus.complete,
+    testWidgets('idle: outline icon, neutral color', (tester) async {
+      await _pump(
+        tester,
+        const ChatUiMessage(
+          id: '1',
+          role: ChatMessageRole.user,
+          content: 'Oi',
+          status: ChatMessageStatus.complete,
+        ),
+        onBookmark: (_) {},
+      );
+
+      final icon = tester.widget<Icon>(find.byIcon(Icons.bookmark_border));
+      expect(icon.color, DesignTokens.colorTextSecondary);
+      expect(icon.size, DesignTokens.chatBookmarkIconSize);
+    });
+
+    testWidgets('saving: a spinner by default', (tester) async {
+      await _pump(
+        tester,
+        const ChatUiMessage(
+          id: '1',
+          role: ChatMessageRole.user,
+          content: 'Oi',
+          status: ChatMessageStatus.complete,
+          bookmarkState: BookmarkState.saving(),
+        ),
+        onBookmark: (_) {},
+      );
+
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.text('Salvando'), findsNothing);
+    });
+
+    testWidgets('saving under Reduce Motion: a static label instead of the '
+        'spinner, in a width-capped slot', (tester) async {
+      await _pump(
+        tester,
+        const ChatUiMessage(
+          id: '1',
+          role: ChatMessageRole.user,
+          content: 'Oi',
+          status: ChatMessageStatus.complete,
+          bookmarkState: BookmarkState.saving(),
+        ),
+        disableAnimations: true,
+        onBookmark: (_) {},
+      );
+
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('Salvando'), findsOneWidget);
+      final constrainedBoxes = tester.widgetList<ConstrainedBox>(
+        find.ancestor(
+          of: find.text('Salvando'),
+          matching: find.byType(ConstrainedBox),
+        ),
+      );
+      expect(
+        constrainedBoxes.map((c) => c.constraints.maxWidth),
+        contains(DesignTokens.chatBookmarkSavingLabelMaxWidth),
+      );
+    });
+
+    testWidgets('saved: ochre check (colorAccent)', (tester) async {
+      await _pump(
+        tester,
+        const ChatUiMessage(
+          id: '1',
+          role: ChatMessageRole.user,
+          content: 'Oi',
+          status: ChatMessageStatus.complete,
+          bookmarkState: BookmarkState.saved(),
+        ),
+        onBookmark: (_) {},
+      );
+
+      final icon = tester.widget<Icon>(find.byIcon(Icons.check));
+      expect(icon.color, DesignTokens.colorAccent);
+    });
+
+    testWidgets('error: red warning icon (colorError)', (tester) async {
+      await _pump(
+        tester,
+        const ChatUiMessage(
+          id: '1',
+          role: ChatMessageRole.user,
+          content: 'Oi',
+          status: ChatMessageStatus.complete,
+          bookmarkState: BookmarkState.error(
+            Failure.networkTimeout(message: 'timeout'),
           ),
-          onBookmark: (_) {},
-        );
+        ),
+        onBookmark: (_) {},
+      );
 
-        final icon = tester.widget<Icon>(find.byIcon(Icons.bookmark_border));
-        expect(icon.color, DesignTokens.colorTextSecondary);
-        expect(icon.size, DesignTokens.chatBookmarkIconSize);
-      },
-    );
-
-    testWidgets(
-      'saving: a spinner by default',
-      (tester) async {
-        await _pump(
-          tester,
-          const ChatUiMessage(
-            id: '1',
-            role: ChatMessageRole.user,
-            content: 'Oi',
-            status: ChatMessageStatus.complete,
-            bookmarkState: BookmarkState.saving(),
-          ),
-          onBookmark: (_) {},
-        );
-
-        expect(find.byType(CircularProgressIndicator), findsOneWidget);
-        expect(find.text('Salvando'), findsNothing);
-      },
-    );
-
-    testWidgets(
-      'saving under Reduce Motion: a static label instead of the '
-      'spinner, in a width-capped slot',
-      (tester) async {
-        await _pump(
-          tester,
-          const ChatUiMessage(
-            id: '1',
-            role: ChatMessageRole.user,
-            content: 'Oi',
-            status: ChatMessageStatus.complete,
-            bookmarkState: BookmarkState.saving(),
-          ),
-          disableAnimations: true,
-          onBookmark: (_) {},
-        );
-
-        expect(find.byType(CircularProgressIndicator), findsNothing);
-        expect(find.text('Salvando'), findsOneWidget);
-        final constrainedBoxes = tester.widgetList<ConstrainedBox>(
-          find.ancestor(
-            of: find.text('Salvando'),
-            matching: find.byType(ConstrainedBox),
-          ),
-        );
-        expect(
-          constrainedBoxes.map((c) => c.constraints.maxWidth),
-          contains(DesignTokens.chatBookmarkSavingLabelMaxWidth),
-        );
-      },
-    );
-
-    testWidgets(
-      'saved: ochre check (colorAccent)',
-      (tester) async {
-        await _pump(
-          tester,
-          const ChatUiMessage(
-            id: '1',
-            role: ChatMessageRole.user,
-            content: 'Oi',
-            status: ChatMessageStatus.complete,
-            bookmarkState: BookmarkState.saved(),
-          ),
-          onBookmark: (_) {},
-        );
-
-        final icon = tester.widget<Icon>(find.byIcon(Icons.check));
-        expect(icon.color, DesignTokens.colorAccent);
-      },
-    );
-
-    testWidgets(
-      'error: red warning icon (colorError)',
-      (tester) async {
-        await _pump(
-          tester,
-          const ChatUiMessage(
-            id: '1',
-            role: ChatMessageRole.user,
-            content: 'Oi',
-            status: ChatMessageStatus.complete,
-            bookmarkState: BookmarkState.error(
-              Failure.networkTimeout(message: 'timeout'),
-            ),
-          ),
-          onBookmark: (_) {},
-        );
-
-        final icon = tester.widget<Icon>(
-          find.byIcon(Icons.warning_amber_rounded),
-        );
-        expect(icon.color, DesignTokens.colorError);
-      },
-    );
+      final icon = tester.widget<Icon>(
+        find.byIcon(Icons.warning_amber_rounded),
+      );
+      expect(icon.color, DesignTokens.colorError);
+    });
 
     testWidgets(
       'tapping it invokes onBookmark with the message id — tap target is '
@@ -437,10 +418,12 @@ void main() {
         expect(tappedId, 'msg-1');
 
         final semantics = tester.getSemantics(
-          find.ancestor(
-            of: find.byIcon(Icons.bookmark_border),
-            matching: find.byWidgetPredicate((w) => w is Semantics),
-          ).first,
+          find
+              .ancestor(
+                of: find.byIcon(Icons.bookmark_border),
+                matching: find.byWidgetPredicate((w) => w is Semantics),
+              )
+              .first,
         );
         expect(semantics.flagsCollection.isButton, isTrue);
 
@@ -461,29 +444,26 @@ void main() {
       },
     );
 
-    testWidgets(
-      'with no onBookmark callback: the icon still renders (state is '
-      'always visible) but exposes no button semantics node',
-      (tester) async {
-        await _pump(
-          tester,
-          const ChatUiMessage(
-            id: 'msg-1',
-            role: ChatMessageRole.user,
-            content: 'Oi',
-            status: ChatMessageStatus.complete,
-          ),
-        );
+    testWidgets('with no onBookmark callback: the icon still renders (state is '
+        'always visible) but exposes no button semantics node', (tester) async {
+      await _pump(
+        tester,
+        const ChatUiMessage(
+          id: 'msg-1',
+          role: ChatMessageRole.user,
+          content: 'Oi',
+          status: ChatMessageStatus.complete,
+        ),
+      );
 
-        expect(find.byIcon(Icons.bookmark_border), findsOneWidget);
-        expect(
-          find.byWidgetPredicate(
-            (w) => w is Semantics && (w.properties.button ?? false),
-          ),
-          findsNothing,
-        );
-      },
-    );
+      expect(find.byIcon(Icons.bookmark_border), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (w) => w is Semantics && (w.properties.button ?? false),
+        ),
+        findsNothing,
+      );
+    });
 
     testWidgets(
       'tapping a saved bubble is still routed through onBookmark — the '

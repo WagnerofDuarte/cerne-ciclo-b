@@ -55,86 +55,81 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
             const BackArrowHeader(title: 'Configurações'),
             Padding(
               padding: DesignTokens.screenPadding,
-              child:
-                  BlocConsumer<AccountSettingsCubit, AccountSettingsState>(
-                    listener: (context, state) {
-                      if (state.errorMessage != null) {
-                        _announce(state.errorMessage!);
-                      }
-                    },
-                    builder: (context, state) {
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          MergeSemantics(
-                            child: Semantics(
-                              label: 'Entrar com biometria',
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: ExcludeSemantics(
-                                      child: Text(
-                                        'Entrar com biometria',
-                                        style: DesignTokens.textBodyLg
-                                            .copyWith(
-                                              color: DesignTokens
-                                                  .colorTextPrimary,
-                                            ),
-                                      ),
+              child: BlocConsumer<AccountSettingsCubit, AccountSettingsState>(
+                listener: (context, state) {
+                  if (state.errorMessage != null) {
+                    _announce(state.errorMessage!);
+                  }
+                },
+                builder: (context, state) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      MergeSemantics(
+                        child: Semantics(
+                          label: 'Entrar com biometria',
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: ExcludeSemantics(
+                                  child: Text(
+                                    'Entrar com biometria',
+                                    style: DesignTokens.textBodyLg.copyWith(
+                                      color: DesignTokens.colorTextPrimary,
                                     ),
                                   ),
-                                  if (state.isSaving) ...[
-                                    const SizedBox(
-                                      width: DesignTokens
-                                          .accountSettingsSavingIndicatorSize,
-                                      height: DesignTokens
-                                          .accountSettingsSavingIndicatorSize,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: DesignTokens
-                                            .accountSettingsSavingIndicatorStrokeWidth,
-                                        color: DesignTokens.colorAccent,
-                                      ),
-                                    ),
-                                    const SizedBox(
-                                      width: DesignTokens.spacingSm,
-                                    ),
-                                  ],
-                                  Switch(
-                                    value: state.biometricEnabled,
-                                    // Boundaries: "no new tokens" — reuses
-                                    // `colorAccent` (Design Notes).
-                                    activeThumbColor: DesignTokens.colorAccent,
-                                    // Review finding: `null` while a
-                                    // toggle is already in flight
-                                    // (`state.isSaving`) — a disabled
-                                    // `Switch` can't be tapped again, so a
-                                    // double-tap can never start a
-                                    // second, overlapping
-                                    // `toggleBiometric` call.
-                                    onChanged: state.isSaving
-                                        ? null
-                                        : (value) => context
-                                              .read<AccountSettingsCubit>()
-                                              .toggleBiometric(value),
-                                  ),
-                                ],
+                                ),
                               ),
-                            ),
+                              if (state.isSaving) ...[
+                                const SizedBox(
+                                  width: DesignTokens
+                                      .accountSettingsSavingIndicatorSize,
+                                  height: DesignTokens
+                                      .accountSettingsSavingIndicatorSize,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: DesignTokens
+                                        .accountSettingsSavingIndicatorStrokeWidth,
+                                    color: DesignTokens.colorAccent,
+                                  ),
+                                ),
+                                const SizedBox(width: DesignTokens.spacingSm),
+                              ],
+                              Switch(
+                                value: state.biometricEnabled,
+                                // Boundaries: "no new tokens" — reuses
+                                // `colorAccent` (Design Notes).
+                                activeThumbColor: DesignTokens.colorAccent,
+                                // Review finding: `null` while a
+                                // toggle is already in flight
+                                // (`state.isSaving`) — a disabled
+                                // `Switch` can't be tapped again, so a
+                                // double-tap can never start a
+                                // second, overlapping
+                                // `toggleBiometric` call.
+                                onChanged: state.isSaving
+                                    ? null
+                                    : (value) => context
+                                          .read<AccountSettingsCubit>()
+                                          .toggleBiometric(value),
+                              ),
+                            ],
                           ),
-                          if (state.errorMessage != null) ...[
-                            const SizedBox(height: DesignTokens.spacingSm),
-                            Text(
-                              state.errorMessage!,
-                              style: DesignTokens.textBodyMd.copyWith(
-                                color: DesignTokens.colorError,
-                              ),
-                            ),
-                          ],
-                        ],
-                      );
-                    },
-                  ),
+                        ),
+                      ),
+                      if (state.errorMessage != null) ...[
+                        const SizedBox(height: DesignTokens.spacingSm),
+                        Text(
+                          state.errorMessage!,
+                          style: DesignTokens.textBodyMd.copyWith(
+                            color: DesignTokens.colorError,
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+                },
+              ),
             ),
           ],
         ),

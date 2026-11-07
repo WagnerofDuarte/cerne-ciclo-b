@@ -130,7 +130,10 @@ void main() {
 
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureStorageChannel, handleSecureStorageCall);
+        .setMockMethodCallHandler(
+          secureStorageChannel,
+          handleSecureStorageCall,
+        );
     fakePathProvider = FakePathProviderPlatform();
     PathProviderPlatform.instance = fakePathProvider;
 
@@ -183,85 +186,79 @@ void main() {
     }
   }
 
-  test(
-    'happy path: driving the real, DI-resolved PhotoEntryCubit through '
-    'pickFromCamera() (fake PhotoPicker) fires a genuine POST to media-ocr '
-    'with the base64-encoded image, then save() fires a genuine POST to '
-    'entries-create with the right URL/headers/body (source: photo), '
-    'emits PhotoSaved, the entry really lands in the real entries Hive '
-    'box, and the temp photo file is deleted',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': {'text': 'Reunião às 10h.', 'confidence': 'high'},
-      });
-      adapter.queueJsonResponse(200, {
-        'data': {
-          'id': 'e2e-photo-entry-1',
-          'content': 'Reunião às 10h.',
-          'source': 'photo',
-          'chatMessageId': null,
-          'occurredAt': '2026-01-01T00:00:00Z',
-          'serverRevision': 1,
-          'createdAt': '2026-01-01T00:00:00Z',
-          'updatedAt': '2026-01-01T00:00:00Z',
-        },
-      });
-
-      // The exact factory resolution `placeholder_screens.dart`'s "+"
-      // control performs (Boundaries: a fresh instance per "+" tap).
-      final cubit = sl<PhotoEntryCubit>();
-      addTearDown(cubit.close);
-
-      await cubit.pickFromCamera();
-
-      expect(cubit.state, isA<PhotoRecognized>());
-      expect((cubit.state as PhotoRecognized).text, 'Reunião às 10h.');
-
-      await cubit.save();
-
-      expect(cubit.state, isA<PhotoSaved>());
-
-      // Exactly two real requests left through the fake transport, built
-      // by the real UrlBuilder/HeaderInterceptor, not a mock of ApiClient.
-      expect(adapter.requests, hasLength(2));
-
-      final ocrRequest = adapter.requests[0];
-      expect(ocrRequest.path, sl<UrlBuilder>().build('media-ocr'));
-      expect(ocrRequest.data, {
-        'image': base64Encode(photoBytes),
-        'mimeType': 'image/jpeg',
-      });
-      expect(ocrRequest.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
-      expect(
-        ocrRequest.headers['Authorization'],
-        'Bearer e2e-test-access-token',
-      );
-
-      final createRequest = adapter.requests[1];
-      expect(createRequest.path, sl<UrlBuilder>().build('entries-create'));
-      expect(createRequest.data, {
+  test('happy path: driving the real, DI-resolved PhotoEntryCubit through '
+      'pickFromCamera() (fake PhotoPicker) fires a genuine POST to media-ocr '
+      'with the base64-encoded image, then save() fires a genuine POST to '
+      'entries-create with the right URL/headers/body (source: photo), '
+      'emits PhotoSaved, the entry really lands in the real entries Hive '
+      'box, and the temp photo file is deleted', () async {
+    adapter.queueJsonResponse(200, {
+      'data': {'text': 'Reunião às 10h.', 'confidence': 'high'},
+    });
+    adapter.queueJsonResponse(200, {
+      'data': {
+        'id': 'e2e-photo-entry-1',
         'content': 'Reunião às 10h.',
         'source': 'photo',
-      });
-      expect(createRequest.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
-      expect(
-        createRequest.headers['Authorization'],
-        'Bearer e2e-test-access-token',
-      );
+        'chatMessageId': null,
+        'occurredAt': '2026-01-01T00:00:00Z',
+        'serverRevision': 1,
+        'createdAt': '2026-01-01T00:00:00Z',
+        'updatedAt': '2026-01-01T00:00:00Z',
+      },
+    });
 
-      // The real write-through happened against the real Hive box.
-      final box = sl<Box<Map>>();
-      final stored = box.get('e2e-photo-entry-1');
-      expect(stored, isNotNull);
-      expect(stored!['content'], 'Reunião às 10h.');
-      expect(stored['source'], 'photo');
+    // The exact factory resolution `placeholder_screens.dart`'s "+"
+    // control performs (Boundaries: a fresh instance per "+" tap).
+    final cubit = sl<PhotoEntryCubit>();
+    addTearDown(cubit.close);
 
-      // Best-effort cleanup of the temp photo file on a successful save
-      // (`PhotoEntryCubit._save()`'s `_deletePickedFile`).
-      await waitUntilDeleted(photoFile);
-      expect(photoFile.existsSync(), isFalse);
-    },
-  );
+    await cubit.pickFromCamera();
+
+    expect(cubit.state, isA<PhotoRecognized>());
+    expect((cubit.state as PhotoRecognized).text, 'Reunião às 10h.');
+
+    await cubit.save();
+
+    expect(cubit.state, isA<PhotoSaved>());
+
+    // Exactly two real requests left through the fake transport, built
+    // by the real UrlBuilder/HeaderInterceptor, not a mock of ApiClient.
+    expect(adapter.requests, hasLength(2));
+
+    final ocrRequest = adapter.requests[0];
+    expect(ocrRequest.path, sl<UrlBuilder>().build('media-ocr'));
+    expect(ocrRequest.data, {
+      'image': base64Encode(photoBytes),
+      'mimeType': 'image/jpeg',
+    });
+    expect(ocrRequest.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
+    expect(ocrRequest.headers['Authorization'], 'Bearer e2e-test-access-token');
+
+    final createRequest = adapter.requests[1];
+    expect(createRequest.path, sl<UrlBuilder>().build('entries-create'));
+    expect(createRequest.data, {
+      'content': 'Reunião às 10h.',
+      'source': 'photo',
+    });
+    expect(createRequest.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
+    expect(
+      createRequest.headers['Authorization'],
+      'Bearer e2e-test-access-token',
+    );
+
+    // The real write-through happened against the real Hive box.
+    final box = sl<Box<Map>>();
+    final stored = box.get('e2e-photo-entry-1');
+    expect(stored, isNotNull);
+    expect(stored!['content'], 'Reunião às 10h.');
+    expect(stored['source'], 'photo');
+
+    // Best-effort cleanup of the temp photo file on a successful save
+    // (`PhotoEntryCubit._save()`'s `_deletePickedFile`).
+    await waitUntilDeleted(photoFile);
+    expect(photoFile.existsSync(), isFalse);
+  });
 
   test(
     'OCR_NO_TEXT recovery path: a real media-ocr failure surfaces as '
@@ -296,7 +293,10 @@ void main() {
       expect(cubit.state, isA<PhotoError>());
       final errorState = cubit.state as PhotoError;
       expect(errorState.kind, PhotoErrorKind.ocrNoText);
-      expect(errorState.message, 'Não foi possível reconhecer texto na imagem.');
+      expect(
+        errorState.message,
+        'Não foi possível reconhecer texto na imagem.',
+      );
       expect(errorState.text, isNull);
 
       await cubit.saveWithoutText();
@@ -314,50 +314,50 @@ void main() {
       final box = sl<Box<Map>>();
       final stored = box.get('e2e-photo-entry-2');
       expect(stored, isNotNull);
-      expect(stored!['content'], 'Registro fotográfico (sem texto reconhecido)');
+      expect(
+        stored!['content'],
+        'Registro fotográfico (sem texto reconhecido)',
+      );
 
       await waitUntilDeleted(photoFile);
       expect(photoFile.existsSync(), isFalse);
     },
   );
 
-  test(
-    'save failure path: OCR succeeds but a non-retryable backend error '
-    '(VALIDATION_ERROR) on the real entries-create call surfaces as '
-    'PhotoError(kind: generic) carrying Failure.message verbatim, fires '
-    'exactly two requests (no retry), never writes to the real entries '
-    'Hive box, and preserves the photo file for a retried save()',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': {'text': 'Reunião às 10h.', 'confidence': 'high'},
-      });
-      adapter.queueJsonResponse(400, {
-        'code': 'VALIDATION_ERROR',
-        'message': 'Conteúdo inválido.',
-        'retryable': false,
-      });
+  test('save failure path: OCR succeeds but a non-retryable backend error '
+      '(VALIDATION_ERROR) on the real entries-create call surfaces as '
+      'PhotoError(kind: generic) carrying Failure.message verbatim, fires '
+      'exactly two requests (no retry), never writes to the real entries '
+      'Hive box, and preserves the photo file for a retried save()', () async {
+    adapter.queueJsonResponse(200, {
+      'data': {'text': 'Reunião às 10h.', 'confidence': 'high'},
+    });
+    adapter.queueJsonResponse(400, {
+      'code': 'VALIDATION_ERROR',
+      'message': 'Conteúdo inválido.',
+      'retryable': false,
+    });
 
-      final cubit = sl<PhotoEntryCubit>();
-      addTearDown(cubit.close);
+    final cubit = sl<PhotoEntryCubit>();
+    addTearDown(cubit.close);
 
-      await cubit.pickFromCamera();
-      await cubit.save();
+    await cubit.pickFromCamera();
+    await cubit.save();
 
-      expect(cubit.state, isA<PhotoError>());
-      final errorState = cubit.state as PhotoError;
-      expect(errorState.kind, PhotoErrorKind.generic);
-      expect(errorState.message, 'Conteúdo inválido.');
-      expect(errorState.text, 'Reunião às 10h.');
-      expect(errorState.path, photoFile.path);
-      expect(adapter.requests, hasLength(2));
+    expect(cubit.state, isA<PhotoError>());
+    final errorState = cubit.state as PhotoError;
+    expect(errorState.kind, PhotoErrorKind.generic);
+    expect(errorState.message, 'Conteúdo inválido.');
+    expect(errorState.text, 'Reunião às 10h.');
+    expect(errorState.path, photoFile.path);
+    expect(adapter.requests, hasLength(2));
 
-      final box = sl<Box<Map>>();
-      expect(box.values, isEmpty);
+    final box = sl<Box<Map>>();
+    expect(box.values, isEmpty);
 
-      // A save failure preserves the file for a retried Salvar tap —
-      // never deleted on this path (`PhotoEntryCubit._save()` only
-      // deletes on success).
-      expect(photoFile.existsSync(), isTrue);
-    },
-  );
+    // A save failure preserves the file for a retried Salvar tap —
+    // never deleted on this path (`PhotoEntryCubit._save()` only
+    // deletes on success).
+    expect(photoFile.existsSync(), isTrue);
+  });
 }

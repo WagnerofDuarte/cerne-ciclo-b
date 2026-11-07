@@ -98,11 +98,9 @@ GoRouter _routerWith(Widget screen) {
 /// widget never rebuilt, no matter how many `pump()` calls followed.
 /// Constructing the cubit here, inside the same zone `tester.pump()`
 /// drains, avoids the mismatch entirely.
-Future<(
-  _FakeAccountSettingsRepository,
-  AccountSettingsCubit,
-)>
-_pumpScreen(WidgetTester tester) async {
+Future<(_FakeAccountSettingsRepository, AccountSettingsCubit)> _pumpScreen(
+  WidgetTester tester,
+) async {
   final fakeRepository = _FakeAccountSettingsRepository();
   final cubit = AccountSettingsCubit(fakeRepository);
   addTearDown(() => cubit.close());
@@ -198,59 +196,53 @@ void main() {
     },
   );
 
-  testWidgets(
-    'the switch disables itself while a toggle is in flight, so a '
-    'double-tap can never start a second, overlapping call (review '
-    'finding)',
-    (tester) async {
-      final (fakeRepository, _) = await _pumpScreen(tester);
-      fakeRepository.setBiometricEnabledResult = right(unit);
-      fakeRepository.setBiometricEnabledGate = Completer<void>();
+  testWidgets('the switch disables itself while a toggle is in flight, so a '
+      'double-tap can never start a second, overlapping call (review '
+      'finding)', (tester) async {
+    final (fakeRepository, _) = await _pumpScreen(tester);
+    fakeRepository.setBiometricEnabledResult = right(unit);
+    fakeRepository.setBiometricEnabledGate = Completer<void>();
 
-      await tester.tap(find.byType(Switch));
-      await tester.pump();
+    await tester.tap(find.byType(Switch));
+    await tester.pump();
 
-      var switchWidget = tester.widget<Switch>(find.byType(Switch));
-      expect(switchWidget.onChanged, isNull);
+    var switchWidget = tester.widget<Switch>(find.byType(Switch));
+    expect(switchWidget.onChanged, isNull);
 
-      fakeRepository.setBiometricEnabledGate!.complete();
-      await tester.pumpAndSettle();
+    fakeRepository.setBiometricEnabledGate!.complete();
+    await tester.pumpAndSettle();
 
-      switchWidget = tester.widget<Switch>(find.byType(Switch));
-      expect(switchWidget.onChanged, isNotNull);
-      expect(switchWidget.value, isFalse);
-    },
-  );
+    switchWidget = tester.widget<Switch>(find.byType(Switch));
+    expect(switchWidget.onChanged, isNotNull);
+    expect(switchWidget.value, isFalse);
+  });
 
-  testWidgets(
-    'a stale error from a previous visit is cleared when the screen '
-    '(re)mounts — AccountSettingsCubit is a DI singleton that outlives any '
-    'single visit, so a failed toggle\'s message must not still be '
-    'showing on a later, unrelated visit (review finding)',
-    (tester) async {
-      final (fakeRepository, cubit) = await _pumpScreen(tester);
-      fakeRepository.setBiometricEnabledResult = left(
-        const Failure.networkTimeout(message: 'Sem conexão'),
-      );
+  testWidgets('a stale error from a previous visit is cleared when the screen '
+      '(re)mounts — AccountSettingsCubit is a DI singleton that outlives any '
+      'single visit, so a failed toggle\'s message must not still be '
+      'showing on a later, unrelated visit (review finding)', (tester) async {
+    final (fakeRepository, cubit) = await _pumpScreen(tester);
+    fakeRepository.setBiometricEnabledResult = left(
+      const Failure.networkTimeout(message: 'Sem conexão'),
+    );
 
-      await tester.tap(find.byType(Switch));
-      await tester.pumpAndSettle();
-      expect(find.text('Sem conexão'), findsOneWidget);
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    expect(find.text('Sem conexão'), findsOneWidget);
 
-      // Simulates leaving and returning to Configurações: a brand new
-      // `AccountSettingsScreen` (and its own `State`, calling `initState`
-      // again) built around the SAME, still-singleton cubit — exactly
-      // what a fresh `GoRoute.builder` call would produce.
-      final router = _routerWith(AccountSettingsScreen(cubit: cubit));
-      addTearDown(router.dispose);
-      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    // Simulates leaving and returning to Configurações: a brand new
+    // `AccountSettingsScreen` (and its own `State`, calling `initState`
+    // again) built around the SAME, still-singleton cubit — exactly
+    // what a fresh `GoRoute.builder` call would produce.
+    final router = _routerWith(AccountSettingsScreen(cubit: cubit));
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
 
-      expect(find.text('Sem conexão'), findsNothing);
-      // The toggle's own confirmed value is untouched by the error clear.
-      final switchWidget = tester.widget<Switch>(find.byType(Switch));
-      expect(switchWidget.value, isTrue);
-    },
-  );
+    expect(find.text('Sem conexão'), findsNothing);
+    // The toggle's own confirmed value is untouched by the error clear.
+    final switchWidget = tester.widget<Switch>(find.byType(Switch));
+    expect(switchWidget.value, isTrue);
+  });
 
   testWidgets(
     'the back arrow navigates to / (shared BackArrowHeader behavior)',

@@ -105,24 +105,21 @@ class _VaultLockScreenState extends State<VaultLockScreen> {
     // this widget has nothing further to do (and may already be in the
     // process of being disposed by the time that happens).
     var shouldAnnounceFailure = false;
-    result.match(
-      (_) {
-        // If the user already reached the keypad manually (via "Usar
-        // PIN") before this pending call resolved, this late failure must
-        // never clobber whatever the keypad is currently showing — AC2's
-        // "no second biometric-retry affordance" only concerns the
-        // biometric view itself, which is no longer on screen.
-        final alreadyOnKeypad = _showPinKeypad;
-        shouldAnnounceFailure = !alreadyOnKeypad;
-        if (!alreadyOnKeypad) {
-          setState(() {
-            _showPinKeypad = true;
-            _errorMessage = _biometricFailureMessage;
-          });
-        }
-      },
-      (_) {},
-    );
+    result.match((_) {
+      // If the user already reached the keypad manually (via "Usar
+      // PIN") before this pending call resolved, this late failure must
+      // never clobber whatever the keypad is currently showing — AC2's
+      // "no second biometric-retry affordance" only concerns the
+      // biometric view itself, which is no longer on screen.
+      final alreadyOnKeypad = _showPinKeypad;
+      shouldAnnounceFailure = !alreadyOnKeypad;
+      if (!alreadyOnKeypad) {
+        setState(() {
+          _showPinKeypad = true;
+          _errorMessage = _biometricFailureMessage;
+        });
+      }
+    }, (_) {});
 
     // `sendAnnouncement()` (see `_announce` below) is honored on both
     // Android and iOS — this app is iOS-only, where VoiceOver doesn't

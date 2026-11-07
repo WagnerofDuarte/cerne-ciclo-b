@@ -18,10 +18,7 @@ Future<void> _pump(
   await tester.pumpWidget(
     MaterialApp(
       home: Scaffold(
-        body: InsightCard(
-          insight: insight,
-          onDismiss: onDismiss ?? () {},
-        ),
+        body: InsightCard(insight: insight, onDismiss: onDismiss ?? () {}),
       ),
     ),
   );
@@ -39,37 +36,34 @@ void main() {
     );
   });
 
-  testWidgets(
-    'the ochre spine is the only accent-colored element — a '
-    'colorAccent-filled bar of chatInsightSpineWidth, and nothing else in '
-    'the card uses that color',
-    (tester) async {
-      await _pump(tester);
+  testWidgets('the ochre spine is the only accent-colored element — a '
+      'colorAccent-filled bar of chatInsightSpineWidth, and nothing else in '
+      'the card uses that color', (tester) async {
+    await _pump(tester);
 
-      final accentContainers = tester
-          .widgetList<Container>(
-            find.descendant(
-              of: find.byType(InsightCard),
-              matching: find.byType(Container),
-            ),
-          )
-          .where((container) => container.color == DesignTokens.colorAccent)
-          .toList();
+    final accentContainers = tester
+        .widgetList<Container>(
+          find.descendant(
+            of: find.byType(InsightCard),
+            matching: find.byType(Container),
+          ),
+        )
+        .where((container) => container.color == DesignTokens.colorAccent)
+        .toList();
 
-      // Review fix: the frozen Acceptance Criteria says the spine is the
-      // *only* accent-colored element — exactly one colorAccent surface
-      // must exist, and the "INSIGHT" label itself must stay neutral
-      // (`colorTextSecondary`, same convention `ChatBubble.timeCaption`
-      // already uses), not also colorAccent.
-      expect(accentContainers, hasLength(1));
-      final spine = accentContainers.single;
-      expect(spine.constraints?.maxWidth, DesignTokens.chatInsightSpineWidth);
-      expect(spine.constraints?.minWidth, DesignTokens.chatInsightSpineWidth);
+    // Review fix: the frozen Acceptance Criteria says the spine is the
+    // *only* accent-colored element — exactly one colorAccent surface
+    // must exist, and the "INSIGHT" label itself must stay neutral
+    // (`colorTextSecondary`, same convention `ChatBubble.timeCaption`
+    // already uses), not also colorAccent.
+    expect(accentContainers, hasLength(1));
+    final spine = accentContainers.single;
+    expect(spine.constraints?.maxWidth, DesignTokens.chatInsightSpineWidth);
+    expect(spine.constraints?.minWidth, DesignTokens.chatInsightSpineWidth);
 
-      final labelStyle = tester.widget<Text>(find.text('INSIGHT')).style;
-      expect(labelStyle?.color, DesignTokens.colorTextSecondary);
-    },
-  );
+    final labelStyle = tester.widget<Text>(find.text('INSIGHT')).style;
+    expect(labelStyle?.color, DesignTokens.colorTextSecondary);
+  });
 
   testWidgets('tapping the dismiss icon calls onDismiss exactly once', (
     tester,
@@ -83,33 +77,27 @@ void main() {
     expect(dismissCount, 1);
   });
 
-  testWidgets(
-    'the dismiss icon sits inside a tappable area at least '
-    'insertionModalTapTargetMin wide/tall (44pt min tap target)',
-    (tester) async {
-      await _pump(tester);
+  testWidgets('the dismiss icon sits inside a tappable area at least '
+      'insertionModalTapTargetMin wide/tall (44pt min tap target)', (
+    tester,
+  ) async {
+    await _pump(tester);
 
-      final constrainedBoxes = tester.widgetList<ConstrainedBox>(
-        find.descendant(
-          of: find.byType(InsightCard),
-          matching: find.byType(ConstrainedBox),
-        ),
-      );
-      final dismissTapTarget = constrainedBoxes.firstWhere(
-        (box) =>
-            box.constraints.minWidth ==
-                DesignTokens.insertionModalTapTargetMin &&
-            box.constraints.minHeight ==
-                DesignTokens.insertionModalTapTargetMin,
-      );
+    final constrainedBoxes = tester.widgetList<ConstrainedBox>(
+      find.descendant(
+        of: find.byType(InsightCard),
+        matching: find.byType(ConstrainedBox),
+      ),
+    );
+    final dismissTapTarget = constrainedBoxes.firstWhere(
+      (box) =>
+          box.constraints.minWidth == DesignTokens.insertionModalTapTargetMin &&
+          box.constraints.minHeight == DesignTokens.insertionModalTapTargetMin,
+    );
 
-      expect(dismissTapTarget.constraints.minWidth, greaterThanOrEqualTo(44));
-      expect(
-        dismissTapTarget.constraints.minHeight,
-        greaterThanOrEqualTo(44),
-      );
-    },
-  );
+    expect(dismissTapTarget.constraints.minWidth, greaterThanOrEqualTo(44));
+    expect(dismissTapTarget.constraints.minHeight, greaterThanOrEqualTo(44));
+  });
 
   testWidgets(
     'the dismiss affordance is announced to assistive tech as a button',
@@ -117,10 +105,12 @@ void main() {
       await _pump(tester);
 
       final semantics = tester.getSemantics(
-        find.ancestor(
-          of: find.byIcon(Icons.close),
-          matching: find.byWidgetPredicate((w) => w is Semantics),
-        ).first,
+        find
+            .ancestor(
+              of: find.byIcon(Icons.close),
+              matching: find.byWidgetPredicate((w) => w is Semantics),
+            )
+            .first,
       );
       expect(semantics.flagsCollection.isButton, isTrue);
     },

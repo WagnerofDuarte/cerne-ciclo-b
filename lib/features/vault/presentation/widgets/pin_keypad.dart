@@ -162,11 +162,7 @@ class _KeypadGrid extends StatelessWidget {
   final VoidCallback onBackspaceTap;
   final bool enabled;
 
-  static const List<String> _digitRows1to9 = [
-    '123',
-    '456',
-    '789',
-  ];
+  static const List<String> _digitRows1to9 = ['123', '456', '789'];
 
   Widget _digitButton(String digit) {
     return _KeypadButton(
@@ -221,7 +217,9 @@ class _KeypadGrid extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         for (final digits in _digitRows1to9) ...[
-          _spacedRow([for (final digit in digits.split('')) _digitButton(digit)]),
+          _spacedRow([
+            for (final digit in digits.split('')) _digitButton(digit),
+          ]),
           const SizedBox(height: DesignTokens.pinKeypadGap),
         ],
         _spacedRow([emptyCell, _digitButton('0'), backspaceButton]),

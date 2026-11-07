@@ -28,43 +28,31 @@ void main() {
       expect(result, isEmpty);
     });
 
-    test(
-      'with seenIds, an item whose id is already in the set is dropped '
-      'even though it never repeats within the list itself',
-      () {
-        final result = dedupedById(
-          ['a', 'b'],
-          (s) => s,
-          seenIds: {'a'},
-        );
+    test('with seenIds, an item whose id is already in the set is dropped '
+        'even though it never repeats within the list itself', () {
+      final result = dedupedById(['a', 'b'], (s) => s, seenIds: {'a'});
 
-        expect(result, ['b']);
-      },
-    );
+      expect(result, ['b']);
+    });
 
-    test(
-      'the caller\'s own seenIds set is never mutated — the running set is '
-      'this function\'s own local copy',
-      () {
-        final seenIds = {'a'};
+    test('the caller\'s own seenIds set is never mutated — the running set is '
+        'this function\'s own local copy', () {
+      final seenIds = {'a'};
 
-        dedupedById(['a', 'b', 'c'], (s) => s, seenIds: seenIds);
+      dedupedById(['a', 'b', 'c'], (s) => s, seenIds: seenIds);
 
-        expect(seenIds, {'a'});
-      },
-    );
+      expect(seenIds, {'a'});
+    });
 
-    test(
-      'works over a non-String item type, keyed by a caller-supplied field '
-      '— the generic is never coupled to Entry/EntryDto',
-      () {
-        final result = dedupedById(
-          [(id: '1', v: 'x'), (id: '2', v: 'y'), (id: '1', v: 'z')],
-          (item) => item.id,
-        );
+    test('works over a non-String item type, keyed by a caller-supplied field '
+        '— the generic is never coupled to Entry/EntryDto', () {
+      final result = dedupedById([
+        (id: '1', v: 'x'),
+        (id: '2', v: 'y'),
+        (id: '1', v: 'z'),
+      ], (item) => item.id);
 
-        expect(result.map((item) => item.v), ['x', 'y']);
-      },
-    );
+      expect(result.map((item) => item.v), ['x', 'y']);
+    });
   });
 }

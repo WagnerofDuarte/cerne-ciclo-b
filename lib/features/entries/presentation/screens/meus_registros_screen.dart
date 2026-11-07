@@ -234,9 +234,8 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
         if (!mounted) {
           return;
         }
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(message)));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
         return;
       }
       await ExportStatusSheet.show(context, cubit: exportCubit);

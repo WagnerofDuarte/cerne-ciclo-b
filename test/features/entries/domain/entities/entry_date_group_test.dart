@@ -105,10 +105,7 @@ void main() {
       final groups = groupEntriesByDate(entries);
 
       expect(groups, hasLength(2));
-      expect(
-        groups.expand((g) => g.entries).map((e) => e.id),
-        ['e1', 'e2'],
-      );
+      expect(groups.expand((g) => g.entries).map((e) => e.id), ['e1', 'e2']);
     });
   });
 }

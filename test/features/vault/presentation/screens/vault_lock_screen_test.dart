@@ -93,9 +93,7 @@ class _FakeVaultRepository implements VaultRepository {
       _controller.add(_status);
       return right(unit);
     }
-    return left(
-      const Failure.malformedResponse(message: 'fake: PIN mismatch'),
-    );
+    return left(const Failure.malformedResponse(message: 'fake: PIN mismatch'));
   }
 
   @override
@@ -301,23 +299,20 @@ void main() {
   );
 
   group('AC1/AC2 — biometric failure falls through to the PIN keypad', () {
-    testWidgets(
-      'authenticate() declines on mount -> PIN keypad shown with the '
-      'failure error band, never a "Tentar novamente" affordance, vault '
-      'stays locked',
-      (tester) async {
-        await tester.pumpWidget(_wrap(fakeVaultRepository));
-        await tester.pumpAndSettle();
+    testWidgets('authenticate() declines on mount -> PIN keypad shown with the '
+        'failure error band, never a "Tentar novamente" affordance, vault '
+        'stays locked', (tester) async {
+      await tester.pumpWidget(_wrap(fakeVaultRepository));
+      await tester.pumpAndSettle();
 
-        expect(find.text('Digite seu PIN'), findsOneWidget);
-        expect(
-          find.text('Não foi possível reconhecer — digite seu PIN'),
-          findsOneWidget,
-        );
-        expect(find.text('Tentar novamente'), findsNothing);
-        expect(fakeVaultRepository.currentStatus, VaultStatus.locked);
-      },
-    );
+      expect(find.text('Digite seu PIN'), findsOneWidget);
+      expect(
+        find.text('Não foi possível reconhecer — digite seu PIN'),
+        findsOneWidget,
+      );
+      expect(find.text('Tentar novamente'), findsNothing);
+      expect(fakeVaultRepository.currentStatus, VaultStatus.locked);
+    });
 
     testWidgets(
       'an OS-lockout-flavored failure (a distinct Failure.message, same '
@@ -397,20 +392,17 @@ void main() {
       },
     );
 
-    testWidgets(
-      'stored PIN matches -> unlocks the vault',
-      (tester) async {
-        fakeVaultRepository.storedPin = '1234';
+    testWidgets('stored PIN matches -> unlocks the vault', (tester) async {
+      fakeVaultRepository.storedPin = '1234';
 
-        await tester.pumpWidget(_wrap(fakeVaultRepository));
-        await tester.pumpAndSettle();
+      await tester.pumpWidget(_wrap(fakeVaultRepository));
+      await tester.pumpAndSettle();
 
-        await _enterPin(tester, '1234');
-        await tester.pumpAndSettle();
+      await _enterPin(tester, '1234');
+      await tester.pumpAndSettle();
 
-        expect(fakeVaultRepository.currentStatus, VaultStatus.unlocked);
-      },
-    );
+      expect(fakeVaultRepository.currentStatus, VaultStatus.unlocked);
+    });
 
     testWidgets(
       'stored PIN mismatch -> stays locked, shows a mismatch error band, '
@@ -427,10 +419,7 @@ void main() {
 
         expect(fakeVaultRepository.currentStatus, VaultStatus.locked);
         expect(find.text('Digite seu PIN'), findsOneWidget);
-        expect(
-          find.text('PIN incorreto. Tente novamente.'),
-          findsOneWidget,
-        );
+        expect(find.text('PIN incorreto. Tente novamente.'), findsOneWidget);
         expect(fakeVaultRepository.submitPinCallCount, 1);
 
         // No attempt cap — a second, correct attempt right after still
@@ -606,54 +595,48 @@ void main() {
       },
     );
 
-    testWidgets(
-      'a submitPin() timeout sends the timeout message as a real '
-      'screen-reader announcement',
-      (tester) async {
-        fakeVaultRepository.storedPin = '1234';
-        fakeVaultRepository.submitPinGate = Completer<void>();
-        final announcements = interceptAnnouncements(tester);
+    testWidgets('a submitPin() timeout sends the timeout message as a real '
+        'screen-reader announcement', (tester) async {
+      fakeVaultRepository.storedPin = '1234';
+      fakeVaultRepository.submitPinGate = Completer<void>();
+      final announcements = interceptAnnouncements(tester);
 
-        await tester.pumpWidget(_wrap(fakeVaultRepository));
-        await tester.pumpAndSettle();
+      await tester.pumpWidget(_wrap(fakeVaultRepository));
+      await tester.pumpAndSettle();
 
-        await _enterPin(tester, '1234');
-        await tester.pump(const Duration(seconds: 10, milliseconds: 1));
+      await _enterPin(tester, '1234');
+      await tester.pump(const Duration(seconds: 10, milliseconds: 1));
 
-        expect(
-          announcements,
-          contains('Não foi possível verificar o PIN. Tente novamente.'),
-        );
+      expect(
+        announcements,
+        contains('Não foi possível verificar o PIN. Tente novamente.'),
+      );
 
-        fakeVaultRepository.submitPinGate!.complete();
-        await tester.pumpAndSettle();
-      },
-    );
+      fakeVaultRepository.submitPinGate!.complete();
+      await tester.pumpAndSettle();
+    });
 
-    testWidgets(
-      'tapping "Usar PIN" before any biometric failure sends no '
-      'announcement at all',
-      (tester) async {
-        fakeVaultRepository.authenticateGate = Completer<void>();
-        final announcements = interceptAnnouncements(tester);
+    testWidgets('tapping "Usar PIN" before any biometric failure sends no '
+        'announcement at all', (tester) async {
+      fakeVaultRepository.authenticateGate = Completer<void>();
+      final announcements = interceptAnnouncements(tester);
 
-        await tester.pumpWidget(_wrap(fakeVaultRepository));
-        await tester.pump();
+      await tester.pumpWidget(_wrap(fakeVaultRepository));
+      await tester.pump();
 
-        await tester.tap(find.text('Usar PIN'));
-        await tester.pump();
+      await tester.tap(find.text('Usar PIN'));
+      await tester.pump();
 
-        expect(announcements, isEmpty);
+      expect(announcements, isEmpty);
 
-        fakeVaultRepository.authenticateGate!.complete();
-        await tester.pumpAndSettle();
+      fakeVaultRepository.authenticateGate!.complete();
+      await tester.pumpAndSettle();
 
-        // The pending authenticate() resolving after the user already
-        // escaped to the keypad manually must not announce anything
-        // either (same "already on keypad" guard as the other assertions
-        // for this path).
-        expect(announcements, isEmpty);
-      },
-    );
+      // The pending authenticate() resolving after the user already
+      // escaped to the keypad manually must not announce anything
+      // either (same "already on keypad" guard as the other assertions
+      // for this path).
+      expect(announcements, isEmpty);
+    });
   });
 }

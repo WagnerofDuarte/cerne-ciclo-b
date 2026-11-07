@@ -234,22 +234,21 @@ class ChatCubit extends Cubit<ChatState> {
         if (isClosed) {
           return;
         }
-        messagesResult.match(
-          (failure) => emit(ChatBootstrapError(failure)),
-          (messages) {
-            // spec-6-5 — opens this cubit's very first trigger window,
-            // tied to the session this bootstrap settled on.
-            _resetInsightWindow(session.id);
-            emit(
-              ChatReady(
-                sessionId: session.id,
-                messages: messages.map(_fromDomain).toList(),
-                sessions: sessions,
-                isOffline: _isOffline,
-              ),
-            );
-          },
-        );
+        messagesResult.match((failure) => emit(ChatBootstrapError(failure)), (
+          messages,
+        ) {
+          // spec-6-5 — opens this cubit's very first trigger window,
+          // tied to the session this bootstrap settled on.
+          _resetInsightWindow(session.id);
+          emit(
+            ChatReady(
+              sessionId: session.id,
+              messages: messages.map(_fromDomain).toList(),
+              sessions: sessions,
+              isOffline: _isOffline,
+            ),
+          );
+        });
       },
     );
   }

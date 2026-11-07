@@ -142,7 +142,11 @@ class TextEntryCubit extends Cubit<TextEntryState> {
     }
     result.match(
       (failure) => emit(
-        TextEntryError(activeTab: activeTab, text: text, message: failure.message),
+        TextEntryError(
+          activeTab: activeTab,
+          text: text,
+          message: failure.message,
+        ),
       ),
       (_) => emit(TextEntrySaved(activeTab: activeTab, text: text)),
     );

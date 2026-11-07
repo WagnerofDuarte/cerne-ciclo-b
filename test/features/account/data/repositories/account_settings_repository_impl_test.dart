@@ -38,9 +38,7 @@ void main() {
   /// drained and discarded here first.
   Future<List<bool>> emittedDuring(Future<void> Function() act) async {
     final emitted = <bool>[];
-    final subscription = repository.biometricEnabledStream.listen(
-      emitted.add,
-    );
+    final subscription = repository.biometricEnabledStream.listen(emitted.add);
     await Future<void>.delayed(Duration.zero);
     emitted.clear();
     await act();
@@ -64,21 +62,23 @@ void main() {
   });
 
   group('fetchBiometricEnabled() — boot fetch', () {
-    test('resolves false -> currentBiometricEnabled/stream update to false',
-        () async {
-      when(() => mockRemoteDataSource.fetchSettings()).thenAnswer(
-        (_) async => right(const AccountSettingsDto(biometricEnabled: false)),
-      );
+    test(
+      'resolves false -> currentBiometricEnabled/stream update to false',
+      () async {
+        when(() => mockRemoteDataSource.fetchSettings()).thenAnswer(
+          (_) async => right(const AccountSettingsDto(biometricEnabled: false)),
+        );
 
-      Either<Failure, Unit>? result;
-      final emitted = await emittedDuring(() async {
-        result = await repository.fetchBiometricEnabled();
-      });
+        Either<Failure, Unit>? result;
+        final emitted = await emittedDuring(() async {
+          result = await repository.fetchBiometricEnabled();
+        });
 
-      expect(emitted, [false]);
-      expect(repository.currentBiometricEnabled, isFalse);
-      expect(result!.isRight(), isTrue);
-    });
+        expect(emitted, [false]);
+        expect(repository.currentBiometricEnabled, isFalse);
+        expect(result!.isRight(), isTrue);
+      },
+    );
 
     test('resolves true -> currentBiometricEnabled/stream update to true '
         '(still true, but goes through the real emit path, not just the '
@@ -119,9 +119,8 @@ void main() {
     test('succeeds -> flips immediately (before the PATCH call resolves) '
         'and stays flipped, Right(unit) returned', () async {
       final patchCompleter = Completer<Either<Failure, AccountSettingsDto>>();
-      when(
-        () => mockRemoteDataSource.updateBiometricEnabled(false),
-      ).thenAnswer((_) => patchCompleter.future);
+      when(() => mockRemoteDataSource.updateBiometricEnabled(false))
+          .thenAnswer((_) => patchCompleter.future);
 
       final emitted = <bool>[];
       final subscription = repository.biometricEnabledStream.listen(
@@ -172,14 +171,12 @@ void main() {
 
     test('calls the data source with exactly the requested value', () async {
       when(() => mockRemoteDataSource.updateBiometricEnabled(true)).thenAnswer(
-        (_) async =>
-            right(const AccountSettingsDto(biometricEnabled: true)),
+        (_) async => right(const AccountSettingsDto(biometricEnabled: true)),
       );
 
       await repository.setBiometricEnabled(true);
 
-      verify(() => mockRemoteDataSource.updateBiometricEnabled(true))
-          .called(1);
+      verify(() => mockRemoteDataSource.updateBiometricEnabled(true)).called(1);
     });
   });
 
@@ -206,8 +203,7 @@ void main() {
         'emit on a closed controller — covers the optimistic-flip side of '
         'the same guard, not just fetchBiometricEnabled()\'s', () async {
       when(() => mockRemoteDataSource.updateBiometricEnabled(false)).thenAnswer(
-        (_) async =>
-            right(const AccountSettingsDto(biometricEnabled: false)),
+        (_) async => right(const AccountSettingsDto(biometricEnabled: false)),
       );
 
       await repository.dispose();
@@ -231,8 +227,7 @@ void main() {
       when(() => mockRemoteDataSource.fetchSettings())
           .thenAnswer((_) => fetchCompleter.future);
       when(() => mockRemoteDataSource.updateBiometricEnabled(false)).thenAnswer(
-        (_) async =>
-            right(const AccountSettingsDto(biometricEnabled: false)),
+        (_) async => right(const AccountSettingsDto(biometricEnabled: false)),
       );
 
       // The boot fetch starts first and is held pending...

@@ -31,78 +31,63 @@ PendingEntryWrite _pendingWrite(PendingEntryWriteStatus status) =>
 /// app ever decides a card's badge.
 void main() {
   group('deriveSyncBadgeState', () {
-    test(
-      'entry present, pending null -> SyncBadgeSynchronized (nothing '
-      'pending for this entry)',
-      () {
-        expect(
-          deriveSyncBadgeState(_entry, null),
-          const SyncBadgeState.synchronized(),
-        );
-      },
-    );
+    test('entry present, pending null -> SyncBadgeSynchronized (nothing '
+        'pending for this entry)', () {
+      expect(
+        deriveSyncBadgeState(_entry, null),
+        const SyncBadgeState.synchronized(),
+      );
+    });
 
-    test(
-      'entry null, pending inFlight -> SyncBadgeSynchronizing',
-      () {
-        expect(
-          deriveSyncBadgeState(
-            null,
-            _pendingWrite(const PendingEntryWriteInFlight()),
-          ),
-          const SyncBadgeState.synchronizing(),
-        );
-      },
-    );
-
-    test(
-      'entry null, pending failed -> SyncBadgeError carrying the same '
-      'Failure verbatim',
-      () {
-        const failure = Failure.networkTimeout(message: 'Timed out');
-        final result = deriveSyncBadgeState(
+    test('entry null, pending inFlight -> SyncBadgeSynchronizing', () {
+      expect(
+        deriveSyncBadgeState(
           null,
-          _pendingWrite(const PendingEntryWriteFailed(failure: failure)),
-        );
+          _pendingWrite(const PendingEntryWriteInFlight()),
+        ),
+        const SyncBadgeState.synchronizing(),
+      );
+    });
 
-        expect(result, isA<SyncBadgeError>());
-        expect((result as SyncBadgeError).failure, failure);
-      },
-    );
+    test('entry null, pending failed -> SyncBadgeError carrying the same '
+        'Failure verbatim', () {
+      const failure = Failure.networkTimeout(message: 'Timed out');
+      final result = deriveSyncBadgeState(
+        null,
+        _pendingWrite(const PendingEntryWriteFailed(failure: failure)),
+      );
 
-    test(
-      'both entry and pending non-null -> pending wins regardless of '
-      'entry (pending is always the authoritative client-side signal, '
-      'sync-badge.md)',
-      () {
-        expect(
-          deriveSyncBadgeState(
-            _entry,
-            _pendingWrite(const PendingEntryWriteInFlight()),
-          ),
-          const SyncBadgeState.synchronizing(),
-        );
+      expect(result, isA<SyncBadgeError>());
+      expect((result as SyncBadgeError).failure, failure);
+    });
 
-        const failure = Failure.validation(message: 'Conteúdo inválido.');
-        final errorResult = deriveSyncBadgeState(
+    test('both entry and pending non-null -> pending wins regardless of '
+        'entry (pending is always the authoritative client-side signal, '
+        'sync-badge.md)', () {
+      expect(
+        deriveSyncBadgeState(
           _entry,
-          _pendingWrite(const PendingEntryWriteFailed(failure: failure)),
-        );
-        expect(errorResult, isA<SyncBadgeError>());
-        expect((errorResult as SyncBadgeError).failure, failure);
-      },
-    );
+          _pendingWrite(const PendingEntryWriteInFlight()),
+        ),
+        const SyncBadgeState.synchronizing(),
+      );
 
-    test(
-      'both entry and pending null -> SyncBadgeSynchronized (unreachable '
-      'from any real caller, but resolves rather than throwing, RNF09)',
-      () {
-        expect(
-          deriveSyncBadgeState(null, null),
-          const SyncBadgeState.synchronized(),
-        );
-      },
-    );
+      const failure = Failure.validation(message: 'Conteúdo inválido.');
+      final errorResult = deriveSyncBadgeState(
+        _entry,
+        _pendingWrite(const PendingEntryWriteFailed(failure: failure)),
+      );
+      expect(errorResult, isA<SyncBadgeError>());
+      expect((errorResult as SyncBadgeError).failure, failure);
+    });
+
+    test('both entry and pending null -> SyncBadgeSynchronized (unreachable '
+        'from any real caller, but resolves rather than throwing, RNF09)', () {
+      expect(
+        deriveSyncBadgeState(null, null),
+        const SyncBadgeState.synchronized(),
+      );
+    });
   });
 
   group('SyncBadgeState equality', () {

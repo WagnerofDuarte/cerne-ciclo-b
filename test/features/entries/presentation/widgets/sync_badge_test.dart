@@ -24,46 +24,37 @@ Future<void> _pump(
 /// non-retryable has no tap)".
 void main() {
   group('the 3 badge states', () {
-    testWidgets(
-      'SyncBadgeSynchronizing renders the "Sincronizando" label in '
-      'colorWarningSync',
-      (tester) async {
-        await _pump(tester, const SyncBadgeState.synchronizing());
+    testWidgets('SyncBadgeSynchronizing renders the "Sincronizando" label in '
+        'colorWarningSync', (tester) async {
+      await _pump(tester, const SyncBadgeState.synchronizing());
 
-        expect(find.text('Sincronizando'), findsOneWidget);
-        final text = tester.widget<Text>(find.text('Sincronizando'));
-        expect(text.style!.color, DesignTokens.colorWarningSync);
-      },
-    );
+      expect(find.text('Sincronizando'), findsOneWidget);
+      final text = tester.widget<Text>(find.text('Sincronizando'));
+      expect(text.style!.color, DesignTokens.colorWarningSync);
+    });
 
-    testWidgets(
-      'SyncBadgeSynchronized renders the "Sincronizado" label in '
-      'colorSuccess',
-      (tester) async {
-        await _pump(tester, const SyncBadgeState.synchronized());
+    testWidgets('SyncBadgeSynchronized renders the "Sincronizado" label in '
+        'colorSuccess', (tester) async {
+      await _pump(tester, const SyncBadgeState.synchronized());
 
-        expect(find.text('Sincronizado'), findsOneWidget);
-        final text = tester.widget<Text>(find.text('Sincronizado'));
-        expect(text.style!.color, DesignTokens.colorSuccess);
-      },
-    );
+      expect(find.text('Sincronizado'), findsOneWidget);
+      final text = tester.widget<Text>(find.text('Sincronizado'));
+      expect(text.style!.color, DesignTokens.colorSuccess);
+    });
 
-    testWidgets(
-      'SyncBadgeError renders the "Erro de sincronização" label in '
-      'colorError',
-      (tester) async {
-        await _pump(
-          tester,
-          const SyncBadgeState.error(
-            Failure.networkTimeout(message: 'Timed out'),
-          ),
-        );
+    testWidgets('SyncBadgeError renders the "Erro de sincronização" label in '
+        'colorError', (tester) async {
+      await _pump(
+        tester,
+        const SyncBadgeState.error(
+          Failure.networkTimeout(message: 'Timed out'),
+        ),
+      );
 
-        expect(find.text('Erro de sincronização'), findsOneWidget);
-        final text = tester.widget<Text>(find.text('Erro de sincronização'));
-        expect(text.style!.color, DesignTokens.colorError);
-      },
-    );
+      expect(find.text('Erro de sincronização'), findsOneWidget);
+      final text = tester.widget<Text>(find.text('Erro de sincronização'));
+      expect(text.style!.color, DesignTokens.colorError);
+    });
   });
 
   group('tap target', () {
@@ -108,26 +99,23 @@ void main() {
   });
 
   group('I/O matrix: tap behavior', () {
-    testWidgets(
-      'a retryable error badge tap calls onRetryTap, never shows an '
-      'inline explanation',
-      (tester) async {
-        var retried = false;
-        await _pump(
-          tester,
-          const SyncBadgeState.error(
-            Failure.networkTimeout(message: 'Timed out'),
-          ),
-          onRetryTap: () => retried = true,
-        );
+    testWidgets('a retryable error badge tap calls onRetryTap, never shows an '
+        'inline explanation', (tester) async {
+      var retried = false;
+      await _pump(
+        tester,
+        const SyncBadgeState.error(
+          Failure.networkTimeout(message: 'Timed out'),
+        ),
+        onRetryTap: () => retried = true,
+      );
 
-        await tester.tap(find.byType(SyncBadge));
-        await tester.pump();
+      await tester.tap(find.byType(SyncBadge));
+      await tester.pump();
 
-        expect(retried, isTrue);
-        expect(find.text('Timed out'), findsNothing);
-      },
-    );
+      expect(retried, isTrue);
+      expect(find.text('Timed out'), findsNothing);
+    });
 
     testWidgets(
       'a non-retryable error badge tap reveals the inline explanation and '
@@ -189,17 +177,14 @@ void main() {
   group(
     'code-review round 1 finding: duplicate accessibility announcement',
     () {
-      testWidgets(
-        'the dot\'s own Tooltip is excluded from semantics — the one '
-        'Semantics node wrapping the whole badge is the single '
-        'accessible-label source, not two',
-        (tester) async {
-          await _pump(tester, const SyncBadgeState.synchronizing());
+      testWidgets('the dot\'s own Tooltip is excluded from semantics — the one '
+          'Semantics node wrapping the whole badge is the single '
+          'accessible-label source, not two', (tester) async {
+        await _pump(tester, const SyncBadgeState.synchronizing());
 
-          final tooltip = tester.widget<Tooltip>(find.byType(Tooltip));
-          expect(tooltip.excludeFromSemantics, isTrue);
-        },
-      );
+        final tooltip = tester.widget<Tooltip>(find.byType(Tooltip));
+        expect(tooltip.excludeFromSemantics, isTrue);
+      });
 
       testWidgets(
         'the semantics tree carries the "Sincronizando" label exactly '

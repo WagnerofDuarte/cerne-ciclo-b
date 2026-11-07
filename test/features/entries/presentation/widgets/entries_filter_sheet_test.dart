@@ -175,29 +175,26 @@ void main() {
     await searchCubit.close();
   });
 
-  testWidgets(
-    'renders the "Filtrar registros" title, both groups ("TIPO DE '
-    'ENTRADA"/"PERÍODO") and no "CATEGORIA" group (Design Notes: the '
-    'backend has no category filter), with a single "Aplicar" button and '
-    'no separate "Limpar"',
-    (tester) async {
-      await _pumpSheet(tester, cubit, searchCubit);
+  testWidgets('renders the "Filtrar registros" title, both groups ("TIPO DE '
+      'ENTRADA"/"PERÍODO") and no "CATEGORIA" group (Design Notes: the '
+      'backend has no category filter), with a single "Aplicar" button and '
+      'no separate "Limpar"', (tester) async {
+    await _pumpSheet(tester, cubit, searchCubit);
 
-      expect(find.text('Filtrar registros'), findsOneWidget);
-      expect(find.text('TIPO DE ENTRADA'), findsOneWidget);
-      expect(find.text('Manual'), findsOneWidget);
-      expect(find.text('Áudio'), findsOneWidget);
-      expect(find.text('Foto'), findsOneWidget);
-      expect(find.text('Chat'), findsOneWidget);
-      expect(find.text('PERÍODO'), findsOneWidget);
-      expect(find.text('Todo o período'), findsOneWidget);
-      expect(find.text('Esta semana'), findsOneWidget);
-      expect(find.text('Este mês'), findsOneWidget);
-      expect(find.text('CATEGORIA'), findsNothing);
-      expect(find.text('Aplicar'), findsOneWidget);
-      expect(find.text('Limpar'), findsNothing);
-    },
-  );
+    expect(find.text('Filtrar registros'), findsOneWidget);
+    expect(find.text('TIPO DE ENTRADA'), findsOneWidget);
+    expect(find.text('Manual'), findsOneWidget);
+    expect(find.text('Áudio'), findsOneWidget);
+    expect(find.text('Foto'), findsOneWidget);
+    expect(find.text('Chat'), findsOneWidget);
+    expect(find.text('PERÍODO'), findsOneWidget);
+    expect(find.text('Todo o período'), findsOneWidget);
+    expect(find.text('Esta semana'), findsOneWidget);
+    expect(find.text('Este mês'), findsOneWidget);
+    expect(find.text('CATEGORIA'), findsNothing);
+    expect(find.text('Aplicar'), findsOneWidget);
+    expect(find.text('Limpar'), findsNothing);
+  });
 
   testWidgets('with no filter selected, tapping Aplicar commits an all-null '
       'selection (no source, no date range) to the cubit', (tester) async {

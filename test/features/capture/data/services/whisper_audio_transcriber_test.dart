@@ -30,75 +30,63 @@ void main() {
     transcriber = WhisperAudioTranscriber(controller: mockController);
   });
 
-  test(
-    'happy path: downloads the base model, transcribes in Portuguese, '
-    'returns the transcribed text',
-    () async {
-      when(
-        () => mockController.downloadModel(WhisperModel.base),
-      ).thenAnswer((_) async => '/models/ggml-base.bin');
-      when(
-        () => mockController.transcribe(
-          model: WhisperModel.base,
-          audioPath: '/tmp/a.wav',
-          lang: 'pt',
+  test('happy path: downloads the base model, transcribes in Portuguese, '
+      'returns the transcribed text', () async {
+    when(() => mockController.downloadModel(WhisperModel.base))
+        .thenAnswer((_) async => '/models/ggml-base.bin');
+    when(
+      () => mockController.transcribe(
+        model: WhisperModel.base,
+        audioPath: '/tmp/a.wav',
+        lang: 'pt',
+      ),
+    ).thenAnswer(
+      (_) async => TranscribeResult(
+        time: const Duration(seconds: 1),
+        transcription: const WhisperTranscribeResponse(
+          type: 'transcription',
+          text: 'Hoje foi um bom dia.',
+          segments: null,
         ),
-      ).thenAnswer(
-        (_) async => TranscribeResult(
-          time: const Duration(seconds: 1),
-          transcription: const WhisperTranscribeResponse(
-            type: 'transcription',
-            text: 'Hoje foi um bom dia.',
-            segments: null,
-          ),
-        ),
-      );
+      ),
+    );
 
-      final result = await transcriber.transcribe('/tmp/a.wav');
+    final result = await transcriber.transcribe('/tmp/a.wav');
 
-      expect(result, 'Hoje foi um bom dia.');
-    },
-  );
+    expect(result, 'Hoje foi um bom dia.');
+  });
 
-  test(
-    'WhisperController.transcribe returning null (its own internal '
-    'failure) -> null, never throws',
-    () async {
-      when(
-        () => mockController.downloadModel(WhisperModel.base),
-      ).thenAnswer((_) async => '/models/ggml-base.bin');
-      when(
-        () => mockController.transcribe(
-          model: WhisperModel.base,
-          audioPath: '/tmp/a.wav',
-          lang: 'pt',
-        ),
-      ).thenAnswer((_) async => null);
+  test('WhisperController.transcribe returning null (its own internal '
+      'failure) -> null, never throws', () async {
+    when(() => mockController.downloadModel(WhisperModel.base))
+        .thenAnswer((_) async => '/models/ggml-base.bin');
+    when(
+      () => mockController.transcribe(
+        model: WhisperModel.base,
+        audioPath: '/tmp/a.wav',
+        lang: 'pt',
+      ),
+    ).thenAnswer((_) async => null);
 
-      final result = await transcriber.transcribe('/tmp/a.wav');
+    final result = await transcriber.transcribe('/tmp/a.wav');
 
-      expect(result, isNull);
-    },
-  );
+    expect(result, isNull);
+  });
 
-  test(
-    'downloadModel throwing (e.g. no connectivity on first-ever use) -> '
-    'null, never lets the exception escape',
-    () async {
-      when(
-        () => mockController.downloadModel(WhisperModel.base),
-      ).thenThrow(Exception('no connectivity'));
+  test('downloadModel throwing (e.g. no connectivity on first-ever use) -> '
+      'null, never lets the exception escape', () async {
+    when(() => mockController.downloadModel(WhisperModel.base))
+        .thenThrow(Exception('no connectivity'));
 
-      final result = await transcriber.transcribe('/tmp/a.wav');
+    final result = await transcriber.transcribe('/tmp/a.wav');
 
-      expect(result, isNull);
-      verifyNever(
-        () => mockController.transcribe(
-          model: any(named: 'model'),
-          audioPath: any(named: 'audioPath'),
-          lang: any(named: 'lang'),
-        ),
-      );
-    },
-  );
+    expect(result, isNull);
+    verifyNever(
+      () => mockController.transcribe(
+        model: any(named: 'model'),
+        audioPath: any(named: 'audioPath'),
+        lang: any(named: 'lang'),
+      ),
+    );
+  });
 }

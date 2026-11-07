@@ -61,7 +61,10 @@ void main() {
     test('calls PATCH account-settings-update with exactly {} (Boundaries: '
         '"called empty to read")', () async {
       when(
-        () => mockApiClient.patch('account-settings-update', data: any(named: 'data')),
+        () => mockApiClient.patch(
+          'account-settings-update',
+          data: any(named: 'data'),
+        ),
       ).thenAnswer((_) async => right(_settingsBody()));
 
       await dataSource.fetchSettings();
@@ -78,7 +81,10 @@ void main() {
     test('decodes only biometricEnabled from the response data object, '
         'ignoring every other field (Code Map)', () async {
       when(
-        () => mockApiClient.patch('account-settings-update', data: any(named: 'data')),
+        () => mockApiClient.patch(
+          'account-settings-update',
+          data: any(named: 'data'),
+        ),
       ).thenAnswer((_) async => right(_settingsBody(biometricEnabled: false)));
 
       final result = await dataSource.fetchSettings();
@@ -93,7 +99,10 @@ void main() {
     test('a backend error code maps straight through as the matching '
         'Failure', () async {
       when(
-        () => mockApiClient.patch('account-settings-update', data: any(named: 'data')),
+        () => mockApiClient.patch(
+          'account-settings-update',
+          data: any(named: 'data'),
+        ),
       ).thenAnswer(
         (_) async => left(const Failure.authExpired(message: 'dead token')),
       );
@@ -113,7 +122,10 @@ void main() {
         '{"biometricEnabled": enabled} — never displayName/persona '
         '(Boundaries: Epic 8\'s scope)', () async {
       when(
-        () => mockApiClient.patch('account-settings-update', data: any(named: 'data')),
+        () => mockApiClient.patch(
+          'account-settings-update',
+          data: any(named: 'data'),
+        ),
       ).thenAnswer((_) async => right(_settingsBody(biometricEnabled: false)));
 
       await dataSource.updateBiometricEnabled(false);
@@ -129,7 +141,10 @@ void main() {
 
     test('decodes the written value back from the response', () async {
       when(
-        () => mockApiClient.patch('account-settings-update', data: any(named: 'data')),
+        () => mockApiClient.patch(
+          'account-settings-update',
+          data: any(named: 'data'),
+        ),
       ).thenAnswer((_) async => right(_settingsBody(biometricEnabled: true)));
 
       final result = await dataSource.updateBiometricEnabled(true);

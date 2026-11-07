@@ -121,11 +121,8 @@ class PhotoError extends PhotoCaptureState {
 /// [PhotoPicker]/[MediaRepository] themselves stay long-lived `get_it`
 /// singletons (`capture_injection.dart`).
 class PhotoEntryCubit extends Cubit<PhotoCaptureState> {
-  PhotoEntryCubit(
-    this._photoPicker,
-    this._mediaRepository,
-    this._tracker,
-  ) : super(const PhotoIdle());
+  PhotoEntryCubit(this._photoPicker, this._mediaRepository, this._tracker)
+    : super(const PhotoIdle());
 
   final PhotoPicker _photoPicker;
   final MediaRepository _mediaRepository;

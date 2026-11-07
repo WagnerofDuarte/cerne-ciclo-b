@@ -50,13 +50,16 @@ sealed class ExportJobState {
   /// `status: 'error'`, `errorCode: 'EXPORT_EMPTY_PERIOD'` — "Nenhum
   /// registro nesse período." + an adjust-period suggestion, no download.
   /// AD-3 ("reuse the existing `Failure.exportEmptyPeriod`... never add a
-  /// new `Failure` subtype") is honored one layer down, in
-  /// `ExportJobStatusDto.toState()`: that mapping step always goes
-  /// through `Failure.fromCode` first and only reaches this case by
-  /// checking the *subtype* it returns — this variant itself carries no
-  /// `Failure` of its own, since by the time the job-level state is
-  /// "empty period" there is nothing further for the UI to do with one
-  /// (no retry, no message beyond the copy above).
+  /// new `Failure` subtype") is honored by two independent producers, both
+  /// checking the *subtype* `Failure.fromCode` returns rather than the raw
+  /// `errorCode` string: the poll path, in `ExportJobStatusDto.toState()`;
+  /// and (spec-7-3) the create path, in `ExportJobCubit.start()`'s
+  /// create-failure branch, when `export-summary-create` itself rejects a
+  /// zero-Entry period synchronously, before any `jobId` exists. This
+  /// variant itself carries no `Failure` of its own either way, since by
+  /// the time the job-level state is "empty period" there is nothing
+  /// further for the UI to do with one (no retry, no message beyond the
+  /// copy above).
   const factory ExportJobState.emptyPeriod() = ExportJobEmptyPeriod;
 }
 

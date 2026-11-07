@@ -114,7 +114,10 @@ void main() {
 
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureStorageChannel, handleSecureStorageCall);
+        .setMockMethodCallHandler(
+          secureStorageChannel,
+          handleSecureStorageCall,
+        );
     fakePathProvider = FakePathProviderPlatform();
     PathProviderPlatform.instance = fakePathProvider;
 
@@ -143,84 +146,72 @@ void main() {
     await fakePathProvider.cleanUp();
   });
 
-  test(
-    'happy path: driving the real, DI-resolved TextEntryCubit through '
-    'updateText + save() fires a genuine POST to entries-create with the '
-    'right URL/headers/body, emits TextEntrySaved, and the entry really '
-    'lands in the real entries Hive box',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': {
-          'id': 'e2e-entry-1',
-          'content': 'Hoje foi um bom dia.',
-          'source': 'manual',
-          'chatMessageId': null,
-          'occurredAt': '2026-01-01T00:00:00Z',
-          'serverRevision': 1,
-          'createdAt': '2026-01-01T00:00:00Z',
-          'updatedAt': '2026-01-01T00:00:00Z',
-        },
-      });
-
-      // The exact factory resolution `placeholder_screens.dart`'s "+"
-      // control performs (Boundaries: a fresh instance per "+" tap).
-      final cubit = sl<TextEntryCubit>();
-      addTearDown(cubit.close);
-
-      cubit.updateText('Hoje foi um bom dia.');
-      await cubit.save();
-
-      expect(cubit.state, isA<TextEntrySaved>());
-
-      // Exactly one real request left through the fake transport, built
-      // by the real UrlBuilder/HeaderInterceptor, not a mock of ApiClient.
-      expect(adapter.requests, hasLength(1));
-      final sent = adapter.requests.single;
-      expect(sent.path, sl<UrlBuilder>().build('entries-create'));
-      expect(sent.data, {
+  test('happy path: driving the real, DI-resolved TextEntryCubit through '
+      'updateText + save() fires a genuine POST to entries-create with the '
+      'right URL/headers/body, emits TextEntrySaved, and the entry really '
+      'lands in the real entries Hive box', () async {
+    adapter.queueJsonResponse(200, {
+      'data': {
+        'id': 'e2e-entry-1',
         'content': 'Hoje foi um bom dia.',
         'source': 'manual',
-      });
-      expect(sent.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
-      expect(sent.headers['Authorization'], 'Bearer e2e-test-access-token');
+        'chatMessageId': null,
+        'occurredAt': '2026-01-01T00:00:00Z',
+        'serverRevision': 1,
+        'createdAt': '2026-01-01T00:00:00Z',
+        'updatedAt': '2026-01-01T00:00:00Z',
+      },
+    });
 
-      // The real write-through happened against the real Hive box.
-      final box = sl<Box<Map>>();
-      final stored = box.get('e2e-entry-1');
-      expect(stored, isNotNull);
-      expect(stored!['content'], 'Hoje foi um bom dia.');
-      expect(stored['source'], 'manual');
-    },
-  );
+    // The exact factory resolution `placeholder_screens.dart`'s "+"
+    // control performs (Boundaries: a fresh instance per "+" tap).
+    final cubit = sl<TextEntryCubit>();
+    addTearDown(cubit.close);
 
-  test(
-    'failure path: a non-retryable backend error (VALIDATION_ERROR) '
-    'surfaces through the real pipeline as TextEntryError carrying '
-    "Failure.message verbatim, fires exactly one request (no retry — "
-    "VALIDATION_ERROR isn't one of the 6 retryable codes), and never "
-    'writes to the real entries Hive box',
-    () async {
-      adapter.queueJsonResponse(400, {
-        'code': 'VALIDATION_ERROR',
-        'message': 'Conteúdo inválido.',
-        'retryable': false,
-      });
+    cubit.updateText('Hoje foi um bom dia.');
+    await cubit.save();
 
-      final cubit = sl<TextEntryCubit>();
-      addTearDown(cubit.close);
+    expect(cubit.state, isA<TextEntrySaved>());
 
-      cubit.updateText('Hoje foi um bom dia.');
-      await cubit.save();
+    // Exactly one real request left through the fake transport, built
+    // by the real UrlBuilder/HeaderInterceptor, not a mock of ApiClient.
+    expect(adapter.requests, hasLength(1));
+    final sent = adapter.requests.single;
+    expect(sent.path, sl<UrlBuilder>().build('entries-create'));
+    expect(sent.data, {'content': 'Hoje foi um bom dia.', 'source': 'manual'});
+    expect(sent.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
+    expect(sent.headers['Authorization'], 'Bearer e2e-test-access-token');
 
-      expect(cubit.state, isA<TextEntryError>());
-      expect(
-        (cubit.state as TextEntryError).message,
-        'Conteúdo inválido.',
-      );
-      expect(adapter.requests, hasLength(1));
+    // The real write-through happened against the real Hive box.
+    final box = sl<Box<Map>>();
+    final stored = box.get('e2e-entry-1');
+    expect(stored, isNotNull);
+    expect(stored!['content'], 'Hoje foi um bom dia.');
+    expect(stored['source'], 'manual');
+  });
 
-      final box = sl<Box<Map>>();
-      expect(box.values, isEmpty);
-    },
-  );
+  test('failure path: a non-retryable backend error (VALIDATION_ERROR) '
+      'surfaces through the real pipeline as TextEntryError carrying '
+      "Failure.message verbatim, fires exactly one request (no retry — "
+      "VALIDATION_ERROR isn't one of the 6 retryable codes), and never "
+      'writes to the real entries Hive box', () async {
+    adapter.queueJsonResponse(400, {
+      'code': 'VALIDATION_ERROR',
+      'message': 'Conteúdo inválido.',
+      'retryable': false,
+    });
+
+    final cubit = sl<TextEntryCubit>();
+    addTearDown(cubit.close);
+
+    cubit.updateText('Hoje foi um bom dia.');
+    await cubit.save();
+
+    expect(cubit.state, isA<TextEntryError>());
+    expect((cubit.state as TextEntryError).message, 'Conteúdo inválido.');
+    expect(adapter.requests, hasLength(1));
+
+    final box = sl<Box<Map>>();
+    expect(box.values, isEmpty);
+  });
 }

@@ -85,10 +85,7 @@ class ConfirmationDialog extends StatelessWidget {
         transitionDuration: const Duration(milliseconds: 180),
         transitionBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(
-            opacity: CurvedAnimation(
-              parent: animation,
-              curve: Curves.easeOut,
-            ),
+            opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
             child: child,
           );
         },

@@ -62,26 +62,22 @@ void main() {
     expect(spineColor(tester), DesignTokens.colorPrimary);
   });
 
-  testWidgets(
-    'EntrySource.audio renders Icons.mic with colorSecondary spine',
-    (tester) async {
-      await _pump(tester, _entry(EntrySource.audio));
+  testWidgets('EntrySource.audio renders Icons.mic with colorSecondary spine', (
+    tester,
+  ) async {
+    await _pump(tester, _entry(EntrySource.audio));
 
-      expect(find.byIcon(Icons.mic), findsOneWidget);
-      expect(spineColor(tester), DesignTokens.colorSecondary);
-    },
-  );
+    expect(find.byIcon(Icons.mic), findsOneWidget);
+    expect(spineColor(tester), DesignTokens.colorSecondary);
+  });
 
-  testWidgets(
-    'EntrySource.photo renders Icons.image_outlined with '
-    'colorTextSecondary spine',
-    (tester) async {
-      await _pump(tester, _entry(EntrySource.photo));
+  testWidgets('EntrySource.photo renders Icons.image_outlined with '
+      'colorTextSecondary spine', (tester) async {
+    await _pump(tester, _entry(EntrySource.photo));
 
-      expect(find.byIcon(Icons.image_outlined), findsOneWidget);
-      expect(spineColor(tester), DesignTokens.colorTextSecondary);
-    },
-  );
+    expect(find.byIcon(Icons.image_outlined), findsOneWidget);
+    expect(spineColor(tester), DesignTokens.colorTextSecondary);
+  });
 
   testWidgets(
     'EntrySource.chat renders Icons.chat_bubble_outline with colorAccent '
@@ -94,51 +90,47 @@ void main() {
     },
   );
 
-  testWidgets(
-    'a malformed occurredAt renders the --:-- placeholder instead of '
-    'throwing (RNF09)',
-    (tester) async {
-      await _pump(
-        tester,
-        Entry(
-          id: 'e1',
-          content: 'content',
-          source: EntrySource.manual,
-          chatMessageId: null,
-          occurredAt: 'not-a-date',
-          serverRevision: 1,
-          createdAt: '2026-01-01T10:00:00Z',
-          updatedAt: '2026-01-01T10:00:00Z',
+  testWidgets('a malformed occurredAt renders the --:-- placeholder instead of '
+      'throwing (RNF09)', (tester) async {
+    await _pump(
+      tester,
+      Entry(
+        id: 'e1',
+        content: 'content',
+        source: EntrySource.manual,
+        chatMessageId: null,
+        occurredAt: 'not-a-date',
+        serverRevision: 1,
+        createdAt: '2026-01-01T10:00:00Z',
+        updatedAt: '2026-01-01T10:00:00Z',
+      ),
+    );
+
+    expect(find.text('--:--'), findsOneWidget);
+  });
+
+  group('spec-4-4: onTap navigation', () {
+    testWidgets('tapping the card body (not the badge) calls onTap', (
+      tester,
+    ) async {
+      var tapped = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: EntryRecordCard(
+              entry: _entry(EntrySource.manual),
+              badgeState: const SyncBadgeState.synchronized(),
+              onTap: () => tapped = true,
+            ),
+          ),
         ),
       );
 
-      expect(find.text('--:--'), findsOneWidget);
-    },
-  );
+      await tester.tap(find.text('content'));
+      await tester.pump();
 
-  group('spec-4-4: onTap navigation', () {
-    testWidgets(
-      'tapping the card body (not the badge) calls onTap',
-      (tester) async {
-        var tapped = false;
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: EntryRecordCard(
-                entry: _entry(EntrySource.manual),
-                badgeState: const SyncBadgeState.synchronized(),
-                onTap: () => tapped = true,
-              ),
-            ),
-          ),
-        );
-
-        await tester.tap(find.text('content'));
-        await tester.pump();
-
-        expect(tapped, isTrue);
-      },
-    );
+      expect(tapped, isTrue);
+    });
 
     testWidgets(
       'tapping within the colored spine strip itself also calls onTap '
@@ -167,10 +159,7 @@ void main() {
         // it.
         final spinePoint =
             cardTopLeft +
-            Offset(
-              DesignTokens.kanbanCardSpineWidth / 2,
-              cardSize.height / 2,
-            );
+            Offset(DesignTokens.kanbanCardSpineWidth / 2, cardSize.height / 2);
 
         await tester.tapAt(spinePoint);
         await tester.pump();
@@ -210,41 +199,39 @@ void main() {
   });
 
   group('spec-4-2: sync badge forwarding', () {
-    testWidgets(
-      'renders a SyncBadge with the given badgeState',
-      (tester) async {
-        await _pump(tester, _entry(EntrySource.manual));
+    testWidgets('renders a SyncBadge with the given badgeState', (
+      tester,
+    ) async {
+      await _pump(tester, _entry(EntrySource.manual));
 
-        expect(find.byType(SyncBadge), findsOneWidget);
-        final badge = tester.widget<SyncBadge>(find.byType(SyncBadge));
-        expect(badge.state, const SyncBadgeState.synchronized());
-      },
-    );
+      expect(find.byType(SyncBadge), findsOneWidget);
+      final badge = tester.widget<SyncBadge>(find.byType(SyncBadge));
+      expect(badge.state, const SyncBadgeState.synchronized());
+    });
 
-    testWidgets(
-      'forwards onRetryTap through to the SyncBadge verbatim',
-      (tester) async {
-        var retried = false;
-        await tester.pumpWidget(
-          MaterialApp(
-            home: Scaffold(
-              body: EntryRecordCard(
-                entry: _entry(EntrySource.manual),
-                badgeState: const SyncBadgeState.error(
-                  Failure.networkTimeout(message: 'Timed out'),
-                ),
-                onTap: () {},
-                onRetryTap: () => retried = true,
+    testWidgets('forwards onRetryTap through to the SyncBadge verbatim', (
+      tester,
+    ) async {
+      var retried = false;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: EntryRecordCard(
+              entry: _entry(EntrySource.manual),
+              badgeState: const SyncBadgeState.error(
+                Failure.networkTimeout(message: 'Timed out'),
               ),
+              onTap: () {},
+              onRetryTap: () => retried = true,
             ),
           ),
-        );
+        ),
+      );
 
-        await tester.tap(find.byType(SyncBadge));
-        await tester.pump();
+      await tester.tap(find.byType(SyncBadge));
+      await tester.pump();
 
-        expect(retried, isTrue);
-      },
-    );
+      expect(retried, isTrue);
+    });
   });
 }

@@ -57,7 +57,9 @@ class _FakeEntriesRepository implements EntriesRepository {
   Future<Either<Failure, Entry>> getById(String id) async {
     getByIdCallCount++;
     if (_results.isEmpty) {
-      throw StateError('no queued getById() result for call #$getByIdCallCount');
+      throw StateError(
+        'no queued getById() result for call #$getByIdCallCount',
+      );
     }
     return _results.removeAt(0);
   }
@@ -209,97 +211,82 @@ void main() {
   });
 
   group('load() — success', () {
-    test(
-      'a successful fetch emits EntryDetailData with a Synchronized badge '
-      '(Boundaries: a fetched Entry is always server-confirmed)',
-      () async {
-        fakeRepository.queueGetById(right(_entry('e1')));
+    test('a successful fetch emits EntryDetailData with a Synchronized badge '
+        '(Boundaries: a fetched Entry is always server-confirmed)', () async {
+      fakeRepository.queueGetById(right(_entry('e1')));
 
-        await cubit.load('e1');
+      await cubit.load('e1');
 
-        expect(
-          cubit.state,
-          EntryDetailData(
-            entry: _entry('e1'),
-            badgeState: const SyncBadgeState.synchronized(),
-          ),
-        );
-      },
-    );
+      expect(
+        cubit.state,
+        EntryDetailData(
+          entry: _entry('e1'),
+          badgeState: const SyncBadgeState.synchronized(),
+        ),
+      );
+    });
 
-    test(
-      'a pending write that happens to share this entry\'s id still feeds '
-      'the shared deriveSyncBadgeState() (never recomputed inline), rather '
-      'than being ignored',
-      () async {
-        fakeRepository.queueGetById(right(_entry('e1')));
-        fakeTracker.emitPendingWrites([
-          PendingEntryWrite(
-            tempId: 'e1',
-            content: 'content-e1',
-            source: EntrySource.manual,
-            mediaDurationSeconds: null,
-            startedAt: DateTime(2026, 1, 1),
-            status: const PendingEntryWriteInFlight(),
-          ),
-        ]);
-        // Lets the pending snapshot land before `load()` reads it.
-        await Future<void>.delayed(Duration.zero);
+    test('a pending write that happens to share this entry\'s id still feeds '
+        'the shared deriveSyncBadgeState() (never recomputed inline), rather '
+        'than being ignored', () async {
+      fakeRepository.queueGetById(right(_entry('e1')));
+      fakeTracker.emitPendingWrites([
+        PendingEntryWrite(
+          tempId: 'e1',
+          content: 'content-e1',
+          source: EntrySource.manual,
+          mediaDurationSeconds: null,
+          startedAt: DateTime(2026, 1, 1),
+          status: const PendingEntryWriteInFlight(),
+        ),
+      ]);
+      // Lets the pending snapshot land before `load()` reads it.
+      await Future<void>.delayed(Duration.zero);
 
-        await cubit.load('e1');
+      await cubit.load('e1');
 
-        expect(cubit.state, isA<EntryDetailData>());
-        final state = cubit.state as EntryDetailData;
-        expect(state.badgeState, const SyncBadgeState.synchronizing());
-      },
-    );
+      expect(cubit.state, isA<EntryDetailData>());
+      final state = cubit.state as EntryDetailData;
+      expect(state.badgeState, const SyncBadgeState.synchronizing());
+    });
   });
 
   group('load() — notFound (RNF04)', () {
-    test(
-      'Failure.notFound emits EntryDetailNotFound',
-      () async {
-        fakeRepository.queueGetById(
-          left(const Failure.notFound(message: 'Não encontrado')),
-        );
+    test('Failure.notFound emits EntryDetailNotFound', () async {
+      fakeRepository.queueGetById(
+        left(const Failure.notFound(message: 'Não encontrado')),
+      );
 
-        await cubit.load('unknown-id');
+      await cubit.load('unknown-id');
 
-        expect(cubit.state, const EntryDetailNotFound());
-      },
-    );
+      expect(cubit.state, const EntryDetailNotFound());
+    });
 
-    test(
-      'a still-pending placeholder\'s synthetic tempId that 404s at the '
-      'backend resolves to the exact same EntryDetailNotFound — no '
-      'special-casing in this cubit',
-      () async {
-        fakeRepository.queueGetById(
-          left(const Failure.notFound(message: 'Não encontrado')),
-        );
+    test('a still-pending placeholder\'s synthetic tempId that 404s at the '
+        'backend resolves to the exact same EntryDetailNotFound — no '
+        'special-casing in this cubit', () async {
+      fakeRepository.queueGetById(
+        left(const Failure.notFound(message: 'Não encontrado')),
+      );
 
-        await cubit.load('pending-123-0');
+      await cubit.load('pending-123-0');
 
-        expect(cubit.state, const EntryDetailNotFound());
-      },
-    );
+      expect(cubit.state, const EntryDetailNotFound());
+    });
   });
 
   group('load() — every other non-absorbed Failure', () {
-    test(
-      'a networkOffline failure (e.g. cache miss, already resolved by the '
-      'repository) emits EntryDetailError, never a permission-denied-'
-      'specific state',
-      () async {
-        fakeRepository.queueGetById(
-          left(const Failure.networkOffline(message: 'Offline')),
-        );
+    test('a networkOffline failure (e.g. cache miss, already resolved by the '
+        'repository) emits EntryDetailError, never a permission-denied-'
+        'specific state', () async {
+      fakeRepository.queueGetById(
+        left(const Failure.networkOffline(message: 'Offline')),
+      );
 
-        await cubit.load('e1');
+      await cubit.load('e1');
 
-        expect(cubit.state, const EntryDetailError(message: 'Offline'));
-      },
-    );
+      expect(cubit.state, const EntryDetailError(message: 'Offline'));
+    });
 
     test('authExpired also emits EntryDetailError', () async {
       fakeRepository.queueGetById(
@@ -308,44 +295,35 @@ void main() {
 
       await cubit.load('e1');
 
-      expect(
-        cubit.state,
-        const EntryDetailError(message: 'Sessão expirada'),
-      );
+      expect(cubit.state, const EntryDetailError(message: 'Sessão expirada'));
     });
   });
 
   group('session expiry while viewing detail', () {
-    test(
-      'SessionRepository.statusStream emitting expired is folded into the '
-      'sealed EntryDetailState itself (round-2 review fix) without '
-      'disturbing the already-resolved entry/badge data — no crash, no '
-      'new overlay built by this cubit itself',
-      () async {
-        fakeRepository.queueGetById(right(_entry('e1')));
-        await cubit.load('e1');
-        final dataState = cubit.state;
+    test('SessionRepository.statusStream emitting expired is folded into the '
+        'sealed EntryDetailState itself (round-2 review fix) without '
+        'disturbing the already-resolved entry/badge data — no crash, no '
+        'new overlay built by this cubit itself', () async {
+      fakeRepository.queueGetById(right(_entry('e1')));
+      await cubit.load('e1');
+      final dataState = cubit.state;
 
-        fakeSessionRepository.setStatus(SessionStatus.expired);
-        await Future<void>.delayed(Duration.zero);
+      fakeSessionRepository.setStatus(SessionStatus.expired);
+      await Future<void>.delayed(Duration.zero);
 
-        expect(cubit.state.sessionStatus, SessionStatus.expired);
-        expect(cubit.state, isA<EntryDetailData>());
-        // The resolved entry/badge data itself is unchanged — only
-        // sessionStatus differs from dataState (equality intentionally
-        // includes it, entry_detail_state.dart's own doc, so this cubit's
-        // re-stamp actually reaches a new emit rather than being
-        // short-circuited by Cubit.emit's own equality check).
-        expect(
-          (cubit.state as EntryDetailData).entry,
-          (dataState as EntryDetailData).entry,
-        );
-        expect(
-          (cubit.state as EntryDetailData).badgeState,
-          dataState.badgeState,
-        );
-      },
-    );
+      expect(cubit.state.sessionStatus, SessionStatus.expired);
+      expect(cubit.state, isA<EntryDetailData>());
+      // The resolved entry/badge data itself is unchanged — only
+      // sessionStatus differs from dataState (equality intentionally
+      // includes it, entry_detail_state.dart's own doc, so this cubit's
+      // re-stamp actually reaches a new emit rather than being
+      // short-circuited by Cubit.emit's own equality check).
+      expect(
+        (cubit.state as EntryDetailData).entry,
+        (dataState as EntryDetailData).entry,
+      );
+      expect((cubit.state as EntryDetailData).badgeState, dataState.badgeState);
+    });
 
     test(
       'a status already known before load() resolves is stamped onto the '
@@ -361,87 +339,75 @@ void main() {
       },
     );
 
-    test(
-      'the session expiring while a load() fetch is still in flight is '
-      'reflected on the EntryDetailLoading state it arrives during, then '
-      'carried over onto the resolved EntryDetailData once the fetch '
-      'completes (review finding: previously only the already-resolved '
-      'ordering was covered)',
-      () async {
-        final gatedRepository = _GatedEntriesRepository();
-        final gatedCubit = EntryDetailCubit(
-          gatedRepository,
-          fakeTracker,
-          fakeSessionRepository,
-        );
-        addTearDown(gatedCubit.close);
+    test('the session expiring while a load() fetch is still in flight is '
+        'reflected on the EntryDetailLoading state it arrives during, then '
+        'carried over onto the resolved EntryDetailData once the fetch '
+        'completes (review finding: previously only the already-resolved '
+        'ordering was covered)', () async {
+      final gatedRepository = _GatedEntriesRepository();
+      final gatedCubit = EntryDetailCubit(
+        gatedRepository,
+        fakeTracker,
+        fakeSessionRepository,
+      );
+      addTearDown(gatedCubit.close);
 
-        final load = gatedCubit.load('e1');
-        expect(gatedCubit.state, isA<EntryDetailLoading>());
+      final load = gatedCubit.load('e1');
+      expect(gatedCubit.state, isA<EntryDetailLoading>());
 
-        fakeSessionRepository.setStatus(SessionStatus.expired);
-        await Future<void>.delayed(Duration.zero);
-        expect(gatedCubit.state, isA<EntryDetailLoading>());
-        expect(gatedCubit.state.sessionStatus, SessionStatus.expired);
+      fakeSessionRepository.setStatus(SessionStatus.expired);
+      await Future<void>.delayed(Duration.zero);
+      expect(gatedCubit.state, isA<EntryDetailLoading>());
+      expect(gatedCubit.state.sessionStatus, SessionStatus.expired);
 
-        gatedRepository.resolve(0, right(_entry('e1')));
-        await load;
+      gatedRepository.resolve(0, right(_entry('e1')));
+      await load;
 
-        expect(gatedCubit.state, isA<EntryDetailData>());
-        expect(gatedCubit.state.sessionStatus, SessionStatus.expired);
-      },
-    );
+      expect(gatedCubit.state, isA<EntryDetailData>());
+      expect(gatedCubit.state.sessionStatus, SessionStatus.expired);
+    });
   });
 
   group('stale in-flight load() guard', () {
-    test(
-      'a stale call\'s result landing after a newer load() is discarded — '
-      'the newer call\'s own result wins',
-      () async {
-        final gatedRepository = _GatedEntriesRepository();
-        final gatedCubit = EntryDetailCubit(
-          gatedRepository,
-          fakeTracker,
-          fakeSessionRepository,
-        );
-        addTearDown(gatedCubit.close);
+    test('a stale call\'s result landing after a newer load() is discarded — '
+        'the newer call\'s own result wins', () async {
+      final gatedRepository = _GatedEntriesRepository();
+      final gatedCubit = EntryDetailCubit(
+        gatedRepository,
+        fakeTracker,
+        fakeSessionRepository,
+      );
+      addTearDown(gatedCubit.close);
 
-        final firstLoad = gatedCubit.load('e1');
-        final secondLoad = gatedCubit.load('e2');
+      final firstLoad = gatedCubit.load('e1');
+      final secondLoad = gatedCubit.load('e2');
 
-        // Resolves the stale first call *after* the second has already
-        // started — its result must never land.
-        gatedRepository.resolve(0, right(_entry('e1')));
-        gatedRepository.resolve(1, right(_entry('e2')));
-        await Future.wait([firstLoad, secondLoad]);
+      // Resolves the stale first call *after* the second has already
+      // started — its result must never land.
+      gatedRepository.resolve(0, right(_entry('e1')));
+      gatedRepository.resolve(1, right(_entry('e2')));
+      await Future.wait([firstLoad, secondLoad]);
 
-        expect(gatedCubit.state, isA<EntryDetailData>());
-        expect(
-          (gatedCubit.state as EntryDetailData).entry.id,
-          'e2',
-        );
-      },
-    );
+      expect(gatedCubit.state, isA<EntryDetailData>());
+      expect((gatedCubit.state as EntryDetailData).entry.id, 'e2');
+    });
 
-    test(
-      'a load() result landing after the cubit is already closed is '
-      'discarded too — no throw, no emit-after-close (review finding: '
-      'only the other half of this guard, concurrent load() calls, was '
-      'covered before)',
-      () async {
-        final gatedRepository = _GatedEntriesRepository();
-        final gatedCubit = EntryDetailCubit(
-          gatedRepository,
-          fakeTracker,
-          fakeSessionRepository,
-        );
+    test('a load() result landing after the cubit is already closed is '
+        'discarded too — no throw, no emit-after-close (review finding: '
+        'only the other half of this guard, concurrent load() calls, was '
+        'covered before)', () async {
+      final gatedRepository = _GatedEntriesRepository();
+      final gatedCubit = EntryDetailCubit(
+        gatedRepository,
+        fakeTracker,
+        fakeSessionRepository,
+      );
 
-        final load = gatedCubit.load('e1');
-        await gatedCubit.close();
-        gatedRepository.resolve(0, right(_entry('e1')));
+      final load = gatedCubit.load('e1');
+      await gatedCubit.close();
+      gatedRepository.resolve(0, right(_entry('e1')));
 
-        await expectLater(load, completes);
-      },
-    );
+      await expectLater(load, completes);
+    });
   });
 }

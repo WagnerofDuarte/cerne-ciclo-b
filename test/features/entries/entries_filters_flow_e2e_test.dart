@@ -127,7 +127,10 @@ void main() {
 
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureStorageChannel, handleSecureStorageCall);
+        .setMockMethodCallHandler(
+          secureStorageChannel,
+          handleSecureStorageCall,
+        );
     fakePathProvider = FakePathProviderPlatform();
     PathProviderPlatform.instance = fakePathProvider;
 
@@ -152,220 +155,202 @@ void main() {
     await fakePathProvider.cleanUp();
   });
 
-  test(
-    'source filter: applyFilters(source: audio) fires a genuine GET to '
-    'entries-list with {limit, source} (no date bounds), lands the real '
-    'cubit on MeusRegistrosLoaded, and persists the filtered page to the '
-    'real entries Hive box',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': [
-          _entryJson(
-            id: 'entry-audio-1',
-            content: 'Áudio transcrito do dia.',
-            source: 'audio',
-            occurredAt: '2026-01-02T10:00:00Z',
-          ),
-        ],
-        'meta': {'nextCursor': null},
-      });
-
-      final cubit = sl<MeusRegistrosCubit>();
-      await cubit.applyFilters(source: EntrySource.audio);
-
-      final state = cubit.state;
-      expect(state, isA<MeusRegistrosLoaded>());
-      final loaded = state as MeusRegistrosLoaded;
-      expect(loaded.entries.map((e) => e.id), ['entry-audio-1']);
-      expect(cubit.activeSource, EntrySource.audio);
-
-      expect(adapter.requests, hasLength(1));
-      final sent = adapter.requests.single;
-      expect(sent.path, sl<UrlBuilder>().build('entries-list'));
-      expect(sent.queryParameters, {'limit': 20, 'source': 'audio'});
-      expect(sent.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
-      expect(sent.headers['Authorization'], 'Bearer e2e-test-access-token');
-
-      final box = sl<Box<Map>>();
-      expect(box.get('entry-audio-1')!['source'], 'audio');
-    },
-  );
-
-  test(
-    'date range filter: applyFilters(dateFrom/dateTo) sends both as their '
-    'own .toUtc().toIso8601String() query params over the real pipeline, '
-    'with no source param',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': [
-          _entryJson(
-            id: 'entry-january',
-            content: 'Registro de janeiro.',
-            source: 'manual',
-            occurredAt: '2026-01-15T10:00:00Z',
-          ),
-        ],
-        'meta': {'nextCursor': null},
-      });
-
-      final dateFrom = DateTime(2026, 1, 1);
-      final dateTo = DateTime(2026, 1, 31);
-      final cubit = sl<MeusRegistrosCubit>();
-      await cubit.applyFilters(dateFrom: dateFrom, dateTo: dateTo);
-
-      expect(cubit.state, isA<MeusRegistrosLoaded>());
-      expect(adapter.requests, hasLength(1));
-      final sent = adapter.requests.single.queryParameters;
-      expect(sent['limit'], 20);
-      expect(sent.containsKey('source'), isFalse);
-      expect(sent['dateFrom'], dateFrom.toUtc().toIso8601String());
-      expect(sent['dateTo'], dateTo.toUtc().toIso8601String());
-      expect(sent['dateFrom'], endsWith('Z'));
-      expect(sent['dateTo'], endsWith('Z'));
-    },
-  );
-
-  test(
-    'pagination with filters active: loadMore() after a filtered first '
-    'page carries the same source/dateFrom/dateTo forward alongside the '
-    'real cursor, and appends the new page to the real Hive box',
-    () async {
-      final dateFrom = DateTime(2026, 1, 1);
-      final dateTo = DateTime(2026, 1, 31);
-
-      adapter.queueJsonResponse(200, {
-        'data': [
-          _entryJson(
-            id: 'entry-1',
-            content: 'Primeira página filtrada.',
-            source: 'photo',
-            occurredAt: '2026-01-10T10:00:00Z',
-          ),
-        ],
-        'meta': {'nextCursor': 'cursor-page-2'},
-      });
-
-      final cubit = sl<MeusRegistrosCubit>();
-      await cubit.applyFilters(
-        source: EntrySource.photo,
-        dateFrom: dateFrom,
-        dateTo: dateTo,
-      );
-
-      adapter.queueJsonResponse(200, {
-        'data': [
-          _entryJson(
-            id: 'entry-2',
-            content: 'Segunda página filtrada.',
-            source: 'photo',
-            occurredAt: '2026-01-05T10:00:00Z',
-          ),
-        ],
-        'meta': {'nextCursor': null},
-      });
-
-      await cubit.loadMore();
-
-      final loaded = cubit.state as MeusRegistrosLoaded;
-      expect(loaded.entries.map((e) => e.id), ['entry-1', 'entry-2']);
-      expect(loaded.nextCursor, isNull);
-
-      expect(adapter.requests, hasLength(2));
-      final secondRequest = adapter.requests.last.queryParameters;
-      expect(secondRequest['cursor'], 'cursor-page-2');
-      expect(secondRequest['source'], 'photo');
-      expect(secondRequest['dateFrom'], dateFrom.toUtc().toIso8601String());
-      expect(secondRequest['dateTo'], dateTo.toUtc().toIso8601String());
-
-      final box = sl<Box<Map>>();
-      expect(box.keys, containsAll(['entry-1', 'entry-2']));
-    },
-  );
-
-  test(
-    'offline fallback stays filter-oblivious (AD-9): applyFilters() '
-    'genuinely retries a NETWORK_OFFLINE entries-list call maxRetries '
-    'times over the real RetryInterceptor, then falls back to the full '
-    'cached entries Hive box dump — not a client-side-filtered subset — '
-    'sorted occurredAt desc',
-    () async {
-      final box = sl<Box<Map>>();
-      await box.putAll({
-        'cached-manual': _entryJson(
-          id: 'cached-manual',
-          content: 'Registro manual antigo (não bate o filtro de áudio).',
-          source: 'manual',
-          occurredAt: '2026-01-01T00:00:00Z',
-        ),
-        'cached-audio': _entryJson(
-          id: 'cached-audio',
-          content: 'Registro de áudio mais recente.',
+  test('source filter: applyFilters(source: audio) fires a genuine GET to '
+      'entries-list with {limit, source} (no date bounds), lands the real '
+      'cubit on MeusRegistrosLoaded, and persists the filtered page to the '
+      'real entries Hive box', () async {
+    adapter.queueJsonResponse(200, {
+      'data': [
+        _entryJson(
+          id: 'entry-audio-1',
+          content: 'Áudio transcrito do dia.',
           source: 'audio',
-          occurredAt: '2026-01-03T00:00:00Z',
+          occurredAt: '2026-01-02T10:00:00Z',
         ),
-      });
+      ],
+      'meta': {'nextCursor': null},
+    });
 
-      for (var i = 0; i <= RetryInterceptor.maxRetries; i++) {
-        adapter.queueErrorResponse('NETWORK_OFFLINE', 'Sem conexão');
-      }
+    final cubit = sl<MeusRegistrosCubit>();
+    await cubit.applyFilters(source: EntrySource.audio);
 
-      final cubit = sl<MeusRegistrosCubit>();
-      await cubit.applyFilters(source: EntrySource.audio);
+    final state = cubit.state;
+    expect(state, isA<MeusRegistrosLoaded>());
+    final loaded = state as MeusRegistrosLoaded;
+    expect(loaded.entries.map((e) => e.id), ['entry-audio-1']);
+    expect(cubit.activeSource, EntrySource.audio);
 
-      final loaded = cubit.state as MeusRegistrosLoaded;
-      // The fallback returns both cached entries — including the one that
-      // doesn't match the active `source: audio` filter — because the
-      // cache dump is never locally filtered (AD-9).
-      expect(loaded.entries.map((e) => e.id), [
-        'cached-audio',
-        'cached-manual',
-      ]);
-      expect(loaded.nextCursor, isNull);
-      expect(cubit.activeSource, EntrySource.audio);
+    expect(adapter.requests, hasLength(1));
+    final sent = adapter.requests.single;
+    expect(sent.path, sl<UrlBuilder>().build('entries-list'));
+    expect(sent.queryParameters, {'limit': 20, 'source': 'audio'});
+    expect(sent.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
+    expect(sent.headers['Authorization'], 'Bearer e2e-test-access-token');
 
-      expect(adapter.requests, hasLength(1 + RetryInterceptor.maxRetries));
-      expect(adapter.requests.first.queryParameters['source'], 'audio');
-    },
-  );
+    final box = sl<Box<Map>>();
+    expect(box.get('entry-audio-1')!['source'], 'audio');
+  });
 
-  test(
-    'clearFilters() after a filtered load re-queries entries-list over the '
-    'real pipeline with no source/dateFrom/dateTo — just limit',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': [
-          _entryJson(
-            id: 'entry-filtered',
-            content: 'Resultado filtrado.',
-            source: 'chat',
-            occurredAt: '2026-01-10T10:00:00Z',
-          ),
-        ],
-        'meta': {'nextCursor': null},
-      });
-      final cubit = sl<MeusRegistrosCubit>();
-      await cubit.applyFilters(source: EntrySource.chat);
+  test('date range filter: applyFilters(dateFrom/dateTo) sends both as their '
+      'own .toUtc().toIso8601String() query params over the real pipeline, '
+      'with no source param', () async {
+    adapter.queueJsonResponse(200, {
+      'data': [
+        _entryJson(
+          id: 'entry-january',
+          content: 'Registro de janeiro.',
+          source: 'manual',
+          occurredAt: '2026-01-15T10:00:00Z',
+        ),
+      ],
+      'meta': {'nextCursor': null},
+    });
 
-      adapter.queueJsonResponse(200, {
-        'data': [
-          _entryJson(
-            id: 'entry-unfiltered',
-            content: 'Resultado completo.',
-            source: 'manual',
-            occurredAt: '2026-01-11T10:00:00Z',
-          ),
-        ],
-        'meta': {'nextCursor': null},
-      });
+    final dateFrom = DateTime(2026, 1, 1);
+    final dateTo = DateTime(2026, 1, 31);
+    final cubit = sl<MeusRegistrosCubit>();
+    await cubit.applyFilters(dateFrom: dateFrom, dateTo: dateTo);
 
-      await cubit.clearFilters();
+    expect(cubit.state, isA<MeusRegistrosLoaded>());
+    expect(adapter.requests, hasLength(1));
+    final sent = adapter.requests.single.queryParameters;
+    expect(sent['limit'], 20);
+    expect(sent.containsKey('source'), isFalse);
+    expect(sent['dateFrom'], dateFrom.toUtc().toIso8601String());
+    expect(sent['dateTo'], dateTo.toUtc().toIso8601String());
+    expect(sent['dateFrom'], endsWith('Z'));
+    expect(sent['dateTo'], endsWith('Z'));
+  });
 
-      expect(cubit.hasActiveFilters, isFalse);
-      final loaded = cubit.state as MeusRegistrosLoaded;
-      expect(loaded.entries.map((e) => e.id), ['entry-unfiltered']);
+  test('pagination with filters active: loadMore() after a filtered first '
+      'page carries the same source/dateFrom/dateTo forward alongside the '
+      'real cursor, and appends the new page to the real Hive box', () async {
+    final dateFrom = DateTime(2026, 1, 1);
+    final dateTo = DateTime(2026, 1, 31);
 
-      expect(adapter.requests, hasLength(2));
-      expect(adapter.requests.last.queryParameters, {'limit': 20});
-    },
-  );
+    adapter.queueJsonResponse(200, {
+      'data': [
+        _entryJson(
+          id: 'entry-1',
+          content: 'Primeira página filtrada.',
+          source: 'photo',
+          occurredAt: '2026-01-10T10:00:00Z',
+        ),
+      ],
+      'meta': {'nextCursor': 'cursor-page-2'},
+    });
+
+    final cubit = sl<MeusRegistrosCubit>();
+    await cubit.applyFilters(
+      source: EntrySource.photo,
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+    );
+
+    adapter.queueJsonResponse(200, {
+      'data': [
+        _entryJson(
+          id: 'entry-2',
+          content: 'Segunda página filtrada.',
+          source: 'photo',
+          occurredAt: '2026-01-05T10:00:00Z',
+        ),
+      ],
+      'meta': {'nextCursor': null},
+    });
+
+    await cubit.loadMore();
+
+    final loaded = cubit.state as MeusRegistrosLoaded;
+    expect(loaded.entries.map((e) => e.id), ['entry-1', 'entry-2']);
+    expect(loaded.nextCursor, isNull);
+
+    expect(adapter.requests, hasLength(2));
+    final secondRequest = adapter.requests.last.queryParameters;
+    expect(secondRequest['cursor'], 'cursor-page-2');
+    expect(secondRequest['source'], 'photo');
+    expect(secondRequest['dateFrom'], dateFrom.toUtc().toIso8601String());
+    expect(secondRequest['dateTo'], dateTo.toUtc().toIso8601String());
+
+    final box = sl<Box<Map>>();
+    expect(box.keys, containsAll(['entry-1', 'entry-2']));
+  });
+
+  test('offline fallback stays filter-oblivious (AD-9): applyFilters() '
+      'genuinely retries a NETWORK_OFFLINE entries-list call maxRetries '
+      'times over the real RetryInterceptor, then falls back to the full '
+      'cached entries Hive box dump — not a client-side-filtered subset — '
+      'sorted occurredAt desc', () async {
+    final box = sl<Box<Map>>();
+    await box.putAll({
+      'cached-manual': _entryJson(
+        id: 'cached-manual',
+        content: 'Registro manual antigo (não bate o filtro de áudio).',
+        source: 'manual',
+        occurredAt: '2026-01-01T00:00:00Z',
+      ),
+      'cached-audio': _entryJson(
+        id: 'cached-audio',
+        content: 'Registro de áudio mais recente.',
+        source: 'audio',
+        occurredAt: '2026-01-03T00:00:00Z',
+      ),
+    });
+
+    for (var i = 0; i <= RetryInterceptor.maxRetries; i++) {
+      adapter.queueErrorResponse('NETWORK_OFFLINE', 'Sem conexão');
+    }
+
+    final cubit = sl<MeusRegistrosCubit>();
+    await cubit.applyFilters(source: EntrySource.audio);
+
+    final loaded = cubit.state as MeusRegistrosLoaded;
+    // The fallback returns both cached entries — including the one that
+    // doesn't match the active `source: audio` filter — because the
+    // cache dump is never locally filtered (AD-9).
+    expect(loaded.entries.map((e) => e.id), ['cached-audio', 'cached-manual']);
+    expect(loaded.nextCursor, isNull);
+    expect(cubit.activeSource, EntrySource.audio);
+
+    expect(adapter.requests, hasLength(1 + RetryInterceptor.maxRetries));
+    expect(adapter.requests.first.queryParameters['source'], 'audio');
+  });
+
+  test('clearFilters() after a filtered load re-queries entries-list over the '
+      'real pipeline with no source/dateFrom/dateTo — just limit', () async {
+    adapter.queueJsonResponse(200, {
+      'data': [
+        _entryJson(
+          id: 'entry-filtered',
+          content: 'Resultado filtrado.',
+          source: 'chat',
+          occurredAt: '2026-01-10T10:00:00Z',
+        ),
+      ],
+      'meta': {'nextCursor': null},
+    });
+    final cubit = sl<MeusRegistrosCubit>();
+    await cubit.applyFilters(source: EntrySource.chat);
+
+    adapter.queueJsonResponse(200, {
+      'data': [
+        _entryJson(
+          id: 'entry-unfiltered',
+          content: 'Resultado completo.',
+          source: 'manual',
+          occurredAt: '2026-01-11T10:00:00Z',
+        ),
+      ],
+      'meta': {'nextCursor': null},
+    });
+
+    await cubit.clearFilters();
+
+    expect(cubit.hasActiveFilters, isFalse);
+    final loaded = cubit.state as MeusRegistrosLoaded;
+    expect(loaded.entries.map((e) => e.id), ['entry-unfiltered']);
+
+    expect(adapter.requests, hasLength(2));
+    expect(adapter.requests.last.queryParameters, {'limit': 20});
+  });
 }

@@ -25,9 +25,7 @@ void main() {
         'subscribe at once', () async {
       final firstEvents = <void>[];
       final secondEvents = <void>[];
-      final firstSubscription = notifier.expiredEvents.listen(
-        firstEvents.add,
-      );
+      final firstSubscription = notifier.expiredEvents.listen(firstEvents.add);
       final secondSubscription = notifier.expiredEvents.listen(
         secondEvents.add,
       );
@@ -45,24 +43,30 @@ void main() {
       expect(notifier.notifyExpired, returnsNormally);
     });
 
-    test('notifyExpired after dispose() is a silent no-op, never throws', () async {
-      await notifier.dispose();
+    test(
+      'notifyExpired after dispose() is a silent no-op, never throws',
+      () async {
+        await notifier.dispose();
 
-      expect(notifier.notifyExpired, returnsNormally);
-    });
+        expect(notifier.notifyExpired, returnsNormally);
+      },
+    );
 
-    test('dispose() closes the stream — a late listen gets no more events', () async {
-      await notifier.dispose();
+    test(
+      'dispose() closes the stream — a late listen gets no more events',
+      () async {
+        await notifier.dispose();
 
-      final events = <void>[];
-      final subscription = notifier.expiredEvents.listen(
-        events.add,
-        onDone: () {},
-      );
-      await Future<void>.delayed(Duration.zero);
+        final events = <void>[];
+        final subscription = notifier.expiredEvents.listen(
+          events.add,
+          onDone: () {},
+        );
+        await Future<void>.delayed(Duration.zero);
 
-      expect(events, isEmpty);
-      await subscription.cancel();
-    });
+        expect(events, isEmpty);
+        await subscription.cancel();
+      },
+    );
   });
 }

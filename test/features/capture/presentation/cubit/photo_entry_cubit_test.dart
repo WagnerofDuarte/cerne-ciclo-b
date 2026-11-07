@@ -29,7 +29,8 @@ class MockPhotoPicker extends Mock implements PhotoPicker {}
 
 class MockMediaRepository extends Mock implements MediaRepository {}
 
-class MockPendingEntryWriteTracker extends Mock implements PendingEntryWriteTracker {}
+class MockPendingEntryWriteTracker extends Mock
+    implements PendingEntryWriteTracker {}
 
 const _savedEntry = Entry(
   id: 'p1',
@@ -65,11 +66,7 @@ void main() {
     mockPhotoPicker = MockPhotoPicker();
     mockMediaRepository = MockMediaRepository();
     mockTracker = MockPendingEntryWriteTracker();
-    cubit = PhotoEntryCubit(
-      mockPhotoPicker,
-      mockMediaRepository,
-      mockTracker,
-    );
+    cubit = PhotoEntryCubit(mockPhotoPicker, mockMediaRepository, mockTracker);
   });
 
   tearDown(() async {
@@ -762,32 +759,28 @@ void main() {
       expect(cubit.state, isA<PhotoRecognized>());
     });
 
-    test(
-      'a photo picked just as the user left the tab (generation mismatch) '
-      'is deleted instead of leaking its temp file forever (Review '
-      'finding)',
-      () async {
-        final abandonedFile = File('${tempDir.path}/abandonada.jpg')
-          ..writeAsBytesSync([7, 8, 9]);
-        final pickCompleter = Completer<PickedPhoto?>();
-        when(
-          () => mockPhotoPicker.pickFromCamera(),
-        ).thenAnswer((_) => pickCompleter.future);
-        final firstPick = cubit.pickFromCamera();
+    test('a photo picked just as the user left the tab (generation mismatch) '
+        'is deleted instead of leaking its temp file forever (Review '
+        'finding)', () async {
+      final abandonedFile = File('${tempDir.path}/abandonada.jpg')
+        ..writeAsBytesSync([7, 8, 9]);
+      final pickCompleter = Completer<PickedPhoto?>();
+      when(() => mockPhotoPicker.pickFromCamera())
+          .thenAnswer((_) => pickCompleter.future);
+      final firstPick = cubit.pickFromCamera();
 
-        await cubit.cancel();
-        // The native picker call finally resolves with a real photo after
-        // the user already left the tab — must not leak this file.
-        pickCompleter.complete(
-          PickedPhoto(path: abandonedFile.path, mimeType: 'image/jpeg'),
-        );
-        await firstPick;
+      await cubit.cancel();
+      // The native picker call finally resolves with a real photo after
+      // the user already left the tab — must not leak this file.
+      pickCompleter.complete(
+        PickedPhoto(path: abandonedFile.path, mimeType: 'image/jpeg'),
+      );
+      await firstPick;
 
-        await _waitUntilDeleted(abandonedFile);
-        expect(abandonedFile.existsSync(), isFalse);
-        expect(cubit.state, isA<PhotoIdle>());
-      },
-    );
+      await _waitUntilDeleted(abandonedFile);
+      expect(abandonedFile.existsSync(), isFalse);
+      expect(cubit.state, isA<PhotoIdle>());
+    });
 
     group('discardPreserved', () {
       test(
@@ -1025,9 +1018,8 @@ void main() {
 
       // The re-pick is canceled (user dismisses the picker with no file
       // chosen) — the old abandoned file must still be gone.
-      when(
-        () => mockPhotoPicker.pickFromCamera(),
-      ).thenAnswer((_) async => null);
+      when(() => mockPhotoPicker.pickFromCamera())
+          .thenAnswer((_) async => null);
 
       await cubit.pickFromCamera();
       await _waitUntilDeleted(photoFile);

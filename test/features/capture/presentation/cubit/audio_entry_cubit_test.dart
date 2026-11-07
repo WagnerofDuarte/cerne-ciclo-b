@@ -28,7 +28,8 @@ class MockMicRecorder extends Mock implements MicRecorder {}
 
 class MockAudioTranscriber extends Mock implements AudioTranscriber {}
 
-class MockPendingEntryWriteTracker extends Mock implements PendingEntryWriteTracker {}
+class MockPendingEntryWriteTracker extends Mock
+    implements PendingEntryWriteTracker {}
 
 const _savedEntry = Entry(
   id: 'e1',
@@ -61,11 +62,7 @@ void main() {
     mockMicRecorder = MockMicRecorder();
     mockAudioTranscriber = MockAudioTranscriber();
     mockTracker = MockPendingEntryWriteTracker();
-    cubit = AudioEntryCubit(
-      mockMicRecorder,
-      mockAudioTranscriber,
-      mockTracker,
-    );
+    cubit = AudioEntryCubit(mockMicRecorder, mockAudioTranscriber, mockTracker);
   });
 
   tearDown(() => cubit.close());
@@ -74,97 +71,93 @@ void main() {
     expect(cubit.state, isA<AudioIdle>());
   });
 
-  test(
-    'amplitudeStream forwards MicRecorder.amplitudeStream verbatim — no '
-    'package:record type ever crosses the cubit boundary',
-    () {
-      final stream = Stream<double>.empty();
-      when(() => mockMicRecorder.amplitudeStream).thenAnswer((_) => stream);
+  test('amplitudeStream forwards MicRecorder.amplitudeStream verbatim — no '
+      'package:record type ever crosses the cubit boundary', () {
+    final stream = Stream<double>.empty();
+    when(() => mockMicRecorder.amplitudeStream).thenAnswer((_) => stream);
 
-      expect(cubit.amplitudeStream, same(stream));
-    },
-  );
+    expect(cubit.amplitudeStream, same(stream));
+  });
 
   group('startRecording()', () {
+    test('permission granted -> starts the recorder, emits AudioRecording '
+        '(elapsedSeconds: 0)', () async {
+      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+      when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+
+      await cubit.startRecording();
+
+      expect(
+        cubit.state,
+        isA<AudioRecording>().having(
+          (s) => s.elapsedSeconds,
+          'elapsedSeconds',
+          0,
+        ),
+      );
+      verify(() => mockMicRecorder.start()).called(1);
+    });
+
+    test('permission denied -> AudioError with no file ("no file to '
+        'preserve"), start() never called', () async {
+      when(() => mockMicRecorder.hasPermission())
+          .thenAnswer((_) async => false);
+
+      await cubit.startRecording();
+
+      expect(
+        cubit.state,
+        isA<AudioError>()
+            .having((s) => s.path, 'path', isNull)
+            .having((s) => s.durationSeconds, 'durationSeconds', isNull),
+      );
+      verifyNever(() => mockMicRecorder.start());
+    });
+
+    test('hasPermission() throwing (native PlatformException) -> AudioError, '
+        'never escapes uncaught (Review finding)', () async {
+      when(() => mockMicRecorder.hasPermission())
+          .thenThrow(Exception('native failure'));
+
+      await cubit.startRecording();
+
+      expect(
+        cubit.state,
+        isA<AudioError>().having((s) => s.path, 'path', isNull),
+      );
+      verifyNever(() => mockMicRecorder.start());
+    });
+
+    test('start() throwing (native PlatformException) -> AudioError, never '
+        'escapes uncaught, and releases the native recorder best-effort '
+        '(Review finding)', () async {
+      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+      when(() => mockMicRecorder.start())
+          .thenThrow(Exception('native failure'));
+      when(() => mockMicRecorder.cancel()).thenAnswer((_) async {});
+
+      await cubit.startRecording();
+
+      expect(
+        cubit.state,
+        isA<AudioError>().having((s) => s.path, 'path', isNull),
+      );
+      verify(() => mockMicRecorder.cancel()).called(1);
+    });
+
     test(
-      'permission granted -> starts the recorder, emits AudioRecording '
-      '(elapsedSeconds: 0)',
+      'ignored while already recording (no second overlapping start)',
       () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockMicRecorder.hasPermission())
+            .thenAnswer((_) async => true);
         when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+        await cubit.startRecording();
 
         await cubit.startRecording();
 
-        expect(
-          cubit.state,
-          isA<AudioRecording>().having((s) => s.elapsedSeconds, 'elapsedSeconds', 0),
-        );
         verify(() => mockMicRecorder.start()).called(1);
       },
     );
-
-    test(
-      'permission denied -> AudioError with no file ("no file to '
-      'preserve"), start() never called',
-      () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => false);
-
-        await cubit.startRecording();
-
-        expect(
-          cubit.state,
-          isA<AudioError>()
-              .having((s) => s.path, 'path', isNull)
-              .having((s) => s.durationSeconds, 'durationSeconds', isNull),
-        );
-        verifyNever(() => mockMicRecorder.start());
-      },
-    );
-
-    test(
-      'hasPermission() throwing (native PlatformException) -> AudioError, '
-      'never escapes uncaught (Review finding)',
-      () async {
-        when(() => mockMicRecorder.hasPermission()).thenThrow(Exception('native failure'));
-
-        await cubit.startRecording();
-
-        expect(
-          cubit.state,
-          isA<AudioError>().having((s) => s.path, 'path', isNull),
-        );
-        verifyNever(() => mockMicRecorder.start());
-      },
-    );
-
-    test(
-      'start() throwing (native PlatformException) -> AudioError, never '
-      'escapes uncaught, and releases the native recorder best-effort '
-      '(Review finding)',
-      () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-        when(() => mockMicRecorder.start()).thenThrow(Exception('native failure'));
-        when(() => mockMicRecorder.cancel()).thenAnswer((_) async {});
-
-        await cubit.startRecording();
-
-        expect(
-          cubit.state,
-          isA<AudioError>().having((s) => s.path, 'path', isNull),
-        );
-        verify(() => mockMicRecorder.cancel()).called(1);
-      },
-    );
-
-    test('ignored while already recording (no second overlapping start)', () async {
-      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-      when(() => mockMicRecorder.start()).thenAnswer((_) async {});
-      await cubit.startRecording();
-
-      await cubit.startRecording();
-
-      verify(() => mockMicRecorder.start()).called(1);
-    });
   });
 
   group('stopRecording()', () {
@@ -172,15 +165,16 @@ void main() {
       'happy path: stops the recorder, AudioProcessing then AudioTranscribed '
       'carrying the transcribed text',
       () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockMicRecorder.hasPermission())
+            .thenAnswer((_) async => true);
         when(() => mockMicRecorder.start()).thenAnswer((_) async {});
         await cubit.startRecording();
         when(() => mockMicRecorder.stop()).thenAnswer(
-          (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
+          (_) async =>
+              const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
         );
-        when(
-          () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
-        ).thenAnswer((_) async => 'Hoje foi um bom dia.');
+        when(() => mockAudioTranscriber.transcribe('/tmp/a.wav'))
+            .thenAnswer((_) async => 'Hoje foi um bom dia.');
 
         final emitted = <AudioCaptureState>[];
         final subscription = cubit.stream.listen(emitted.add);
@@ -197,31 +191,27 @@ void main() {
       },
     );
 
-    test(
-      'transcription fails (null) -> AudioError, file preserved (path/'
-      'duration still set), no auto-retry',
-      () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
-        await cubit.startRecording();
-        when(() => mockMicRecorder.stop()).thenAnswer(
-          (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
-        );
-        when(
-          () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
-        ).thenAnswer((_) async => null);
+    test('transcription fails (null) -> AudioError, file preserved (path/'
+        'duration still set), no auto-retry', () async {
+      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+      when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+      await cubit.startRecording();
+      when(() => mockMicRecorder.stop()).thenAnswer(
+        (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
+      );
+      when(() => mockAudioTranscriber.transcribe('/tmp/a.wav'))
+          .thenAnswer((_) async => null);
 
-        await cubit.stopRecording();
+      await cubit.stopRecording();
 
-        expect(
-          cubit.state,
-          isA<AudioError>()
-              .having((s) => s.path, 'path', '/tmp/a.wav')
-              .having((s) => s.durationSeconds, 'durationSeconds', 7)
-              .having((s) => s.text, 'text', isNull),
-        );
-      },
-    );
+      expect(
+        cubit.state,
+        isA<AudioError>()
+            .having((s) => s.path, 'path', '/tmp/a.wav')
+            .having((s) => s.durationSeconds, 'durationSeconds', 7)
+            .having((s) => s.text, 'text', isNull),
+      );
+    });
 
     test('ignored outside AudioRecording (e.g. a stray second tap)', () async {
       await cubit.stopRecording();
@@ -230,144 +220,127 @@ void main() {
       expect(cubit.state, isA<AudioIdle>());
     });
 
-    test(
-      'stop() throwing (native PlatformException) -> AudioError, never '
-      'escapes uncaught, and releases the native recorder best-effort '
-      '(Review finding)',
-      () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
-        await cubit.startRecording();
-        when(() => mockMicRecorder.stop()).thenThrow(Exception('native failure'));
-        when(() => mockMicRecorder.cancel()).thenAnswer((_) async {});
+    test('stop() throwing (native PlatformException) -> AudioError, never '
+        'escapes uncaught, and releases the native recorder best-effort '
+        '(Review finding)', () async {
+      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+      when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+      await cubit.startRecording();
+      when(() => mockMicRecorder.stop()).thenThrow(Exception('native failure'));
+      when(() => mockMicRecorder.cancel()).thenAnswer((_) async {});
 
-        await cubit.stopRecording();
+      await cubit.stopRecording();
 
-        expect(
-          cubit.state,
-          isA<AudioError>().having((s) => s.path, 'path', isNull),
-        );
-        verify(() => mockMicRecorder.cancel()).called(1);
-      },
-    );
+      expect(
+        cubit.state,
+        isA<AudioError>().having((s) => s.path, 'path', isNull),
+      );
+      verify(() => mockMicRecorder.cancel()).called(1);
+    });
 
-    test(
-      'a second concurrent call while the first is still awaiting stop() '
-      'is ignored (Review finding: without this, a fast double-tap on the '
-      'stop control before the UI rebuilds could fire _micRecorder.stop() '
-      'twice and let a stale/null second result clobber the first call\'s '
-      'genuine recording)',
-      () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
-        await cubit.startRecording();
-        final stopCompleter = Completer<MicRecording?>();
-        when(() => mockMicRecorder.stop()).thenAnswer((_) => stopCompleter.future);
-        when(
-          () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
-        ).thenAnswer((_) async => 'Hoje foi um bom dia.');
+    test('a second concurrent call while the first is still awaiting stop() '
+        'is ignored (Review finding: without this, a fast double-tap on the '
+        'stop control before the UI rebuilds could fire _micRecorder.stop() '
+        'twice and let a stale/null second result clobber the first call\'s '
+        'genuine recording)', () async {
+      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+      when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+      await cubit.startRecording();
+      final stopCompleter = Completer<MicRecording?>();
+      when(() => mockMicRecorder.stop())
+          .thenAnswer((_) => stopCompleter.future);
+      when(() => mockAudioTranscriber.transcribe('/tmp/a.wav'))
+          .thenAnswer((_) async => 'Hoje foi um bom dia.');
 
-        final firstStop = cubit.stopRecording();
-        final secondStop = cubit.stopRecording();
-        stopCompleter.complete(
-          const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
-        );
-        await firstStop;
-        await secondStop;
+      final firstStop = cubit.stopRecording();
+      final secondStop = cubit.stopRecording();
+      stopCompleter.complete(
+        const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
+      );
+      await firstStop;
+      await secondStop;
 
-        verify(() => mockMicRecorder.stop()).called(1);
-      },
-    );
+      verify(() => mockMicRecorder.stop()).called(1);
+    });
   });
 
   group('retry()', () {
-    test(
-      'no file (permission denied) -> re-requests permission via '
-      'startRecording, never re-transcribes',
-      () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => false);
-        await cubit.startRecording();
-        expect(cubit.state, isA<AudioError>());
+    test('no file (permission denied) -> re-requests permission via '
+        'startRecording, never re-transcribes', () async {
+      when(() => mockMicRecorder.hasPermission())
+          .thenAnswer((_) async => false);
+      await cubit.startRecording();
+      expect(cubit.state, isA<AudioError>());
 
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+      when(() => mockMicRecorder.start()).thenAnswer((_) async {});
 
-        await cubit.retry();
+      await cubit.retry();
 
-        expect(cubit.state, isA<AudioRecording>());
-        verify(() => mockMicRecorder.start()).called(1);
-        verifyNever(() => mockAudioTranscriber.transcribe(any()));
-      },
-    );
+      expect(cubit.state, isA<AudioRecording>());
+      verify(() => mockMicRecorder.start()).called(1);
+      verifyNever(() => mockAudioTranscriber.transcribe(any()));
+    });
 
-    test(
-      'a preserved file whose transcription failed -> re-transcribes the '
-      'same file in place, never re-records',
-      () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
-        await cubit.startRecording();
-        when(() => mockMicRecorder.stop()).thenAnswer(
-          (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
-        );
-        when(
-          () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
-        ).thenAnswer((_) async => null);
-        await cubit.stopRecording();
-        expect(cubit.state, isA<AudioError>());
+    test('a preserved file whose transcription failed -> re-transcribes the '
+        'same file in place, never re-records', () async {
+      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+      when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+      await cubit.startRecording();
+      when(() => mockMicRecorder.stop()).thenAnswer(
+        (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
+      );
+      when(() => mockAudioTranscriber.transcribe('/tmp/a.wav'))
+          .thenAnswer((_) async => null);
+      await cubit.stopRecording();
+      expect(cubit.state, isA<AudioError>());
 
-        when(
-          () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
-        ).thenAnswer((_) async => 'Transcrito na segunda tentativa.');
+      when(() => mockAudioTranscriber.transcribe('/tmp/a.wav'))
+          .thenAnswer((_) async => 'Transcrito na segunda tentativa.');
 
-        await cubit.retry();
+      await cubit.retry();
 
-        expect(
-          cubit.state,
-          isA<AudioTranscribed>().having(
-            (s) => s.text,
-            'text',
-            'Transcrito na segunda tentativa.',
-          ),
-        );
-        // Called exactly once — the original recording above, never a
-        // second time for this retry (it re-transcribes, not re-records).
-        verify(() => mockMicRecorder.start()).called(1);
-      },
-    );
+      expect(
+        cubit.state,
+        isA<AudioTranscribed>().having(
+          (s) => s.text,
+          'text',
+          'Transcrito na segunda tentativa.',
+        ),
+      );
+      // Called exactly once — the original recording above, never a
+      // second time for this retry (it re-transcribes, not re-records).
+      verify(() => mockMicRecorder.start()).called(1);
+    });
 
-    test(
-      'a no-op for a save failure (AudioError.text != null) — Salvar, not '
-      'retry, is that case\'s own recovery path',
-      () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
-        await cubit.startRecording();
-        when(() => mockMicRecorder.stop()).thenAnswer(
-          (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
-        );
-        when(
-          () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
-        ).thenAnswer((_) async => 'texto');
-        await cubit.stopRecording();
-        when(
-          () => mockTracker.create(
-            content: any(named: 'content'),
-            source: any(named: 'source'),
-            mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
-          ),
-        ).thenAnswer(
-          (_) async => left(const Failure.networkOffline(message: 'Sem conexão')),
-        );
-        await cubit.save();
-        final errorState = cubit.state as AudioError;
-        expect(errorState.text, isNotNull);
+    test('a no-op for a save failure (AudioError.text != null) — Salvar, not '
+        'retry, is that case\'s own recovery path', () async {
+      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+      when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+      await cubit.startRecording();
+      when(() => mockMicRecorder.stop()).thenAnswer(
+        (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
+      );
+      when(() => mockAudioTranscriber.transcribe('/tmp/a.wav'))
+          .thenAnswer((_) async => 'texto');
+      await cubit.stopRecording();
+      when(
+        () => mockTracker.create(
+          content: any(named: 'content'),
+          source: any(named: 'source'),
+          mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
+        ),
+      ).thenAnswer(
+        (_) async => left(const Failure.networkOffline(message: 'Sem conexão')),
+      );
+      await cubit.save();
+      final errorState = cubit.state as AudioError;
+      expect(errorState.text, isNotNull);
 
-        await cubit.retry();
+      await cubit.retry();
 
-        expect(cubit.state, same(errorState));
-      },
-    );
+      expect(cubit.state, same(errorState));
+    });
 
     test('a no-op outside AudioError', () async {
       await cubit.retry();
@@ -385,9 +358,8 @@ void main() {
       when(() => mockMicRecorder.stop()).thenAnswer(
         (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
       );
-      when(
-        () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
-      ).thenAnswer((_) async => 'texto original');
+      when(() => mockAudioTranscriber.transcribe('/tmp/a.wav'))
+          .thenAnswer((_) async => 'texto original');
       await cubit.stopRecording();
       return cubit.state as AudioTranscribed;
     }
@@ -397,7 +369,10 @@ void main() {
 
       cubit.updateText('texto editado');
 
-      expect(cubit.state, isA<AudioTranscribed>().having((s) => s.text, 'text', 'texto editado'));
+      expect(
+        cubit.state,
+        isA<AudioTranscribed>().having((s) => s.text, 'text', 'texto editado'),
+      );
     });
 
     test('ignored outside AudioTranscribed', () {
@@ -431,49 +406,49 @@ void main() {
   });
 
   group('cancel() — leaving the Áudio tab mid-recording/mid-processing', () {
-    test('while recording -> cancels the recorder, resets to AudioIdle', () async {
+    test(
+      'while recording -> cancels the recorder, resets to AudioIdle',
+      () async {
+        when(() => mockMicRecorder.hasPermission())
+            .thenAnswer((_) async => true);
+        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+        await cubit.startRecording();
+        when(() => mockMicRecorder.cancel()).thenAnswer((_) async {});
+
+        await cubit.cancel();
+
+        expect(cubit.state, isA<AudioIdle>());
+        verify(() => mockMicRecorder.cancel()).called(1);
+      },
+    );
+
+    test('while processing -> resets to AudioIdle without touching the '
+        'recorder (already stopped) and drops the eventual transcription '
+        'result instead of resurrecting the flow', () async {
       when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
       when(() => mockMicRecorder.start()).thenAnswer((_) async {});
       await cubit.startRecording();
-      when(() => mockMicRecorder.cancel()).thenAnswer((_) async {});
+      when(() => mockMicRecorder.stop()).thenAnswer(
+        (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
+      );
+      final transcribeCompleter = Completer<String?>();
+      when(() => mockAudioTranscriber.transcribe('/tmp/a.wav'))
+          .thenAnswer((_) => transcribeCompleter.future);
+
+      final stopFuture = cubit.stopRecording();
+      // Let `stopRecording()` reach `AudioProcessing` before leaving.
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state, isA<AudioProcessing>());
 
       await cubit.cancel();
+      expect(cubit.state, isA<AudioIdle>());
+
+      transcribeCompleter.complete('chegou tarde demais');
+      await stopFuture;
 
       expect(cubit.state, isA<AudioIdle>());
-      verify(() => mockMicRecorder.cancel()).called(1);
+      verifyNever(() => mockMicRecorder.cancel());
     });
-
-    test(
-      'while processing -> resets to AudioIdle without touching the '
-      'recorder (already stopped) and drops the eventual transcription '
-      'result instead of resurrecting the flow',
-      () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
-        await cubit.startRecording();
-        when(() => mockMicRecorder.stop()).thenAnswer(
-          (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
-        );
-        final transcribeCompleter = Completer<String?>();
-        when(
-          () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
-        ).thenAnswer((_) => transcribeCompleter.future);
-
-        final stopFuture = cubit.stopRecording();
-        // Let `stopRecording()` reach `AudioProcessing` before leaving.
-        await Future<void>.delayed(Duration.zero);
-        expect(cubit.state, isA<AudioProcessing>());
-
-        await cubit.cancel();
-        expect(cubit.state, isA<AudioIdle>());
-
-        transcribeCompleter.complete('chegou tarde demais');
-        await stopFuture;
-
-        expect(cubit.state, isA<AudioIdle>());
-        verifyNever(() => mockMicRecorder.cancel());
-      },
-    );
 
     test('a no-op outside AudioRecording/AudioProcessing', () async {
       await cubit.cancel();
@@ -482,101 +457,149 @@ void main() {
       verifyNever(() => mockMicRecorder.cancel());
     });
 
-    test(
-      'while recording, MicRecorder.cancel() throwing never escapes '
-      'uncaught — best-effort via _safeCancelRecorder (Review finding: '
-      'mirrors the existing hasPermission()/start()/stop() throw-tests, '
-      'extended to this call site)',
-      () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+    test('while recording, MicRecorder.cancel() throwing never escapes '
+        'uncaught — best-effort via _safeCancelRecorder (Review finding: '
+        'mirrors the existing hasPermission()/start()/stop() throw-tests, '
+        'extended to this call site)', () async {
+      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+      when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+      await cubit.startRecording();
+      when(() => mockMicRecorder.cancel())
+          .thenThrow(Exception('native failure'));
+
+      await cubit.cancel();
+
+      expect(cubit.state, isA<AudioIdle>());
+      verify(() => mockMicRecorder.cancel()).called(1);
+    });
+
+    test('startRecording()\'s own abandon-on-generation-mismatch branch '
+        'never lets a thrown MicRecorder.cancel() escape uncaught either '
+        '(Review finding: the same _safeCancelRecorder guard backs both '
+        'call sites)', () async {
+      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+      final startCompleter = Completer<void>();
+      when(() => mockMicRecorder.start())
+          .thenAnswer((_) => startCompleter.future);
+      when(() => mockMicRecorder.cancel())
+          .thenThrow(Exception('native failure'));
+
+      final startFuture = cubit.startRecording();
+      // Let startRecording() actually get past the synchronous
+      // hasPermission() resolution and reach the in-flight
+      // _micRecorder.start() await (Review finding: without this, the
+      // immediately-following cancel() below runs synchronously before
+      // that resolution is ever processed, so startRecording() bails
+      // out at its earlier post-hasPermission() generation check
+      // instead — never reaching start() at all, silently testing the
+      // wrong branch).
+      await Future<void>.delayed(Duration.zero);
+      // Tab switch away while start() is still in flight.
+      await cubit.cancel();
+      startCompleter.complete();
+      await startFuture;
+      await Future<void>.delayed(Duration.zero);
+
+      expect(cubit.state, isA<AudioIdle>());
+      verify(() => mockMicRecorder.cancel()).called(1);
+    });
+
+    test('cancel() frees a permanently-stuck _stopping after a hung stop() so '
+        'a later record/stop cycle still works (Review finding: without the '
+        '_stopping reset in cancel(), a stop() that never resolves left '
+        'stopRecording() a permanent no-op for the rest of this cubit\'s '
+        'life)', () async {
+      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+      when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+      await cubit.startRecording();
+      final hungStopCompleter = Completer<MicRecording?>();
+      when(() => mockMicRecorder.stop())
+          .thenAnswer((_) => hungStopCompleter.future);
+      when(() => mockMicRecorder.cancel()).thenAnswer((_) async {});
+
+      // stopRecording() never resolves — simulates a hung native stop().
+      unawaited(cubit.stopRecording());
+      await Future<void>.delayed(Duration.zero);
+
+      await cubit.cancel();
+      expect(cubit.state, isA<AudioIdle>());
+
+      // A fresh record/stop cycle must not stay blocked by the `_stopping`
+      // flag the still-hung call above would otherwise have left stuck.
+      await cubit.startRecording();
+      when(() => mockMicRecorder.stop()).thenAnswer(
+        (_) async => const MicRecording(path: '/tmp/b.wav', durationSeconds: 3),
+      );
+      when(() => mockAudioTranscriber.transcribe('/tmp/b.wav'))
+          .thenAnswer((_) async => 'depois da gravação pendurada');
+
+      await cubit.stopRecording();
+
+      expect(cubit.state, isA<AudioTranscribed>());
+    });
+
+    test('while processing deletes the real abandoned recording file, not '
+        'just a fake path (Review finding: the existing coverage above used '
+        "a fake '/tmp/a.wav' path, which silently no-ops the delete and "
+        "never actually observes it happening)", () async {
+      final tempDir = Directory.systemTemp.createTempSync(
+        'cerne_test_audio_cubit_',
+      );
+      addTearDown(() {
+        if (tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+      });
+      final file = File('${tempDir.path}/a.wav')..createSync();
+      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+      when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+      await cubit.startRecording();
+      when(() => mockMicRecorder.stop()).thenAnswer(
+        (_) async => MicRecording(path: file.path, durationSeconds: 7),
+      );
+      final transcribeCompleter = Completer<String?>();
+      when(() => mockAudioTranscriber.transcribe(file.path))
+          .thenAnswer((_) => transcribeCompleter.future);
+
+      final stopFuture = cubit.stopRecording();
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state, isA<AudioProcessing>());
+      expect(file.existsSync(), isTrue);
+
+      await cubit.cancel();
+      await _waitUntilDeleted(file);
+
+      expect(file.existsSync(), isFalse);
+
+      transcribeCompleter.complete('chegou tarde demais');
+      await stopFuture;
+    });
+
+    group('discardPreserved', () {
+      test('false (default) — a no-op for AudioTranscribed, preserving the '
+          'result for a later tab switch back', () async {
+        when(() => mockMicRecorder.hasPermission())
+            .thenAnswer((_) async => true);
         when(() => mockMicRecorder.start()).thenAnswer((_) async {});
-        await cubit.startRecording();
-        when(() => mockMicRecorder.cancel()).thenThrow(Exception('native failure'));
-
-        await cubit.cancel();
-
-        expect(cubit.state, isA<AudioIdle>());
-        verify(() => mockMicRecorder.cancel()).called(1);
-      },
-    );
-
-    test(
-      'startRecording()\'s own abandon-on-generation-mismatch branch '
-      'never lets a thrown MicRecorder.cancel() escape uncaught either '
-      '(Review finding: the same _safeCancelRecorder guard backs both '
-      'call sites)',
-      () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-        final startCompleter = Completer<void>();
-        when(() => mockMicRecorder.start()).thenAnswer((_) => startCompleter.future);
-        when(() => mockMicRecorder.cancel()).thenThrow(Exception('native failure'));
-
-        final startFuture = cubit.startRecording();
-        // Let startRecording() actually get past the synchronous
-        // hasPermission() resolution and reach the in-flight
-        // _micRecorder.start() await (Review finding: without this, the
-        // immediately-following cancel() below runs synchronously before
-        // that resolution is ever processed, so startRecording() bails
-        // out at its earlier post-hasPermission() generation check
-        // instead — never reaching start() at all, silently testing the
-        // wrong branch).
-        await Future<void>.delayed(Duration.zero);
-        // Tab switch away while start() is still in flight.
-        await cubit.cancel();
-        startCompleter.complete();
-        await startFuture;
-        await Future<void>.delayed(Duration.zero);
-
-        expect(cubit.state, isA<AudioIdle>());
-        verify(() => mockMicRecorder.cancel()).called(1);
-      },
-    );
-
-    test(
-      'cancel() frees a permanently-stuck _stopping after a hung stop() so '
-      'a later record/stop cycle still works (Review finding: without the '
-      '_stopping reset in cancel(), a stop() that never resolves left '
-      'stopRecording() a permanent no-op for the rest of this cubit\'s '
-      'life)',
-      () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
-        await cubit.startRecording();
-        final hungStopCompleter = Completer<MicRecording?>();
-        when(
-          () => mockMicRecorder.stop(),
-        ).thenAnswer((_) => hungStopCompleter.future);
-        when(() => mockMicRecorder.cancel()).thenAnswer((_) async {});
-
-        // stopRecording() never resolves — simulates a hung native stop().
-        unawaited(cubit.stopRecording());
-        await Future<void>.delayed(Duration.zero);
-
-        await cubit.cancel();
-        expect(cubit.state, isA<AudioIdle>());
-
-        // A fresh record/stop cycle must not stay blocked by the `_stopping`
-        // flag the still-hung call above would otherwise have left stuck.
         await cubit.startRecording();
         when(() => mockMicRecorder.stop()).thenAnswer(
-          (_) async => const MicRecording(path: '/tmp/b.wav', durationSeconds: 3),
+          (_) async =>
+              const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
         );
-        when(
-          () => mockAudioTranscriber.transcribe('/tmp/b.wav'),
-        ).thenAnswer((_) async => 'depois da gravação pendurada');
-
+        when(() => mockAudioTranscriber.transcribe('/tmp/a.wav'))
+            .thenAnswer((_) async => 'texto');
         await cubit.stopRecording();
+        final transcribed = cubit.state;
 
-        expect(cubit.state, isA<AudioTranscribed>());
-      },
-    );
+        await cubit.cancel();
 
-    test(
-      'while processing deletes the real abandoned recording file, not '
-      'just a fake path (Review finding: the existing coverage above used '
-      "a fake '/tmp/a.wav' path, which silently no-ops the delete and "
-      "never actually observes it happening)",
-      () async {
+        expect(cubit.state, same(transcribed));
+      });
+
+      test('true — deletes the preserved file for AudioTranscribed (Review '
+          "finding: InsertionModal.show()'s full-modal-dismiss path, which "
+          'never switches back to the tab, so the file would otherwise leak '
+          'forever once close() follows)', () async {
         final tempDir = Directory.systemTemp.createTempSync(
           'cerne_test_audio_cubit_',
         );
@@ -586,177 +609,102 @@ void main() {
           }
         });
         final file = File('${tempDir.path}/a.wav')..createSync();
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+        when(() => mockMicRecorder.hasPermission())
+            .thenAnswer((_) async => true);
         when(() => mockMicRecorder.start()).thenAnswer((_) async {});
         await cubit.startRecording();
         when(() => mockMicRecorder.stop()).thenAnswer(
           (_) async => MicRecording(path: file.path, durationSeconds: 7),
         );
-        final transcribeCompleter = Completer<String?>();
-        when(
-          () => mockAudioTranscriber.transcribe(file.path),
-        ).thenAnswer((_) => transcribeCompleter.future);
-
-        final stopFuture = cubit.stopRecording();
-        await Future<void>.delayed(Duration.zero);
-        expect(cubit.state, isA<AudioProcessing>());
+        when(() => mockAudioTranscriber.transcribe(file.path))
+            .thenAnswer((_) async => 'texto');
+        await cubit.stopRecording();
         expect(file.existsSync(), isTrue);
 
-        await cubit.cancel();
+        await cubit.cancel(discardPreserved: true);
         await _waitUntilDeleted(file);
 
         expect(file.existsSync(), isFalse);
+      });
 
-        transcribeCompleter.complete('chegou tarde demais');
-        await stopFuture;
-      },
-    );
+      test('true — also deletes the preserved file for a file-carrying '
+          'AudioError (e.g. a failed transcription awaiting retry)', () async {
+        final tempDir = Directory.systemTemp.createTempSync(
+          'cerne_test_audio_cubit_',
+        );
+        addTearDown(() {
+          if (tempDir.existsSync()) {
+            tempDir.deleteSync(recursive: true);
+          }
+        });
+        final file = File('${tempDir.path}/a.wav')..createSync();
+        when(() => mockMicRecorder.hasPermission())
+            .thenAnswer((_) async => true);
+        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+        await cubit.startRecording();
+        when(() => mockMicRecorder.stop()).thenAnswer(
+          (_) async => MicRecording(path: file.path, durationSeconds: 7),
+        );
+        when(() => mockAudioTranscriber.transcribe(file.path))
+            .thenAnswer((_) async => null);
+        await cubit.stopRecording();
+        expect(cubit.state, isA<AudioError>());
+        expect(file.existsSync(), isTrue);
 
-    group('discardPreserved', () {
-      test(
-        'false (default) — a no-op for AudioTranscribed, preserving the '
-        'result for a later tab switch back',
-        () async {
-          when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-          when(() => mockMicRecorder.start()).thenAnswer((_) async {});
-          await cubit.startRecording();
-          when(() => mockMicRecorder.stop()).thenAnswer(
-            (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
-          );
-          when(
-            () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
-          ).thenAnswer((_) async => 'texto');
-          await cubit.stopRecording();
-          final transcribed = cubit.state;
+        await cubit.cancel(discardPreserved: true);
+        await _waitUntilDeleted(file);
 
-          await cubit.cancel();
+        expect(file.existsSync(), isFalse);
+      });
 
-          expect(cubit.state, same(transcribed));
-        },
-      );
+      test('true — a no-op for a permission-denied AudioError (no file to '
+          'delete)', () async {
+        when(() => mockMicRecorder.hasPermission())
+            .thenAnswer((_) async => false);
+        await cubit.startRecording();
+        expect(cubit.state, isA<AudioError>());
 
-      test(
-        'true — deletes the preserved file for AudioTranscribed (Review '
-        "finding: InsertionModal.show()'s full-modal-dismiss path, which "
-        'never switches back to the tab, so the file would otherwise leak '
-        'forever once close() follows)',
-        () async {
-          final tempDir = Directory.systemTemp.createTempSync(
-            'cerne_test_audio_cubit_',
-          );
-          addTearDown(() {
-            if (tempDir.existsSync()) {
-              tempDir.deleteSync(recursive: true);
-            }
-          });
-          final file = File('${tempDir.path}/a.wav')..createSync();
-          when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-          when(() => mockMicRecorder.start()).thenAnswer((_) async {});
-          await cubit.startRecording();
-          when(() => mockMicRecorder.stop()).thenAnswer(
-            (_) async => MicRecording(path: file.path, durationSeconds: 7),
-          );
-          when(
-            () => mockAudioTranscriber.transcribe(file.path),
-          ).thenAnswer((_) async => 'texto');
-          await cubit.stopRecording();
-          expect(file.existsSync(), isTrue);
+        await cubit.cancel(discardPreserved: true);
 
-          await cubit.cancel(discardPreserved: true);
-          await _waitUntilDeleted(file);
-
-          expect(file.existsSync(), isFalse);
-        },
-      );
-
-      test(
-        'true — also deletes the preserved file for a file-carrying '
-        'AudioError (e.g. a failed transcription awaiting retry)',
-        () async {
-          final tempDir = Directory.systemTemp.createTempSync(
-            'cerne_test_audio_cubit_',
-          );
-          addTearDown(() {
-            if (tempDir.existsSync()) {
-              tempDir.deleteSync(recursive: true);
-            }
-          });
-          final file = File('${tempDir.path}/a.wav')..createSync();
-          when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-          when(() => mockMicRecorder.start()).thenAnswer((_) async {});
-          await cubit.startRecording();
-          when(() => mockMicRecorder.stop()).thenAnswer(
-            (_) async => MicRecording(path: file.path, durationSeconds: 7),
-          );
-          when(
-            () => mockAudioTranscriber.transcribe(file.path),
-          ).thenAnswer((_) async => null);
-          await cubit.stopRecording();
-          expect(cubit.state, isA<AudioError>());
-          expect(file.existsSync(), isTrue);
-
-          await cubit.cancel(discardPreserved: true);
-          await _waitUntilDeleted(file);
-
-          expect(file.existsSync(), isFalse);
-        },
-      );
-
-      test(
-        'true — a no-op for a permission-denied AudioError (no file to '
-        'delete)',
-        () async {
-          when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => false);
-          await cubit.startRecording();
-          expect(cubit.state, isA<AudioError>());
-
-          await cubit.cancel(discardPreserved: true);
-
-          expect(cubit.state, isA<AudioError>());
-        },
-      );
+        expect(cubit.state, isA<AudioError>());
+      });
     });
   });
 
   group('cancel() racing retry()', () {
-    test(
-      'a cancel() mid-retry-re-transcription resets to AudioIdle and '
-      'drops the eventual stale result instead of resurrecting the flow '
-      '(Review finding: retry() re-enters the shared _transcribe() '
-      "continuation through a different call path than stopRecording(), "
-      'and never bumps _generation itself — relying entirely on '
-      "_transcribe()'s own state-based guard)",
-      () async {
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
-        await cubit.startRecording();
-        when(() => mockMicRecorder.stop()).thenAnswer(
-          (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
-        );
-        when(
-          () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
-        ).thenAnswer((_) async => null);
-        await cubit.stopRecording();
-        expect(cubit.state, isA<AudioError>());
+    test('a cancel() mid-retry-re-transcription resets to AudioIdle and '
+        'drops the eventual stale result instead of resurrecting the flow '
+        '(Review finding: retry() re-enters the shared _transcribe() '
+        "continuation through a different call path than stopRecording(), "
+        'and never bumps _generation itself — relying entirely on '
+        "_transcribe()'s own state-based guard)", () async {
+      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+      when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+      await cubit.startRecording();
+      when(() => mockMicRecorder.stop()).thenAnswer(
+        (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
+      );
+      when(() => mockAudioTranscriber.transcribe('/tmp/a.wav'))
+          .thenAnswer((_) async => null);
+      await cubit.stopRecording();
+      expect(cubit.state, isA<AudioError>());
 
-        final retryCompleter = Completer<String?>();
-        when(
-          () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
-        ).thenAnswer((_) => retryCompleter.future);
+      final retryCompleter = Completer<String?>();
+      when(() => mockAudioTranscriber.transcribe('/tmp/a.wav'))
+          .thenAnswer((_) => retryCompleter.future);
 
-        final retryFuture = cubit.retry();
-        await Future<void>.delayed(Duration.zero);
-        expect(cubit.state, isA<AudioProcessing>());
+      final retryFuture = cubit.retry();
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state, isA<AudioProcessing>());
 
-        await cubit.cancel();
-        expect(cubit.state, isA<AudioIdle>());
+      await cubit.cancel();
+      expect(cubit.state, isA<AudioIdle>());
 
-        retryCompleter.complete('chegou tarde demais, pós-cancelamento');
-        await retryFuture;
+      retryCompleter.complete('chegou tarde demais, pós-cancelamento');
+      await retryFuture;
 
-        expect(cubit.state, isA<AudioIdle>());
-      },
-    );
+      expect(cubit.state, isA<AudioIdle>());
+    });
   });
 
   group('save()', () {
@@ -767,75 +715,65 @@ void main() {
       when(() => mockMicRecorder.stop()).thenAnswer(
         (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
       );
-      when(
-        () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
-      ).thenAnswer((_) async => 'Hoje foi um bom dia.');
+      when(() => mockAudioTranscriber.transcribe('/tmp/a.wav'))
+          .thenAnswer((_) async => 'Hoje foi um bom dia.');
       await cubit.stopRecording();
     }
 
-    test(
-      'happy path -> saving then AudioSaved, source always audio, '
-      'mediaDurationSeconds carried through',
-      () async {
-        await reachTranscribed();
-        when(
-          () => mockTracker.create(
-            content: 'Hoje foi um bom dia.',
-            source: EntrySource.audio,
-            mediaDurationSeconds: 7,
-          ),
-        ).thenAnswer((_) async => right(_savedEntry));
+    test('happy path -> saving then AudioSaved, source always audio, '
+        'mediaDurationSeconds carried through', () async {
+      await reachTranscribed();
+      when(
+        () => mockTracker.create(
+          content: 'Hoje foi um bom dia.',
+          source: EntrySource.audio,
+          mediaDurationSeconds: 7,
+        ),
+      ).thenAnswer((_) async => right(_savedEntry));
 
-        final emitted = <AudioCaptureState>[];
-        final subscription = cubit.stream.listen(emitted.add);
+      final emitted = <AudioCaptureState>[];
+      final subscription = cubit.stream.listen(emitted.add);
 
-        await cubit.save();
-        await Future<void>.delayed(Duration.zero);
-        await subscription.cancel();
+      await cubit.save();
+      await Future<void>.delayed(Duration.zero);
+      await subscription.cancel();
 
-        expect(
-          emitted,
-          [
-            isA<AudioTranscribed>().having((s) => s.saving, 'saving', true),
-            isA<AudioSaved>(),
-          ],
-        );
-        verify(
-          () => mockTracker.create(
-            content: 'Hoje foi um bom dia.',
-            source: EntrySource.audio,
-            mediaDurationSeconds: 7,
-          ),
-        ).called(1);
-      },
-    );
+      expect(emitted, [
+        isA<AudioTranscribed>().having((s) => s.saving, 'saving', true),
+        isA<AudioSaved>(),
+      ]);
+      verify(
+        () => mockTracker.create(
+          content: 'Hoje foi um bom dia.',
+          source: EntrySource.audio,
+          mediaDurationSeconds: 7,
+        ),
+      ).called(1);
+    });
 
-    test(
-      'failure (incl. offline) -> AudioError carrying Failure.message, '
-      'text/file preserved, Salvar re-enabled (no auto-retry)',
-      () async {
-        await reachTranscribed();
-        when(
-          () => mockTracker.create(
-            content: any(named: 'content'),
-            source: any(named: 'source'),
-            mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
-          ),
-        ).thenAnswer(
-          (_) async => left(const Failure.networkOffline(message: 'Sem conexão')),
-        );
+    test('failure (incl. offline) -> AudioError carrying Failure.message, '
+        'text/file preserved, Salvar re-enabled (no auto-retry)', () async {
+      await reachTranscribed();
+      when(
+        () => mockTracker.create(
+          content: any(named: 'content'),
+          source: any(named: 'source'),
+          mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
+        ),
+      ).thenAnswer(
+        (_) async => left(const Failure.networkOffline(message: 'Sem conexão')),
+      );
 
-        await cubit.save();
+      await cubit.save();
 
-        expect(
-          cubit.state,
-          isA<AudioError>()
-              .having((s) => s.message, 'message', 'Sem conexão')
-              .having((s) => s.text, 'text', 'Hoje foi um bom dia.')
-              .having((s) => s.path, 'path', '/tmp/a.wav'),
-        );
-      },
-    );
+      expect(
+        cubit.state,
+        isA<AudioError>()
+            .having((s) => s.message, 'message', 'Sem conexão')
+            .having((s) => s.text, 'text', 'Hoje foi um bom dia.')
+            .having((s) => s.path, 'path', '/tmp/a.wav'),
+      );
+    });
 
     test('blank/whitespace-only text never calls create()', () async {
       await reachTranscribed();
@@ -865,46 +803,42 @@ void main() {
       expect(cubit.state, isA<AudioIdle>());
     });
 
-    test(
-      'happy path deletes the real temp recording file after a '
-      'successful save (Review finding: the existing happy-path test '
-      "above uses a fake '/tmp/a.wav' path, which silently no-ops the "
-      'delete and never actually observes it happening)',
-      () async {
-        final tempDir = Directory.systemTemp.createTempSync(
-          'cerne_test_audio_cubit_',
-        );
-        addTearDown(() {
-          if (tempDir.existsSync()) {
-            tempDir.deleteSync(recursive: true);
-          }
-        });
-        final file = File('${tempDir.path}/a.wav')..createSync();
-        when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
-        when(() => mockMicRecorder.start()).thenAnswer((_) async {});
-        await cubit.startRecording();
-        when(() => mockMicRecorder.stop()).thenAnswer(
-          (_) async => MicRecording(path: file.path, durationSeconds: 7),
-        );
-        when(
-          () => mockAudioTranscriber.transcribe(file.path),
-        ).thenAnswer((_) async => 'Hoje foi um bom dia.');
-        await cubit.stopRecording();
-        when(
-          () => mockTracker.create(
-            content: any(named: 'content'),
-            source: any(named: 'source'),
-            mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
-          ),
-        ).thenAnswer((_) async => right(_savedEntry));
-        expect(file.existsSync(), isTrue);
+    test('happy path deletes the real temp recording file after a '
+        'successful save (Review finding: the existing happy-path test '
+        "above uses a fake '/tmp/a.wav' path, which silently no-ops the "
+        'delete and never actually observes it happening)', () async {
+      final tempDir = Directory.systemTemp.createTempSync(
+        'cerne_test_audio_cubit_',
+      );
+      addTearDown(() {
+        if (tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+      });
+      final file = File('${tempDir.path}/a.wav')..createSync();
+      when(() => mockMicRecorder.hasPermission()).thenAnswer((_) async => true);
+      when(() => mockMicRecorder.start()).thenAnswer((_) async {});
+      await cubit.startRecording();
+      when(() => mockMicRecorder.stop()).thenAnswer(
+        (_) async => MicRecording(path: file.path, durationSeconds: 7),
+      );
+      when(() => mockAudioTranscriber.transcribe(file.path))
+          .thenAnswer((_) async => 'Hoje foi um bom dia.');
+      await cubit.stopRecording();
+      when(
+        () => mockTracker.create(
+          content: any(named: 'content'),
+          source: any(named: 'source'),
+          mediaDurationSeconds: any(named: 'mediaDurationSeconds'),
+        ),
+      ).thenAnswer((_) async => right(_savedEntry));
+      expect(file.existsSync(), isTrue);
 
-        await cubit.save();
-        await _waitUntilDeleted(file);
+      await cubit.save();
+      await _waitUntilDeleted(file);
 
-        expect(file.existsSync(), isFalse);
-      },
-    );
+      expect(file.existsSync(), isFalse);
+    });
 
     test('ignored while already saving (no double-submit)', () async {
       await reachTranscribed();
@@ -942,9 +876,8 @@ void main() {
       when(() => mockMicRecorder.stop()).thenAnswer(
         (_) async => const MicRecording(path: '/tmp/a.wav', durationSeconds: 7),
       );
-      when(
-        () => mockAudioTranscriber.transcribe('/tmp/a.wav'),
-      ).thenAnswer((_) async => 'Hoje foi um bom dia.');
+      when(() => mockAudioTranscriber.transcribe('/tmp/a.wav'))
+          .thenAnswer((_) async => 'Hoje foi um bom dia.');
       await cubit.stopRecording();
       final completer = Completer<Either<Failure, Entry>>();
       when(

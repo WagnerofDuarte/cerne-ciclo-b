@@ -66,7 +66,10 @@ class ChatRemoteDataSource {
   /// title") — the contract's own `title` field is optional
   /// (`openapi.yaml`), an empty body is valid.
   Future<Either<Failure, ChatSessionDto>> createSession() async {
-    final result = await _apiClient.post('chat-sessions-create', data: const {});
+    final result = await _apiClient.post(
+      'chat-sessions-create',
+      data: const {},
+    );
     return result.flatMap((json) {
       try {
         final data = json['data'] as Map<String, dynamic>;
@@ -308,9 +311,7 @@ class ChatRemoteDataSource {
           return right(ChatTokenEvent(json['delta'] as String));
         } catch (error) {
           return left(
-            Failure.malformedResponse(
-              message: 'malformed token event: $error',
-            ),
+            Failure.malformedResponse(message: 'malformed token event: $error'),
           );
         }
       case 'done':
@@ -328,9 +329,7 @@ class ChatRemoteDataSource {
           );
         } catch (error) {
           return left(
-            Failure.malformedResponse(
-              message: 'malformed error event: $error',
-            ),
+            Failure.malformedResponse(message: 'malformed error event: $error'),
           );
         }
       default:

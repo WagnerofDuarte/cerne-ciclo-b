@@ -117,7 +117,10 @@ void main() {
 
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureStorageChannel, handleSecureStorageCall);
+        .setMockMethodCallHandler(
+          secureStorageChannel,
+          handleSecureStorageCall,
+        );
     fakePathProvider = FakePathProviderPlatform();
     PathProviderPlatform.instance = fakePathProvider;
 
@@ -142,84 +145,72 @@ void main() {
     await fakePathProvider.cleanUp();
   });
 
-  test(
-    'happy path: getById() fires a genuine GET to entries-get/{id} with '
-    'the right URL/headers, resolves Right, and persists the entry to the '
-    'real entries Hive box',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': _entryJson(
-          id: 'entry-1',
-          content: 'Primeiro registro do dia.',
-          source: 'manual',
-          occurredAt: '2026-01-02T10:00:00Z',
-        ),
-      });
+  test('happy path: getById() fires a genuine GET to entries-get/{id} with '
+      'the right URL/headers, resolves Right, and persists the entry to the '
+      'real entries Hive box', () async {
+    adapter.queueJsonResponse(200, {
+      'data': _entryJson(
+        id: 'entry-1',
+        content: 'Primeiro registro do dia.',
+        source: 'manual',
+        occurredAt: '2026-01-02T10:00:00Z',
+      ),
+    });
 
-      final result = await sl<EntriesRepository>().getById('entry-1');
+    final result = await sl<EntriesRepository>().getById('entry-1');
 
-      expect(result.isRight(), isTrue);
-      result.match((_) => fail('expected Right'), (entry) {
-        expect(entry.id, 'entry-1');
-        expect(entry.content, 'Primeiro registro do dia.');
-      });
+    expect(result.isRight(), isTrue);
+    result.match((_) => fail('expected Right'), (entry) {
+      expect(entry.id, 'entry-1');
+      expect(entry.content, 'Primeiro registro do dia.');
+    });
 
-      expect(adapter.requests, hasLength(1));
-      final sent = adapter.requests.single;
-      expect(sent.path, sl<UrlBuilder>().build('entries-get', ['entry-1']));
-      expect(sent.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
-      expect(
-        sent.headers['Authorization'],
-        'Bearer e2e-test-access-token',
-      );
+    expect(adapter.requests, hasLength(1));
+    final sent = adapter.requests.single;
+    expect(sent.path, sl<UrlBuilder>().build('entries-get', ['entry-1']));
+    expect(sent.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
+    expect(sent.headers['Authorization'], 'Bearer e2e-test-access-token');
 
-      final box = sl<Box<Map>>();
-      expect(box.get('entry-1')!['content'], 'Primeiro registro do dia.');
-    },
-  );
+    final box = sl<Box<Map>>();
+    expect(box.get('entry-1')!['content'], 'Primeiro registro do dia.');
+  });
 
-  test(
-    'offline fallback: getById() genuinely retries a NETWORK_OFFLINE '
-    'entries-get call maxRetries times over the real RetryInterceptor '
-    'before falling back to the real cached entry in the Hive box',
-    () async {
-      final box = sl<Box<Map>>();
-      await box.put(
-        'entry-1',
-        _entryJson(
-          id: 'entry-1',
-          content: 'Versão em cache.',
-          source: 'manual',
-          occurredAt: '2026-01-01T00:00:00Z',
-        ),
-      );
+  test('offline fallback: getById() genuinely retries a NETWORK_OFFLINE '
+      'entries-get call maxRetries times over the real RetryInterceptor '
+      'before falling back to the real cached entry in the Hive box', () async {
+    final box = sl<Box<Map>>();
+    await box.put(
+      'entry-1',
+      _entryJson(
+        id: 'entry-1',
+        content: 'Versão em cache.',
+        source: 'manual',
+        occurredAt: '2026-01-01T00:00:00Z',
+      ),
+    );
 
-      for (var i = 0; i <= RetryInterceptor.maxRetries; i++) {
-        adapter.queueErrorResponse('NETWORK_OFFLINE', 'Sem conexão');
-      }
+    for (var i = 0; i <= RetryInterceptor.maxRetries; i++) {
+      adapter.queueErrorResponse('NETWORK_OFFLINE', 'Sem conexão');
+    }
 
-      final result = await sl<EntriesRepository>().getById('entry-1');
+    final result = await sl<EntriesRepository>().getById('entry-1');
 
-      expect(result.isRight(), isTrue);
-      result.match(
-        (_) => fail('expected Right'),
-        (entry) => expect(entry.content, 'Versão em cache.'),
-      );
-      expect(adapter.requests, hasLength(1 + RetryInterceptor.maxRetries));
-    },
-  );
+    expect(result.isRight(), isTrue);
+    result.match(
+      (_) => fail('expected Right'),
+      (entry) => expect(entry.content, 'Versão em cache.'),
+    );
+    expect(adapter.requests, hasLength(1 + RetryInterceptor.maxRetries));
+  });
 
-  test(
-    'not-found: a genuine NOT_FOUND response propagates as Left with no '
-    'cache fallback, no synthesized state — the exact Failure the backend '
-    'produced',
-    () async {
-      adapter.queueErrorResponse('NOT_FOUND', 'Registro não encontrado');
+  test('not-found: a genuine NOT_FOUND response propagates as Left with no '
+      'cache fallback, no synthesized state — the exact Failure the backend '
+      'produced', () async {
+    adapter.queueErrorResponse('NOT_FOUND', 'Registro não encontrado');
 
-      final result = await sl<EntriesRepository>().getById('unknown-id');
+    final result = await sl<EntriesRepository>().getById('unknown-id');
 
-      expect(result.isLeft(), isTrue);
-      expect(adapter.requests, hasLength(1));
-    },
-  );
+    expect(result.isLeft(), isTrue);
+    expect(adapter.requests, hasLength(1));
+  });
 }

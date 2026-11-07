@@ -153,9 +153,7 @@ class PendingEntryWriteTrackerImpl implements PendingEntryWriteTracker {
     // record's own insertion below, so only one combined snapshot is ever
     // emitted for this — never an intermediate "failed just removed, new
     // one not yet added" one.
-    _pending.removeWhere(
-      (_, write) => write.status is PendingEntryWriteFailed,
-    );
+    _pending.removeWhere((_, write) => write.status is PendingEntryWriteFailed);
     final tempId = _generateTempId();
     _pending[tempId] = PendingEntryWrite(
       tempId: tempId,
@@ -191,7 +189,9 @@ class PendingEntryWriteTrackerImpl implements PendingEntryWriteTracker {
       // [retry].
       return;
     }
-    _pending[tempId] = current.copyWith(status: const PendingEntryWriteInFlight());
+    _pending[tempId] = current.copyWith(
+      status: const PendingEntryWriteInFlight(),
+    );
     _emitPending();
 
     final result = await _repository.create(

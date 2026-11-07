@@ -108,22 +108,19 @@ class AccountSettingsCubit extends Cubit<AccountSettingsState> {
     if (isClosed) {
       return;
     }
-    result.match(
-      (failure) {
-        // Review finding: a superseded call's `Left` is an internal
-        // control-flow signal (`AccountSettingsRepository.
-        // supersededMessage`), not a real error — the winning call already
-        // settled the value correctly, so nothing should be shown; showing
-        // `failure.message` unconditionally leaked that raw, English,
-        // internal string into this otherwise fully Portuguese screen.
-        if (failure.message == AccountSettingsRepository.supersededMessage) {
-          emit(state.copyWith(isSaving: false));
-          return;
-        }
-        emit(state.copyWith(errorMessage: failure.message, isSaving: false));
-      },
-      (_) => emit(state.copyWith(isSaving: false)),
-    );
+    result.match((failure) {
+      // Review finding: a superseded call's `Left` is an internal
+      // control-flow signal (`AccountSettingsRepository.
+      // supersededMessage`), not a real error — the winning call already
+      // settled the value correctly, so nothing should be shown; showing
+      // `failure.message` unconditionally leaked that raw, English,
+      // internal string into this otherwise fully Portuguese screen.
+      if (failure.message == AccountSettingsRepository.supersededMessage) {
+        emit(state.copyWith(isSaving: false));
+        return;
+      }
+      emit(state.copyWith(errorMessage: failure.message, isSaving: false));
+    }, (_) => emit(state.copyWith(isSaving: false)));
   }
 
   /// Review finding: [errorMessage] previously cleared only at the start of

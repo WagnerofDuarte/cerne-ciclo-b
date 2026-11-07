@@ -438,11 +438,23 @@ void main() {
         () => mockDio.get<dynamic>(
           captureAny(),
           queryParameters: captureAny(named: 'queryParameters'),
-          options: any(named: 'options'),
+          options: captureAny(named: 'options'),
         ),
       ).captured;
       expect(captured[0], '$baseUrl/export-download-get/job-1');
       expect(captured[1], {'format': 'pdf'});
+
+      final options = captured[2] as Options;
+      expect(
+        options.followRedirects,
+        isFalse,
+        reason:
+            'the one setting that stops dio auto-following the 302 '
+            'into the signed-storage host (Boundaries) — a regression here '
+            'would not fail on this fake-free mocked test otherwise',
+      );
+      expect(options.validateStatus?.call(302), isTrue);
+      expect(options.validateStatus?.call(400), isFalse);
     });
 
     test('a response with no Location header -> Left(MalformedResponse) '

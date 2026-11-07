@@ -30,25 +30,28 @@ void main() {
   runWriteFailureMatrix<Map<String, dynamic>>(
     endpointName: 'auth-signup',
     stubNetworkTimeout: () {
-      when(() => mockApiClient.post(any(), data: any(named: 'data'))).thenAnswer(
-        (_) async => left(
-          const Failure.networkTimeout(message: 'Request timed out'),
-        ),
+      when(
+        () => mockApiClient.post(any(), data: any(named: 'data')),
+      ).thenAnswer(
+        (_) async =>
+            left(const Failure.networkTimeout(message: 'Request timed out')),
       );
     },
     stubMalformedResponse: () {
-      when(() => mockApiClient.post(any(), data: any(named: 'data'))).thenAnswer(
+      when(
+        () => mockApiClient.post(any(), data: any(named: 'data')),
+      ).thenAnswer(
         (_) async => left(
           const Failure.malformedResponse(message: 'Could not parse response'),
         ),
       );
     },
     stubNoConnection: () {
-      when(() => mockApiClient.post(any(), data: any(named: 'data'))).thenAnswer(
-        (_) async => left(
-          const Failure.networkOffline(message: 'No connection'),
-        ),
-      );
+      when(() => mockApiClient.post(any(), data: any(named: 'data')))
+          .thenAnswer(
+            (_) async =>
+                left(const Failure.networkOffline(message: 'No connection')),
+          );
     },
     invoke: () => _signUp(mockApiClient),
   );

@@ -138,7 +138,10 @@ void main() {
 
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureStorageChannel, handleSecureStorageCall);
+        .setMockMethodCallHandler(
+          secureStorageChannel,
+          handleSecureStorageCall,
+        );
     fakePathProvider = FakePathProviderPlatform();
     PathProviderPlatform.instance = fakePathProvider;
 
@@ -164,151 +167,136 @@ void main() {
     await fakePathProvider.cleanUp();
   });
 
-  test(
-    'happy path: loadFirstPage() fires a genuine GET to entries-list with '
-    'the right URL/headers/query, lands the real cubit on MeusRegistrosLoaded, '
-    'and persists every item to the real entries Hive box',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': [
-          _entryJson(
-            id: 'entry-1',
-            content: 'Primeiro registro do dia.',
-            source: 'manual',
-            occurredAt: '2026-01-02T10:00:00Z',
-          ),
-          _entryJson(
-            id: 'entry-2',
-            content: 'Áudio transcrito.',
-            source: 'audio',
-            occurredAt: '2026-01-01T09:00:00Z',
-          ),
-        ],
-        'meta': {'nextCursor': 'cursor-page-2'},
-      });
-
-      final cubit = sl<MeusRegistrosCubit>();
-      await cubit.loadFirstPage();
-
-      final state = cubit.state;
-      expect(state, isA<MeusRegistrosLoaded>());
-      final loaded = state as MeusRegistrosLoaded;
-      expect(loaded.entries.map((e) => e.id), ['entry-1', 'entry-2']);
-      expect(loaded.nextCursor, 'cursor-page-2');
-
-      // Exactly one real request left through the fake transport, built by
-      // the real UrlBuilder/HeaderInterceptor, not a mock of ApiClient.
-      expect(adapter.requests, hasLength(1));
-      final sent = adapter.requests.single;
-      expect(sent.path, sl<UrlBuilder>().build('entries-list'));
-      expect(sent.queryParameters, {'limit': 20});
-      expect(sent.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
-      expect(
-        sent.headers['Authorization'],
-        'Bearer e2e-test-access-token',
-      );
-
-      // The real write-through happened against the real Hive box.
-      final box = sl<Box<Map>>();
-      expect(box.get('entry-1')!['content'], 'Primeiro registro do dia.');
-      expect(box.get('entry-2')!['source'], 'audio');
-    },
-  );
-
-  test(
-    'pagination: loadMore() against the real pipeline sends the held '
-    'nextCursor as a query param, appends the new page with no dup ids, '
-    'and persists the new items to the real Hive box alongside the first '
-    'page\'s',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': [
-          _entryJson(
-            id: 'entry-1',
-            content: 'Primeiro registro do dia.',
-            source: 'manual',
-            occurredAt: '2026-01-02T10:00:00Z',
-          ),
-        ],
-        'meta': {'nextCursor': 'cursor-page-2'},
-      });
-
-      final cubit = sl<MeusRegistrosCubit>();
-      await cubit.loadFirstPage();
-
-      adapter.queueJsonResponse(200, {
-        'data': [
-          _entryJson(
-            id: 'entry-2',
-            content: 'Foto do dia anterior.',
-            source: 'photo',
-            occurredAt: '2025-12-31T08:00:00Z',
-          ),
-        ],
-        'meta': {'nextCursor': null},
-      });
-
-      await cubit.loadMore();
-
-      final loaded = cubit.state as MeusRegistrosLoaded;
-      expect(loaded.entries.map((e) => e.id), ['entry-1', 'entry-2']);
-      expect(loaded.nextCursor, isNull);
-
-      expect(adapter.requests, hasLength(2));
-      expect(adapter.requests.last.queryParameters, {
-        'limit': 20,
-        'cursor': 'cursor-page-2',
-      });
-
-      final box = sl<Box<Map>>();
-      expect(box.keys, containsAll(['entry-1', 'entry-2']));
-    },
-  );
-
-  test(
-    'offline fallback: loadFirstPage() genuinely retries a NETWORK_OFFLINE '
-    'entries-list call maxRetries times over the real RetryInterceptor '
-    'before falling back to the real cached entries Hive box, sorted '
-    'occurredAt desc',
-    () async {
-      final box = sl<Box<Map>>();
-      await box.putAll({
-        'cached-older': _entryJson(
-          id: 'cached-older',
-          content: 'Registro antigo.',
+  test('happy path: loadFirstPage() fires a genuine GET to entries-list with '
+      'the right URL/headers/query, lands the real cubit on MeusRegistrosLoaded, '
+      'and persists every item to the real entries Hive box', () async {
+    adapter.queueJsonResponse(200, {
+      'data': [
+        _entryJson(
+          id: 'entry-1',
+          content: 'Primeiro registro do dia.',
           source: 'manual',
-          occurredAt: '2026-01-01T00:00:00Z',
+          occurredAt: '2026-01-02T10:00:00Z',
         ),
-        'cached-newer': _entryJson(
-          id: 'cached-newer',
-          content: 'Registro mais recente.',
+        _entryJson(
+          id: 'entry-2',
+          content: 'Áudio transcrito.',
+          source: 'audio',
+          occurredAt: '2026-01-01T09:00:00Z',
+        ),
+      ],
+      'meta': {'nextCursor': 'cursor-page-2'},
+    });
+
+    final cubit = sl<MeusRegistrosCubit>();
+    await cubit.loadFirstPage();
+
+    final state = cubit.state;
+    expect(state, isA<MeusRegistrosLoaded>());
+    final loaded = state as MeusRegistrosLoaded;
+    expect(loaded.entries.map((e) => e.id), ['entry-1', 'entry-2']);
+    expect(loaded.nextCursor, 'cursor-page-2');
+
+    // Exactly one real request left through the fake transport, built by
+    // the real UrlBuilder/HeaderInterceptor, not a mock of ApiClient.
+    expect(adapter.requests, hasLength(1));
+    final sent = adapter.requests.single;
+    expect(sent.path, sl<UrlBuilder>().build('entries-list'));
+    expect(sent.queryParameters, {'limit': 20});
+    expect(sent.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
+    expect(sent.headers['Authorization'], 'Bearer e2e-test-access-token');
+
+    // The real write-through happened against the real Hive box.
+    final box = sl<Box<Map>>();
+    expect(box.get('entry-1')!['content'], 'Primeiro registro do dia.');
+    expect(box.get('entry-2')!['source'], 'audio');
+  });
+
+  test('pagination: loadMore() against the real pipeline sends the held '
+      'nextCursor as a query param, appends the new page with no dup ids, '
+      'and persists the new items to the real Hive box alongside the first '
+      'page\'s', () async {
+    adapter.queueJsonResponse(200, {
+      'data': [
+        _entryJson(
+          id: 'entry-1',
+          content: 'Primeiro registro do dia.',
           source: 'manual',
-          occurredAt: '2026-01-03T00:00:00Z',
+          occurredAt: '2026-01-02T10:00:00Z',
         ),
-      });
+      ],
+      'meta': {'nextCursor': 'cursor-page-2'},
+    });
 
-      // Initial attempt + RetryInterceptor.maxRetries retries, all
-      // genuinely retryable (error-taxonomy.md's NETWORK_OFFLINE).
-      for (var i = 0; i <= RetryInterceptor.maxRetries; i++) {
-        adapter.queueErrorResponse('NETWORK_OFFLINE', 'Sem conexão');
-      }
+    final cubit = sl<MeusRegistrosCubit>();
+    await cubit.loadFirstPage();
 
-      final cubit = sl<MeusRegistrosCubit>();
-      await cubit.loadFirstPage();
+    adapter.queueJsonResponse(200, {
+      'data': [
+        _entryJson(
+          id: 'entry-2',
+          content: 'Foto do dia anterior.',
+          source: 'photo',
+          occurredAt: '2025-12-31T08:00:00Z',
+        ),
+      ],
+      'meta': {'nextCursor': null},
+    });
 
-      final loaded = cubit.state as MeusRegistrosLoaded;
-      expect(loaded.entries.map((e) => e.id), [
-        'cached-newer',
-        'cached-older',
-      ]);
-      expect(loaded.nextCursor, isNull);
+    await cubit.loadMore();
 
-      // Every retry genuinely left through the real Dio pipeline before
-      // the repository's own offline fallback ever engaged.
-      expect(adapter.requests, hasLength(1 + RetryInterceptor.maxRetries));
+    final loaded = cubit.state as MeusRegistrosLoaded;
+    expect(loaded.entries.map((e) => e.id), ['entry-1', 'entry-2']);
+    expect(loaded.nextCursor, isNull);
 
-      // The fallback only reads the cache — it never writes to it.
-      expect(box.length, 2);
-    },
-  );
+    expect(adapter.requests, hasLength(2));
+    expect(adapter.requests.last.queryParameters, {
+      'limit': 20,
+      'cursor': 'cursor-page-2',
+    });
+
+    final box = sl<Box<Map>>();
+    expect(box.keys, containsAll(['entry-1', 'entry-2']));
+  });
+
+  test('offline fallback: loadFirstPage() genuinely retries a NETWORK_OFFLINE '
+      'entries-list call maxRetries times over the real RetryInterceptor '
+      'before falling back to the real cached entries Hive box, sorted '
+      'occurredAt desc', () async {
+    final box = sl<Box<Map>>();
+    await box.putAll({
+      'cached-older': _entryJson(
+        id: 'cached-older',
+        content: 'Registro antigo.',
+        source: 'manual',
+        occurredAt: '2026-01-01T00:00:00Z',
+      ),
+      'cached-newer': _entryJson(
+        id: 'cached-newer',
+        content: 'Registro mais recente.',
+        source: 'manual',
+        occurredAt: '2026-01-03T00:00:00Z',
+      ),
+    });
+
+    // Initial attempt + RetryInterceptor.maxRetries retries, all
+    // genuinely retryable (error-taxonomy.md's NETWORK_OFFLINE).
+    for (var i = 0; i <= RetryInterceptor.maxRetries; i++) {
+      adapter.queueErrorResponse('NETWORK_OFFLINE', 'Sem conexão');
+    }
+
+    final cubit = sl<MeusRegistrosCubit>();
+    await cubit.loadFirstPage();
+
+    final loaded = cubit.state as MeusRegistrosLoaded;
+    expect(loaded.entries.map((e) => e.id), ['cached-newer', 'cached-older']);
+    expect(loaded.nextCursor, isNull);
+
+    // Every retry genuinely left through the real Dio pipeline before
+    // the repository's own offline fallback ever engaged.
+    expect(adapter.requests, hasLength(1 + RetryInterceptor.maxRetries));
+
+    // The fallback only reads the cache — it never writes to it.
+    expect(box.length, 2);
+  });
 }

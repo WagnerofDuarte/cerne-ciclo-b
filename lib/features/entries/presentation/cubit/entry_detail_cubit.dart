@@ -68,19 +68,23 @@ class EntryDetailCubit extends Cubit<EntryDetailState> {
   /// Returns [current] with [status] stamped on, preserving every other
   /// field — used both by [_onSessionStatusChanged] (re-emit) and [load]
   /// (first emit of each new variant).
-  EntryDetailState _restamped(EntryDetailState current, SessionStatus? status) =>
-      switch (current) {
-        EntryDetailLoading() => EntryDetailLoading(sessionStatus: status),
-        EntryDetailData(entry: final entry, badgeState: final badgeState) =>
-          EntryDetailData(
-            entry: entry,
-            badgeState: badgeState,
-            sessionStatus: status,
-          ),
-        EntryDetailNotFound() => EntryDetailNotFound(sessionStatus: status),
-        EntryDetailError(message: final message) =>
-          EntryDetailError(message: message, sessionStatus: status),
-      };
+  EntryDetailState _restamped(
+    EntryDetailState current,
+    SessionStatus? status,
+  ) => switch (current) {
+    EntryDetailLoading() => EntryDetailLoading(sessionStatus: status),
+    EntryDetailData(entry: final entry, badgeState: final badgeState) =>
+      EntryDetailData(
+        entry: entry,
+        badgeState: badgeState,
+        sessionStatus: status,
+      ),
+    EntryDetailNotFound() => EntryDetailNotFound(sessionStatus: status),
+    EntryDetailError(message: final message) => EntryDetailError(
+      message: message,
+      sessionStatus: status,
+    ),
+  };
 
   /// Guards a stale in-flight [load] call's result landing after a newer
   /// one (e.g. a quick back-then-forward re-navigation) — same rationale

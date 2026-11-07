@@ -254,38 +254,35 @@ void main() {
       expect(adapter.requests, hasLength(1));
     });
 
-    test(
-      'Story 1.5: a mid-session AUTH_EXPIRED on a bearer endpoint fires the '
-      "real SessionExpiryNotifier's expiredEvents through the whole real "
-      'pipeline, while the same code on auth-refresh never does',
-      () async {
-        final events = <void>[];
-        final subscription = sessionExpiryNotifier.expiredEvents.listen(
-          events.add,
-        );
-        addTearDown(subscription.cancel);
+    test('Story 1.5: a mid-session AUTH_EXPIRED on a bearer endpoint fires the '
+        "real SessionExpiryNotifier's expiredEvents through the whole real "
+        'pipeline, while the same code on auth-refresh never does', () async {
+      final events = <void>[];
+      final subscription = sessionExpiryNotifier.expiredEvents.listen(
+        events.add,
+      );
+      addTearDown(subscription.cancel);
 
-        adapter.queueJsonResponse(401, {
-          'code': 'AUTH_EXPIRED',
-          'message': 'Session expired',
-          'retryable': false,
-        });
-        await apiClient.get('entries-list');
-        await Future<void>.delayed(Duration.zero);
-        expect(events, hasLength(1));
+      adapter.queueJsonResponse(401, {
+        'code': 'AUTH_EXPIRED',
+        'message': 'Session expired',
+        'retryable': false,
+      });
+      await apiClient.get('entries-list');
+      await Future<void>.delayed(Duration.zero);
+      expect(events, hasLength(1));
 
-        adapter.queueJsonResponse(401, {
-          'code': 'AUTH_EXPIRED',
-          'message': 'Refresh token dead',
-          'retryable': false,
-        });
-        await apiClient.post(
-          'auth-refresh',
-          data: {'refreshToken': 'dead-token'},
-        );
-        await Future<void>.delayed(Duration.zero);
-        expect(events, hasLength(1));
-      },
-    );
+      adapter.queueJsonResponse(401, {
+        'code': 'AUTH_EXPIRED',
+        'message': 'Refresh token dead',
+        'retryable': false,
+      });
+      await apiClient.post(
+        'auth-refresh',
+        data: {'refreshToken': 'dead-token'},
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(events, hasLength(1));
+    });
   });
 }

@@ -67,9 +67,7 @@ void main() {
   /// is always that initial replay, not an emission caused by [act]. It's
   /// drained and discarded here so the returned list reflects only
   /// emissions [act] itself caused.
-  Future<List<VaultStatus>> emittedDuring(
-    Future<void> Function() act,
-  ) async {
+  Future<List<VaultStatus>> emittedDuring(Future<void> Function() act) async {
     final emitted = <VaultStatus>[];
     final subscription = repository.statusStream.listen(emitted.add);
     await Future<void>.delayed(Duration.zero);
@@ -86,13 +84,16 @@ void main() {
       expect(repository.currentStatus, VaultStatus.locked);
     });
 
-    test('a listener that subscribes before any authenticate() call still '
-        'immediately sees VaultStatus.locked, not nothing until the first '
-        'emission (Stream.multi replay, mirrors SessionRepositoryImpl)', () async {
-      final status = await repository.statusStream.first;
+    test(
+      'a listener that subscribes before any authenticate() call still '
+      'immediately sees VaultStatus.locked, not nothing until the first '
+      'emission (Stream.multi replay, mirrors SessionRepositoryImpl)',
+      () async {
+        final status = await repository.statusStream.first;
 
-      expect(status, VaultStatus.locked);
-    });
+        expect(status, VaultStatus.locked);
+      },
+    );
   });
 
   group('cold start, biometrics succeed', () {
@@ -140,30 +141,35 @@ void main() {
   });
 
   group('cold start, biometrics fail/cancelled/unavailable', () {
-    test('authenticate() returns false -> status stays locked, no '
-        'emission, Left(Failure.malformedResponse), never '
-        'Failure.authInvalid (Boundaries: reserved for password login)', () async {
-      when(
-        () => mockLocalAuthentication.authenticate(
-          localizedReason: any(named: 'localizedReason'),
-          biometricOnly: any(named: 'biometricOnly'),
-          persistAcrossBackgrounding: any(named: 'persistAcrossBackgrounding'),
-        ),
-      ).thenAnswer((_) async => false);
+    test(
+      'authenticate() returns false -> status stays locked, no '
+      'emission, Left(Failure.malformedResponse), never '
+      'Failure.authInvalid (Boundaries: reserved for password login)',
+      () async {
+        when(
+          () => mockLocalAuthentication.authenticate(
+            localizedReason: any(named: 'localizedReason'),
+            biometricOnly: any(named: 'biometricOnly'),
+            persistAcrossBackgrounding: any(
+              named: 'persistAcrossBackgrounding',
+            ),
+          ),
+        ).thenAnswer((_) async => false);
 
-      Either<Failure, Unit>? result;
-      final emitted = await emittedDuring(() async {
-        result = await repository.authenticate();
-      });
+        Either<Failure, Unit>? result;
+        final emitted = await emittedDuring(() async {
+          result = await repository.authenticate();
+        });
 
-      expect(emitted, isEmpty);
-      expect(repository.currentStatus, VaultStatus.locked);
-      expect(result!.isLeft(), isTrue);
-      result!.match(
-        (failure) => expect(failure, isA<MalformedResponse>()),
-        (_) => fail('expected Left'),
-      );
-    });
+        expect(emitted, isEmpty);
+        expect(repository.currentStatus, VaultStatus.locked);
+        expect(result!.isLeft(), isTrue);
+        result!.match(
+          (failure) => expect(failure, isA<MalformedResponse>()),
+          (_) => fail('expected Left'),
+        );
+      },
+    );
 
     test('authenticate() throws LocalAuthException (e.g. user cancelled) '
         '-> status stays locked, no emission, Left(Failure.'
@@ -205,9 +211,7 @@ void main() {
           persistAcrossBackgrounding: any(named: 'persistAcrossBackgrounding'),
         ),
       ).thenThrow(
-        const LocalAuthException(
-          code: LocalAuthExceptionCode.biometricLockout,
-        ),
+        const LocalAuthException(code: LocalAuthExceptionCode.biometricLockout),
       );
 
       final result = await repository.authenticate();
@@ -265,9 +269,8 @@ void main() {
         'emits unlocked, currentStatus flips to unlocked, Right(unit) '
         'returned (no PIN-creation screen exists anywhere in '
         'docs/input/ — Design Notes)', () async {
-      when(
-        () => mockSecureStorage.read(key: any(named: 'key')),
-      ).thenAnswer((_) async => null);
+      when(() => mockSecureStorage.read(key: any(named: 'key')))
+          .thenAnswer((_) async => null);
       when(
         () => mockSecureStorage.write(
           key: any(named: 'key'),
@@ -280,9 +283,8 @@ void main() {
         result = await repository.submitPin('1234');
       });
 
-      verify(
-        () => mockSecureStorage.write(key: 'vault_pin', value: '1234'),
-      ).called(1);
+      verify(() => mockSecureStorage.write(key: 'vault_pin', value: '1234'))
+          .called(1);
       expect(emitted, [VaultStatus.unlocked]);
       expect(repository.currentStatus, VaultStatus.unlocked);
       expect(result!.isRight(), isTrue);
@@ -290,9 +292,8 @@ void main() {
 
     test('stored PIN matches -> statusStream emits unlocked, '
         'currentStatus flips to unlocked, Right(unit) returned', () async {
-      when(
-        () => mockSecureStorage.read(key: any(named: 'key')),
-      ).thenAnswer((_) async => '1234');
+      when(() => mockSecureStorage.read(key: any(named: 'key')))
+          .thenAnswer((_) async => '1234');
 
       Either<Failure, Unit>? result;
       final emitted = await emittedDuring(() async {
@@ -314,9 +315,8 @@ void main() {
         'Left(Failure.malformedResponse(...)), never Failure.authInvalid '
         '(Boundaries: reserved for password login), no attempt cap — '
         'always retryable', () async {
-      when(
-        () => mockSecureStorage.read(key: any(named: 'key')),
-      ).thenAnswer((_) async => '1234');
+      when(() => mockSecureStorage.read(key: any(named: 'key')))
+          .thenAnswer((_) async => '1234');
 
       Either<Failure, Unit>? result;
       final emitted = await emittedDuring(() async {
@@ -341,9 +341,8 @@ void main() {
     test('secure-storage throws on read -> Left(Failure.'
         'malformedResponse), status stays locked, no crash (RNF09: never '
         'let a platform exception escape unmapped)', () async {
-      when(
-        () => mockSecureStorage.read(key: any(named: 'key')),
-      ).thenThrow(Exception('keychain unavailable'));
+      when(() => mockSecureStorage.read(key: any(named: 'key')))
+          .thenThrow(Exception('keychain unavailable'));
 
       final result = await repository.submitPin('1234');
 
@@ -358,9 +357,8 @@ void main() {
       final firstRead = Completer<String?>();
       final secondRead = Completer<String?>();
       final pendingReads = [firstRead, secondRead];
-      when(
-        () => mockSecureStorage.read(key: any(named: 'key')),
-      ).thenAnswer((_) => pendingReads.removeAt(0).future);
+      when(() => mockSecureStorage.read(key: any(named: 'key')))
+          .thenAnswer((_) => pendingReads.removeAt(0).future);
       when(
         () => mockSecureStorage.write(
           key: any(named: 'key'),
@@ -383,9 +381,8 @@ void main() {
       final secondResult = await secondResultFuture;
       await Future<void>.delayed(Duration.zero);
       expect(secondResult.isRight(), isTrue);
-      verify(
-        () => mockSecureStorage.write(key: 'vault_pin', value: '2222'),
-      ).called(1);
+      verify(() => mockSecureStorage.write(key: 'vault_pin', value: '2222'))
+          .called(1);
       expect(repository.currentStatus, VaultStatus.unlocked);
       expect(emitted, [VaultStatus.unlocked]);
       emitted.clear();
@@ -410,9 +407,8 @@ void main() {
         'once it finally resolves (review finding: the generation check '
         'right after read() only guards a slow read(); this guards the '
         'symmetric slow-write() case)', () async {
-      when(
-        () => mockSecureStorage.read(key: any(named: 'key')),
-      ).thenAnswer((_) async => null);
+      when(() => mockSecureStorage.read(key: any(named: 'key')))
+          .thenAnswer((_) async => null);
 
       final firstWrite = Completer<void>();
       var writeCallCount = 0;
@@ -622,9 +618,7 @@ void main() {
       emitted.clear();
 
       idleRepository.didChangeAppLifecycleState(AppLifecycleState.paused);
-      currentTime = currentTime.add(
-        const Duration(minutes: 4, seconds: 59),
-      );
+      currentTime = currentTime.add(const Duration(minutes: 4, seconds: 59));
       idleRepository.didChangeAppLifecycleState(AppLifecycleState.resumed);
       await Future<void>.delayed(Duration.zero);
       await subscription.cancel();

@@ -95,7 +95,9 @@ class RetryInterceptor extends Interceptor {
   /// [neverRetriedFunctions].
   static bool shouldRetry(DioException err, int attempt) {
     final code = errorCodeOf(err);
-    if (code == null || !retryableCodes.contains(code) || attempt >= maxRetries) {
+    if (code == null ||
+        !retryableCodes.contains(code) ||
+        attempt >= maxRetries) {
       return false;
     }
     final function = HeaderInterceptor.functionNameOf(err.requestOptions.path);

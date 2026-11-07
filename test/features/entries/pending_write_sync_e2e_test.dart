@@ -128,7 +128,10 @@ void main() {
 
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureStorageChannel, handleSecureStorageCall);
+        .setMockMethodCallHandler(
+          secureStorageChannel,
+          handleSecureStorageCall,
+        );
     fakePathProvider = FakePathProviderPlatform();
     PathProviderPlatform.instance = fakePathProvider;
 
@@ -154,152 +157,146 @@ void main() {
     await fakePathProvider.cleanUp();
   });
 
-  test(
-    'happy path: tracker.create() fires a genuine POST to entries-create, '
-    'persists the confirmed entry to the real Hive box, and the real '
-    "MeusRegistrosCubit (sharing the tracker) prepends it into its loaded "
-    'state via confirmedWrites',
-    () async {
-      // Starts the real MeusRegistrosCubit subscribing to the shared
-      // tracker's streams before the write is created, same as the running
-      // app does ("Meus Registros" mounts and subscribes for its whole
-      // lifetime regardless of which screen started the capture).
-      final cubit = sl<MeusRegistrosCubit>();
-      adapter.queueJsonResponse(200, {
-        'data': <Map<String, dynamic>>[],
-        'meta': {'nextCursor': null},
-      });
-      await cubit.loadFirstPage();
-      expect(cubit.state, isA<MeusRegistrosEmpty>());
+  test('happy path: tracker.create() fires a genuine POST to entries-create, '
+      'persists the confirmed entry to the real Hive box, and the real '
+      "MeusRegistrosCubit (sharing the tracker) prepends it into its loaded "
+      'state via confirmedWrites', () async {
+    // Starts the real MeusRegistrosCubit subscribing to the shared
+    // tracker's streams before the write is created, same as the running
+    // app does ("Meus Registros" mounts and subscribes for its whole
+    // lifetime regardless of which screen started the capture).
+    final cubit = sl<MeusRegistrosCubit>();
+    adapter.queueJsonResponse(200, {
+      'data': <Map<String, dynamic>>[],
+      'meta': {'nextCursor': null},
+    });
+    await cubit.loadFirstPage();
+    expect(cubit.state, isA<MeusRegistrosEmpty>());
 
-      adapter.queueJsonResponse(200, {
-        'data': _entryJson(
-          id: 'entry-1',
-          content: 'Primeiro registro do dia.',
-          source: 'manual',
-          occurredAt: '2026-01-02T10:00:00Z',
-        ),
-      });
-
-      final tracker = sl<PendingEntryWriteTracker>();
-      final result = await tracker.create(
+    adapter.queueJsonResponse(200, {
+      'data': _entryJson(
+        id: 'entry-1',
         content: 'Primeiro registro do dia.',
-        source: EntrySource.manual,
-      );
-      // The tracker's `confirmedWrites`/`pendingWrites` broadcast
-      // controllers notify listeners on their own microtask, one tick
-      // after `create()`'s awaited Future resolves — same convention
-      // `audio_entry_cubit_test.dart` documents for this exact tracker.
-      await Future<void>.delayed(Duration.zero);
+        source: 'manual',
+        occurredAt: '2026-01-02T10:00:00Z',
+      ),
+    });
 
-      expect(result.isRight(), isTrue);
-      final loaded = cubit.state as MeusRegistrosLoaded;
-      expect(loaded.entries.map((e) => e.id), ['entry-1']);
-      expect(loaded.pendingWrites, isEmpty);
+    final tracker = sl<PendingEntryWriteTracker>();
+    final result = await tracker.create(
+      content: 'Primeiro registro do dia.',
+      source: EntrySource.manual,
+    );
+    // The tracker's `confirmedWrites`/`pendingWrites` broadcast
+    // controllers notify listeners on their own microtask, one tick
+    // after `create()`'s awaited Future resolves — same convention
+    // `audio_entry_cubit_test.dart` documents for this exact tracker.
+    await Future<void>.delayed(Duration.zero);
 
-      // Exactly one real request left through the fake transport, built by
-      // the real UrlBuilder/HeaderInterceptor, not a mock of ApiClient.
-      final createRequest = adapter.requests.last;
-      expect(createRequest.path, sl<UrlBuilder>().build('entries-create'));
-      expect(createRequest.data, {
-        'content': 'Primeiro registro do dia.',
-        'source': 'manual',
-      });
-      expect(createRequest.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
-      expect(
-        createRequest.headers['Authorization'],
-        'Bearer e2e-test-access-token',
-      );
+    expect(result.isRight(), isTrue);
+    final loaded = cubit.state as MeusRegistrosLoaded;
+    expect(loaded.entries.map((e) => e.id), ['entry-1']);
+    expect(loaded.pendingWrites, isEmpty);
 
-      // The real write-through happened against the real Hive box.
-      final box = sl<Box<Map>>();
-      expect(box.get('entry-1')!['content'], 'Primeiro registro do dia.');
-    },
-  );
+    // Exactly one real request left through the fake transport, built by
+    // the real UrlBuilder/HeaderInterceptor, not a mock of ApiClient.
+    final createRequest = adapter.requests.last;
+    expect(createRequest.path, sl<UrlBuilder>().build('entries-create'));
+    expect(createRequest.data, {
+      'content': 'Primeiro registro do dia.',
+      'source': 'manual',
+    });
+    expect(createRequest.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
+    expect(
+      createRequest.headers['Authorization'],
+      'Bearer e2e-test-access-token',
+    );
 
-  test(
-    'retryable failure then manual retry: create() exhausts the real '
-    "RetryInterceptor's retries on a retryable code, surfaces as the "
-    "tracker's own failed pending write (visible on MeusRegistrosCubit), "
-    'and a later tracker.retry() fires a brand-new genuine POST that '
-    'confirms the exact same payload',
-    () async {
-      final tracker = sl<PendingEntryWriteTracker>();
-      final cubit = sl<MeusRegistrosCubit>();
+    // The real write-through happened against the real Hive box.
+    final box = sl<Box<Map>>();
+    expect(box.get('entry-1')!['content'], 'Primeiro registro do dia.');
+  });
 
-      // MeusRegistrosCubit only overlays a pending write onto an already-
-      // resolved state (Loaded/Empty/Error) — it stays Loading, with no
-      // pending write visible, until this resolves at least once.
-      adapter.queueJsonResponse(200, {
-        'data': <Map<String, dynamic>>[],
-        'meta': {'nextCursor': null},
-      });
-      await cubit.loadFirstPage();
-      expect(cubit.state, isA<MeusRegistrosEmpty>());
-      final baselineRequestCount = adapter.requests.length;
+  test('retryable failure then manual retry: create() exhausts the real '
+      "RetryInterceptor's retries on a retryable code, surfaces as the "
+      "tracker's own failed pending write (visible on MeusRegistrosCubit), "
+      'and a later tracker.retry() fires a brand-new genuine POST that '
+      'confirms the exact same payload', () async {
+    final tracker = sl<PendingEntryWriteTracker>();
+    final cubit = sl<MeusRegistrosCubit>();
 
-      // Initial attempt + RetryInterceptor.maxRetries retries, all
-      // genuinely retryable (error-taxonomy.md's NETWORK_TIMEOUT) —
-      // consumed entirely inside this one tracker.create() call, same as
-      // `entries_list_flow_e2e_test.dart`'s offline-fallback case.
-      for (var i = 0; i <= RetryInterceptor.maxRetries; i++) {
-        adapter.queueErrorResponse('NETWORK_TIMEOUT', 'Tempo esgotado');
-      }
+    // MeusRegistrosCubit only overlays a pending write onto an already-
+    // resolved state (Loaded/Empty/Error) — it stays Loading, with no
+    // pending write visible, until this resolves at least once.
+    adapter.queueJsonResponse(200, {
+      'data': <Map<String, dynamic>>[],
+      'meta': {'nextCursor': null},
+    });
+    await cubit.loadFirstPage();
+    expect(cubit.state, isA<MeusRegistrosEmpty>());
+    final baselineRequestCount = adapter.requests.length;
 
-      final createResult = await tracker.create(
+    // Initial attempt + RetryInterceptor.maxRetries retries, all
+    // genuinely retryable (error-taxonomy.md's NETWORK_TIMEOUT) —
+    // consumed entirely inside this one tracker.create() call, same as
+    // `entries_list_flow_e2e_test.dart`'s offline-fallback case.
+    for (var i = 0; i <= RetryInterceptor.maxRetries; i++) {
+      adapter.queueErrorResponse('NETWORK_TIMEOUT', 'Tempo esgotado');
+    }
+
+    final createResult = await tracker.create(
+      content: 'Áudio transcrito com falha de rede.',
+      source: EntrySource.audio,
+      mediaDurationSeconds: 12,
+    );
+    await Future<void>.delayed(Duration.zero);
+
+    expect(createResult.isLeft(), isTrue);
+    expect(
+      adapter.requests,
+      hasLength(baselineRequestCount + 1 + RetryInterceptor.maxRetries),
+    );
+
+    final failedWrite =
+        (cubit.state as MeusRegistrosLoaded).pendingWrites.single;
+    final failedStatus = failedWrite.status as PendingEntryWriteFailed;
+    expect(failedStatus.failure.retryable, isTrue);
+    final tempId = failedWrite.tempId;
+
+    // The manual retry's own single real attempt succeeds this time.
+    adapter.queueJsonResponse(200, {
+      'data': _entryJson(
+        id: 'entry-retried',
         content: 'Áudio transcrito com falha de rede.',
-        source: EntrySource.audio,
-        mediaDurationSeconds: 12,
-      );
-      await Future<void>.delayed(Duration.zero);
+        source: 'audio',
+        occurredAt: '2026-01-02T11:00:00Z',
+      ),
+    });
 
-      expect(createResult.isLeft(), isTrue);
-      expect(
-        adapter.requests,
-        hasLength(baselineRequestCount + 1 + RetryInterceptor.maxRetries),
-      );
+    await tracker.retry(tempId);
+    await Future<void>.delayed(Duration.zero);
 
-      final failedWrite = (cubit.state as MeusRegistrosLoaded).pendingWrites
-          .single;
-      final failedStatus = failedWrite.status as PendingEntryWriteFailed;
-      expect(failedStatus.failure.retryable, isTrue);
-      final tempId = failedWrite.tempId;
+    // Exactly one new request beyond the exhausted initial attempt's
+    // own 1 + maxRetries — retry() never re-runs the retry budget from
+    // scratch, it's a single fresh `create()` replay.
+    expect(
+      adapter.requests,
+      hasLength(baselineRequestCount + 1 + RetryInterceptor.maxRetries + 1),
+    );
+    final retryRequest = adapter.requests.last;
+    expect(retryRequest.data, {
+      'content': 'Áudio transcrito com falha de rede.',
+      'source': 'audio',
+      'mediaDurationSeconds': 12,
+    });
 
-      // The manual retry's own single real attempt succeeds this time.
-      adapter.queueJsonResponse(200, {
-        'data': _entryJson(
-          id: 'entry-retried',
-          content: 'Áudio transcrito com falha de rede.',
-          source: 'audio',
-          occurredAt: '2026-01-02T11:00:00Z',
-        ),
-      });
+    final loaded = cubit.state as MeusRegistrosLoaded;
+    expect(loaded.entries.map((e) => e.id), ['entry-retried']);
+    expect(loaded.pendingWrites, isEmpty);
 
-      await tracker.retry(tempId);
-      await Future<void>.delayed(Duration.zero);
-
-      // Exactly one new request beyond the exhausted initial attempt's
-      // own 1 + maxRetries — retry() never re-runs the retry budget from
-      // scratch, it's a single fresh `create()` replay.
-      expect(
-        adapter.requests,
-        hasLength(baselineRequestCount + 1 + RetryInterceptor.maxRetries + 1),
-      );
-      final retryRequest = adapter.requests.last;
-      expect(retryRequest.data, {
-        'content': 'Áudio transcrito com falha de rede.',
-        'source': 'audio',
-        'mediaDurationSeconds': 12,
-      });
-
-      final loaded = cubit.state as MeusRegistrosLoaded;
-      expect(loaded.entries.map((e) => e.id), ['entry-retried']);
-      expect(loaded.pendingWrites, isEmpty);
-
-      final box = sl<Box<Map>>();
-      expect(box.get('entry-retried'), isNotNull);
-    },
-  );
+    final box = sl<Box<Map>>();
+    expect(box.get('entry-retried'), isNotNull);
+  });
 
   test(
     'non-retryable failure blocks retry: create() fails once with a '
@@ -334,8 +331,8 @@ void main() {
       // A non-retryable code never triggers RetryInterceptor at all.
       expect(adapter.requests, hasLength(baselineRequestCount + 1));
 
-      final failedWrite = (cubit.state as MeusRegistrosLoaded).pendingWrites
-          .single;
+      final failedWrite =
+          (cubit.state as MeusRegistrosLoaded).pendingWrites.single;
       final failedStatus = failedWrite.status as PendingEntryWriteFailed;
       expect(failedStatus.failure.retryable, isFalse);
 

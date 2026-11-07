@@ -123,7 +123,10 @@ void main() {
 
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureStorageChannel, handleSecureStorageCall);
+        .setMockMethodCallHandler(
+          secureStorageChannel,
+          handleSecureStorageCall,
+        );
     fakePathProvider = FakePathProviderPlatform();
     PathProviderPlatform.instance = fakePathProvider;
 
@@ -148,88 +151,84 @@ void main() {
     await fakePathProvider.cleanUp();
   });
 
-  test(
-    'happy path: search() fires a genuine GET to entries-search with the '
-    'right URL/headers/query ({q: query}, never limit/cursor), resolves '
-    'Right with a semantic match, and persists it to the real entries '
-    'Hive box',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': [
-          _entryJson(
-            id: 'entry-1',
-            content: 'Hoje me senti muito nervoso no trabalho.',
-            source: 'manual',
-            occurredAt: '2026-01-02T10:00:00Z',
-          ),
-        ],
-      });
+  test('happy path: search() fires a genuine GET to entries-search with the '
+      'right URL/headers/query ({q: query}, never limit/cursor), resolves '
+      'Right with a semantic match, and persists it to the real entries '
+      'Hive box', () async {
+    adapter.queueJsonResponse(200, {
+      'data': [
+        _entryJson(
+          id: 'entry-1',
+          content: 'Hoje me senti muito nervoso no trabalho.',
+          source: 'manual',
+          occurredAt: '2026-01-02T10:00:00Z',
+        ),
+      ],
+    });
 
-      final result = await sl<EntriesRepository>().search('ansiedade');
+    final result = await sl<EntriesRepository>().search('ansiedade');
 
-      expect(result.isRight(), isTrue);
-      result.match((_) => fail('expected Right'), (entries) {
-        expect(entries, hasLength(1));
-        expect(entries.single.id, 'entry-1');
-        expect(
-          entries.single.content,
-          'Hoje me senti muito nervoso no trabalho.',
-        );
-      });
-
-      expect(adapter.requests, hasLength(1));
-      final sent = adapter.requests.single;
-      expect(sent.path, sl<UrlBuilder>().build('entries-search'));
-      expect(sent.queryParameters, {'q': 'ansiedade'});
-      expect(sent.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
-      expect(sent.headers['Authorization'], 'Bearer e2e-test-access-token');
-
-      final box = sl<Box<Map>>();
+    expect(result.isRight(), isTrue);
+    result.match((_) => fail('expected Right'), (entries) {
+      expect(entries, hasLength(1));
+      expect(entries.single.id, 'entry-1');
       expect(
-        box.get('entry-1')!['content'],
+        entries.single.content,
         'Hoje me senti muito nervoso no trabalho.',
       );
-    },
-  );
+    });
 
-  test(
-    'offline: search() genuinely retries a NETWORK_OFFLINE entries-search '
-    'call maxRetries times over the real RetryInterceptor, then '
-    'propagates Left(networkOffline) unmapped — no cache fallback (AD-9), '
-    'even with a matching entry already cached from a prior list()/'
-    'getById()',
-    () async {
-      final box = sl<Box<Map>>();
-      await box.put(
-        'cached-1',
-        _entryJson(
-          id: 'cached-1',
-          content: 'Um registro antigo qualquer, já em cache.',
-          source: 'manual',
-          occurredAt: '2026-01-01T00:00:00Z',
-        ),
-      );
+    expect(adapter.requests, hasLength(1));
+    final sent = adapter.requests.single;
+    expect(sent.path, sl<UrlBuilder>().build('entries-search'));
+    expect(sent.queryParameters, {'q': 'ansiedade'});
+    expect(sent.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
+    expect(sent.headers['Authorization'], 'Bearer e2e-test-access-token');
 
-      for (var i = 0; i <= RetryInterceptor.maxRetries; i++) {
-        adapter.queueErrorResponse('NETWORK_OFFLINE', 'Sem conexão');
-      }
+    final box = sl<Box<Map>>();
+    expect(
+      box.get('entry-1')!['content'],
+      'Hoje me senti muito nervoso no trabalho.',
+    );
+  });
 
-      final result = await sl<EntriesRepository>().search('ansiedade');
+  test('offline: search() genuinely retries a NETWORK_OFFLINE entries-search '
+      'call maxRetries times over the real RetryInterceptor, then '
+      'propagates Left(networkOffline) unmapped — no cache fallback (AD-9), '
+      'even with a matching entry already cached from a prior list()/'
+      'getById()', () async {
+    final box = sl<Box<Map>>();
+    await box.put(
+      'cached-1',
+      _entryJson(
+        id: 'cached-1',
+        content: 'Um registro antigo qualquer, já em cache.',
+        source: 'manual',
+        occurredAt: '2026-01-01T00:00:00Z',
+      ),
+    );
 
-      expect(result.isLeft(), isTrue);
-      result.match(
-        (failure) => expect(failure.message, 'Sem conexão'),
-        (_) => fail('expected Left — AD-9: no client-side vector index/'
-            'cache fallback for search'),
-      );
-      expect(adapter.requests, hasLength(1 + RetryInterceptor.maxRetries));
+    for (var i = 0; i <= RetryInterceptor.maxRetries; i++) {
+      adapter.queueErrorResponse('NETWORK_OFFLINE', 'Sem conexão');
+    }
 
-      // The pre-existing cache entry is untouched — search() never reads
-      // or writes it on a failure path.
-      expect(box.length, 1);
-      expect(box.get('cached-1'), isNotNull);
-    },
-  );
+    final result = await sl<EntriesRepository>().search('ansiedade');
+
+    expect(result.isLeft(), isTrue);
+    result.match(
+      (failure) => expect(failure.message, 'Sem conexão'),
+      (_) => fail(
+        'expected Left — AD-9: no client-side vector index/'
+        'cache fallback for search',
+      ),
+    );
+    expect(adapter.requests, hasLength(1 + RetryInterceptor.maxRetries));
+
+    // The pre-existing cache entry is untouched — search() never reads
+    // or writes it on a failure path.
+    expect(box.length, 1);
+    expect(box.get('cached-1'), isNotNull);
+  });
 
   // spec-5-3 (deferred-work.md, 2026-11-05): closes the self-disclosed gap
   // that no e2e test drove `entries-search` with `source`/`dateFrom`/
@@ -268,42 +267,39 @@ void main() {
     },
   );
 
-  test(
-    'date range filter: search(dateFrom/dateTo) sends both as their own '
-    'UTC ISO8601 strings to entries-search over the real pipeline, with '
-    'no source param',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': [
-          _entryJson(
-            id: 'entry-dated-1',
-            content: 'Um registro de janeiro sobre ansiedade.',
-            source: 'manual',
-            occurredAt: '2026-01-15T10:00:00Z',
-          ),
-        ],
-      });
+  test('date range filter: search(dateFrom/dateTo) sends both as their own '
+      'UTC ISO8601 strings to entries-search over the real pipeline, with '
+      'no source param', () async {
+    adapter.queueJsonResponse(200, {
+      'data': [
+        _entryJson(
+          id: 'entry-dated-1',
+          content: 'Um registro de janeiro sobre ansiedade.',
+          source: 'manual',
+          occurredAt: '2026-01-15T10:00:00Z',
+        ),
+      ],
+    });
 
-      final dateFrom = DateTime(2026, 1, 1);
-      final dateTo = DateTime(2026, 1, 31);
+    final dateFrom = DateTime(2026, 1, 1);
+    final dateTo = DateTime(2026, 1, 31);
 
-      final result = await sl<EntriesRepository>().search(
-        'ansiedade',
-        dateFrom: dateFrom,
-        dateTo: dateTo,
-      );
+    final result = await sl<EntriesRepository>().search(
+      'ansiedade',
+      dateFrom: dateFrom,
+      dateTo: dateTo,
+    );
 
-      expect(result.isRight(), isTrue);
-      final sent = adapter.requests.single.queryParameters;
-      expect(sent['q'], 'ansiedade');
-      expect(sent.containsKey('source'), isFalse);
-      expect(sent['dateFrom'], dateFrom.toUtc().toIso8601String());
-      expect(sent['dateTo'], dateTo.toUtc().toIso8601String());
-      expect(sent['dateFrom'], endsWith('Z'));
-      expect(sent['dateTo'], endsWith('Z'));
+    expect(result.isRight(), isTrue);
+    final sent = adapter.requests.single.queryParameters;
+    expect(sent['q'], 'ansiedade');
+    expect(sent.containsKey('source'), isFalse);
+    expect(sent['dateFrom'], dateFrom.toUtc().toIso8601String());
+    expect(sent['dateTo'], dateTo.toUtc().toIso8601String());
+    expect(sent['dateFrom'], endsWith('Z'));
+    expect(sent['dateTo'], endsWith('Z'));
 
-      final box = sl<Box<Map>>();
-      expect(box.get('entry-dated-1')!['content'], isNotNull);
-    },
-  );
+    final box = sl<Box<Map>>();
+    expect(box.get('entry-dated-1')!['content'], isNotNull);
+  });
 }

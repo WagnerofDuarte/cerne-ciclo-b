@@ -94,9 +94,7 @@ void main() {
     (tester) async {
       final submittedPins = <String>[];
 
-      await tester.pumpWidget(
-        _wrap(PinKeypad(onSubmit: submittedPins.add)),
-      );
+      await tester.pumpWidget(_wrap(PinKeypad(onSubmit: submittedPins.add)));
 
       await _tapDigit(tester, '1');
       await _tapDigit(tester, '2');
@@ -120,19 +118,18 @@ void main() {
     },
   );
 
-  testWidgets(
-    'backspace on an empty buffer is a harmless no-op',
-    (tester) async {
-      await tester.pumpWidget(
-        _wrap(PinKeypad(onSubmit: (_) => fail('should not submit'))),
-      );
+  testWidgets('backspace on an empty buffer is a harmless no-op', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _wrap(PinKeypad(onSubmit: (_) => fail('should not submit'))),
+    );
 
-      await tester.tap(find.byIcon(Icons.backspace_outlined));
-      await tester.pump();
+    await tester.tap(find.byIcon(Icons.backspace_outlined));
+    await tester.pump();
 
-      expect(tester.takeException(), isNull);
-    },
-  );
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'after a submit, the buffer is already cleared — entering a fresh 4 '
@@ -140,9 +137,7 @@ void main() {
     (tester) async {
       final submittedPins = <String>[];
 
-      await tester.pumpWidget(
-        _wrap(PinKeypad(onSubmit: submittedPins.add)),
-      );
+      await tester.pumpWidget(_wrap(PinKeypad(onSubmit: submittedPins.add)));
 
       for (final digit in '1111'.split('')) {
         await _tapDigit(tester, digit);
@@ -202,19 +197,18 @@ void main() {
       },
     );
 
-    testWidgets(
-      'backspace does nothing while disabled (no exception)',
-      (tester) async {
-        await tester.pumpWidget(
-          _wrap(PinKeypad(enabled: false, onSubmit: (_) {})),
-        );
+    testWidgets('backspace does nothing while disabled (no exception)', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(PinKeypad(enabled: false, onSubmit: (_) {})),
+      );
 
-        await tester.tap(find.byIcon(Icons.backspace_outlined));
-        await tester.pump();
+      await tester.tap(find.byIcon(Icons.backspace_outlined));
+      await tester.pump();
 
-        expect(tester.takeException(), isNull);
-      },
-    );
+      expect(tester.takeException(), isNull);
+    });
 
     testWidgets(
       'digits ignored while disabled are not silently queued — toggling '
@@ -225,11 +219,7 @@ void main() {
 
         await tester.pumpWidget(
           _wrap(
-            PinKeypad(
-              key: key,
-              enabled: false,
-              onSubmit: submittedPins.add,
-            ),
+            PinKeypad(key: key, enabled: false, onSubmit: submittedPins.add),
           ),
         );
         for (final digit in '12'.split('')) {
@@ -240,12 +230,7 @@ void main() {
         // disabled taps above would still be present here if the guard
         // only blocked onSubmit rather than the buffer write itself.
         await tester.pumpWidget(
-          _wrap(
-            PinKeypad(
-              key: key,
-              onSubmit: submittedPins.add,
-            ),
-          ),
+          _wrap(PinKeypad(key: key, onSubmit: submittedPins.add)),
         );
         for (final digit in '9876'.split('')) {
           await _tapDigit(tester, digit);
@@ -272,10 +257,7 @@ void main() {
         );
 
         final disabledOpacity = tester.widget<Opacity>(
-          find.ancestor(
-            of: find.text('1'),
-            matching: find.byType(Opacity),
-          ),
+          find.ancestor(of: find.text('1'), matching: find.byType(Opacity)),
         );
         expect(disabledOpacity.opacity, lessThan(1));
 
@@ -287,15 +269,10 @@ void main() {
           isSemantics(hasEnabledState: true, isEnabled: false),
         );
 
-        await tester.pumpWidget(
-          _wrap(PinKeypad(key: key, onSubmit: (_) {})),
-        );
+        await tester.pumpWidget(_wrap(PinKeypad(key: key, onSubmit: (_) {})));
 
         final enabledOpacity = tester.widget<Opacity>(
-          find.ancestor(
-            of: find.text('1'),
-            matching: find.byType(Opacity),
-          ),
+          find.ancestor(of: find.text('1'), matching: find.byType(Opacity)),
         );
         expect(enabledOpacity.opacity, 1);
 
@@ -312,29 +289,28 @@ void main() {
     );
   });
 
-  testWidgets(
-    'every digit/backspace tap target is at least 44pt (UX-DR23)',
-    (tester) async {
-      await tester.pumpWidget(_wrap(PinKeypad(onSubmit: (_) {})));
+  testWidgets('every digit/backspace tap target is at least 44pt (UX-DR23)', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_wrap(PinKeypad(onSubmit: (_) {})));
 
-      // The nearest `InkWell` ancestor is the actual tappable surface
-      // (the `Text`/`Icon` glyph itself is intentionally smaller, shrunk
-      // to fit via `FittedBox` — UX-DR22 — so measuring the glyph would
-      // under-report the real hit area).
-      final digitTarget = tester.getSize(
-        find.ancestor(of: find.text('5'), matching: find.byType(InkWell)),
-      );
-      expect(digitTarget.width, greaterThanOrEqualTo(44));
-      expect(digitTarget.height, greaterThanOrEqualTo(44));
+    // The nearest `InkWell` ancestor is the actual tappable surface
+    // (the `Text`/`Icon` glyph itself is intentionally smaller, shrunk
+    // to fit via `FittedBox` — UX-DR22 — so measuring the glyph would
+    // under-report the real hit area).
+    final digitTarget = tester.getSize(
+      find.ancestor(of: find.text('5'), matching: find.byType(InkWell)),
+    );
+    expect(digitTarget.width, greaterThanOrEqualTo(44));
+    expect(digitTarget.height, greaterThanOrEqualTo(44));
 
-      final backspaceTarget = tester.getSize(
-        find.ancestor(
-          of: find.byIcon(Icons.backspace_outlined),
-          matching: find.byType(InkWell),
-        ),
-      );
-      expect(backspaceTarget.width, greaterThanOrEqualTo(44));
-      expect(backspaceTarget.height, greaterThanOrEqualTo(44));
-    },
-  );
+    final backspaceTarget = tester.getSize(
+      find.ancestor(
+        of: find.byIcon(Icons.backspace_outlined),
+        matching: find.byType(InkWell),
+      ),
+    );
+    expect(backspaceTarget.width, greaterThanOrEqualTo(44));
+    expect(backspaceTarget.height, greaterThanOrEqualTo(44));
+  });
 }

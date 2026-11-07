@@ -43,42 +43,40 @@ sealed class Failure with _$Failure {
   /// The 6 server `retryable:true` codes (AD-4). Every other code —
   /// including the local `malformedResponse` — is `false`.
   bool get retryable => switch (this) {
-        NetworkTimeout() => true,
-        NetworkOffline() => true,
-        PiiCheckFailed() => true,
-        EmbeddingFailed() => true,
-        AiGenerationTimeout() => true,
-        RateLimited() => true,
-        AuthExpired() ||
-        AuthInvalid() ||
-        Validation() ||
-        NotFound() ||
-        ExportEmptyPeriod() ||
-        PayloadTooLarge() ||
-        OcrNoText() ||
-        MalformedResponse() =>
-          false,
-      };
+    NetworkTimeout() => true,
+    NetworkOffline() => true,
+    PiiCheckFailed() => true,
+    EmbeddingFailed() => true,
+    AiGenerationTimeout() => true,
+    RateLimited() => true,
+    AuthExpired() ||
+    AuthInvalid() ||
+    Validation() ||
+    NotFound() ||
+    ExportEmptyPeriod() ||
+    PayloadTooLarge() ||
+    OcrNoText() ||
+    MalformedResponse() => false,
+  };
 
   /// Maps a backend error `code` (`error-taxonomy.md`) to its `Failure`
   /// subtype. An unrecognized code (should never happen — the taxonomy is
   /// closed) falls back to [Failure.malformedResponse] rather than throwing,
   /// so no repository ever lets an unmapped error escape (RNF09).
   factory Failure.fromCode(String code, String message) => switch (code) {
-        'AUTH_EXPIRED' => Failure.authExpired(message: message),
-        'AUTH_INVALID' => Failure.authInvalid(message: message),
-        'NETWORK_TIMEOUT' => Failure.networkTimeout(message: message),
-        'NETWORK_OFFLINE' => Failure.networkOffline(message: message),
-        'VALIDATION_ERROR' => Failure.validation(message: message),
-        'PII_CHECK_FAILED' => Failure.piiCheckFailed(message: message),
-        'EMBEDDING_FAILED' => Failure.embeddingFailed(message: message),
-        'AI_GENERATION_TIMEOUT' =>
-          Failure.aiGenerationTimeout(message: message),
-        'NOT_FOUND' => Failure.notFound(message: message),
-        'RATE_LIMITED' => Failure.rateLimited(message: message),
-        'EXPORT_EMPTY_PERIOD' => Failure.exportEmptyPeriod(message: message),
-        'PAYLOAD_TOO_LARGE' => Failure.payloadTooLarge(message: message),
-        'OCR_NO_TEXT' => Failure.ocrNoText(message: message),
-        _ => Failure.malformedResponse(message: message),
-      };
+    'AUTH_EXPIRED' => Failure.authExpired(message: message),
+    'AUTH_INVALID' => Failure.authInvalid(message: message),
+    'NETWORK_TIMEOUT' => Failure.networkTimeout(message: message),
+    'NETWORK_OFFLINE' => Failure.networkOffline(message: message),
+    'VALIDATION_ERROR' => Failure.validation(message: message),
+    'PII_CHECK_FAILED' => Failure.piiCheckFailed(message: message),
+    'EMBEDDING_FAILED' => Failure.embeddingFailed(message: message),
+    'AI_GENERATION_TIMEOUT' => Failure.aiGenerationTimeout(message: message),
+    'NOT_FOUND' => Failure.notFound(message: message),
+    'RATE_LIMITED' => Failure.rateLimited(message: message),
+    'EXPORT_EMPTY_PERIOD' => Failure.exportEmptyPeriod(message: message),
+    'PAYLOAD_TOO_LARGE' => Failure.payloadTooLarge(message: message),
+    'OCR_NO_TEXT' => Failure.ocrNoText(message: message),
+    _ => Failure.malformedResponse(message: message),
+  };
 }

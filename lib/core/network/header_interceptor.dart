@@ -12,8 +12,8 @@ class HeaderInterceptor extends Interceptor {
   HeaderInterceptor({
     required String anonKey,
     required AccessTokenProvider accessTokenProvider,
-  })  : _anonKey = anonKey,
-        _accessTokenProvider = accessTokenProvider;
+  }) : _anonKey = anonKey,
+       _accessTokenProvider = accessTokenProvider;
 
   /// The three operations with `security: []` in the contract — the only
   /// ones that ever send the anon key as the bearer token.

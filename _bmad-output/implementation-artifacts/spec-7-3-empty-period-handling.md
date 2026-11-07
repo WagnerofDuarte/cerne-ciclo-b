@@ -55,6 +55,18 @@ baseline_commit: '3ce4d329a1943d6ebfeae891e5dc3adc9097943b'
 - [x] `test/features/export/presentation/cubit/export_job_cubit_test.dart` -- unit test: `createJobResult = left(const Failure.exportEmptyPeriod(message: ...))` → `started` is `true`, `cubit.state` is `ExportJobEmptyPeriod`, elapsing a poll interval never calls `getStatus`.
 - [x] `test/features/export/export_flow_e2e_test.dart` -- e2e test: queue a single `400` response `{'code': 'EXPORT_EMPTY_PERIOD', 'message': ..., 'retryable': false}` to `export-summary-create`, drive the real `ExportJobCubit` through DI, assert `cubit.state is ExportJobEmptyPeriod` and that `export-status-get` is never requested.
 
+### Review Findings
+
+- [x] [Review][Decision] Diff touches two files the spec marks read-only/no-change — `meus_registros_screen.dart:195-199` and `export_status_sheet.dart:24-26` each gain a doc-comment-only edit describing the new create-time exception, but the Boundaries & Constraints ("Always") section says "Only functional change: `ExportJobCubit.start()`'s create-failure handler. No change to ... `ExportStatusSheet`, or `MeusRegistrosScreen`," and the Code Map marks both files' relevant lines "read-only." (source: acceptance-auditor) — Resolved: keep the comment updates (accepted deviation, accurate and clarifying; no code change).
+- [x] [Review][Patch] `ExportJobState.emptyPeriod()`'s doc doesn't mention the new create-failure producer [lib/features/export/domain/entities/export_job_state.dart:50-59] — it still describes only `ExportJobStatusDto.toState()` as the path into this state. Fixed: doc comment now names both producers.
+- [x] [Review][Defer] `ExportRepository.createJob`'s doc calls the rejection "theoretical" [lib/features/export/domain/repositories/export_repository.dart:11-17] — deferred, pre-existing, outside this spec's Code Map
+- [x] [Review][Defer] No test for re-opening export after dismissing the create-time empty-period sheet [lib/features/entries/presentation/screens/meus_registros_screen.dart `_onExportTap`] — deferred, coverage gap only, the `finally` guard already covers this path structurally
+- [x] [Review][Defer] New widget test's `pumpAndSettle()` safety is an undocumented assumption [test/features/entries/presentation/screens/meus_registros_screen_test.dart, new spec-7-3 test] — deferred, correct today, no comment explaining why
+- [x] [Review][Defer] Empty-period copy/affordances not revisited for the now-more-common create-time entry point [lib/features/export/presentation/widgets/export_status_sheet.dart `_contentFor`] — deferred, product/UX decision, out of this spec's scope
+- [x] [Review][Defer] `ExportJobState.error`'s doc still frames itself purely around poll-path mapping [lib/features/export/domain/entities/export_job_state.dart:44-48] — deferred, pre-existing framing gap, not introduced by this diff
+
+6 findings dismissed as noise (blind-hunter: e2e test fixture message coincidence, duplicated `is ExportEmptyPeriod` check across cubit/DTO, live-region accessibility risk, dense doc-comment wording, missing time-elapse assertion in the e2e "exactly one request" check, prototype state-diagram cross-reference).
+
 **Acceptance Criteria:**
 - Given a period with zero Entries, when the user requests an export and `export-summary-create` rejects synchronously with `EXPORT_EMPTY_PERIOD`, then the sheet opens directly into "Período vazio" (no download button, "Fechar" only) — never a generic error `SnackBar`, never a crash.
 - Given that empty-period state, then no poll ever fires — there was never a `jobId` to poll.

@@ -168,8 +168,7 @@ class AudioEntryCubit extends Cubit<AudioCaptureState> {
   Future<void> startRecording() async {
     final current = state;
     final canStart =
-        current is AudioIdle ||
-        (current is AudioError && current.path == null);
+        current is AudioIdle || (current is AudioError && current.path == null);
     if (!canStart) {
       return;
     }
@@ -342,8 +341,7 @@ class AudioEntryCubit extends Cubit<AudioCaptureState> {
     // already reset the state to `AudioIdle` by the time this resolves —
     // without this, the eventual transcription result would still land
     // and resurrect a flow the user already left.
-    if (state is! AudioProcessing ||
-        (state as AudioProcessing).path != path) {
+    if (state is! AudioProcessing || (state as AudioProcessing).path != path) {
       return;
     }
     if (text == null) {

@@ -78,28 +78,31 @@ class AccountSettingsRepositoryImpl implements AccountSettingsRepository {
   Future<Either<Failure, Unit>> fetchBiometricEnabled() async {
     final generation = ++_generation;
     final result = await _remoteDataSource.fetchSettings();
-    return result.match((failure) {
-      // Swallowed, fire-and-forget like `SessionRepository.
-      // restoreSession()` — `currentBiometricEnabled` stays exactly as it
-      // was (I/O matrix: "Boot fetch fails").
-      return left(failure);
-    }, (dto) {
-      // Review finding: a `setBiometricEnabled` call that started after
-      // this fetch (and has therefore already bumped `_generation`) has
-      // superseded it — this fetch's now-stale read must not clobber
-      // whatever that newer call already settled on, and must not report
-      // success either, since its result was discarded (mirrors
-      // `setBiometricEnabled`'s own stale-generation branch).
-      if (generation != _generation) {
-        return left(
-          const Failure.malformedResponse(
-            message: AccountSettingsRepository.supersededMessage,
-          ),
-        );
-      }
-      _emit(dto.biometricEnabled);
-      return right(unit);
-    });
+    return result.match(
+      (failure) {
+        // Swallowed, fire-and-forget like `SessionRepository.
+        // restoreSession()` — `currentBiometricEnabled` stays exactly as it
+        // was (I/O matrix: "Boot fetch fails").
+        return left(failure);
+      },
+      (dto) {
+        // Review finding: a `setBiometricEnabled` call that started after
+        // this fetch (and has therefore already bumped `_generation`) has
+        // superseded it — this fetch's now-stale read must not clobber
+        // whatever that newer call already settled on, and must not report
+        // success either, since its result was discarded (mirrors
+        // `setBiometricEnabled`'s own stale-generation branch).
+        if (generation != _generation) {
+          return left(
+            const Failure.malformedResponse(
+              message: AccountSettingsRepository.supersededMessage,
+            ),
+          );
+        }
+        _emit(dto.biometricEnabled);
+        return right(unit);
+      },
+    );
   }
 
   @override

@@ -77,20 +77,23 @@ void main() {
   });
 
   group('listSessions', () {
-    test('success writes through to the sessions box, then returns Right', () async {
-      final dto = _sessionDto('s1', '2026-01-02T00:00:00Z');
-      when(() => mockRemoteDataSource.listSessions())
-          .thenAnswer((_) async => right([dto]));
+    test(
+      'success writes through to the sessions box, then returns Right',
+      () async {
+        final dto = _sessionDto('s1', '2026-01-02T00:00:00Z');
+        when(() => mockRemoteDataSource.listSessions())
+            .thenAnswer((_) async => right([dto]));
 
-      final result = await repository.listSessions();
+        final result = await repository.listSessions();
 
-      verify(() => mockSessionsBox.putAll({'s1': dto.toJson()})).called(1);
-      expect(result.isRight(), isTrue);
-      result.match(
-        (_) => fail('expected Right'),
-        (sessions) => expect(sessions.single.id, 's1'),
-      );
-    });
+        verify(() => mockSessionsBox.putAll({'s1': dto.toJson()})).called(1);
+        expect(result.isRight(), isTrue);
+        result.match(
+          (_) => fail('expected Right'),
+          (sessions) => expect(sessions.single.id, 's1'),
+        );
+      },
+    );
 
     test(
       'networkOffline falls back to a full box dump, sorted updatedAt desc',
@@ -144,62 +147,59 @@ void main() {
       );
     });
 
-    test(
-      'review finding: one corrupted cache entry is skipped, never '
-      'discarding every other valid session in the box over it',
-      () async {
-        when(() => mockRemoteDataSource.listSessions()).thenAnswer(
-          (_) async => left(const Failure.networkOffline(message: 'offline')),
-        );
-        when(() => mockSessionsBox.values).thenReturn([
-          _sessionDto('good1', '2026-01-01T00:00:00Z').toJson(),
-          {'this': 'is not a valid session shape'},
-          _sessionDto('good2', '2026-01-02T00:00:00Z').toJson(),
-        ]);
+    test('review finding: one corrupted cache entry is skipped, never '
+        'discarding every other valid session in the box over it', () async {
+      when(() => mockRemoteDataSource.listSessions()).thenAnswer(
+        (_) async => left(const Failure.networkOffline(message: 'offline')),
+      );
+      when(() => mockSessionsBox.values).thenReturn([
+        _sessionDto('good1', '2026-01-01T00:00:00Z').toJson(),
+        {'this': 'is not a valid session shape'},
+        _sessionDto('good2', '2026-01-02T00:00:00Z').toJson(),
+      ]);
 
-        final result = await repository.listSessions();
+      final result = await repository.listSessions();
 
-        expect(result.isRight(), isTrue);
-        result.match((_) => fail('expected Right'), (sessions) {
-          expect(sessions.map((s) => s.id).toList(), ['good2', 'good1']);
-        });
-      },
-    );
+      expect(result.isRight(), isTrue);
+      result.match((_) => fail('expected Right'), (sessions) {
+        expect(sessions.map((s) => s.id).toList(), ['good2', 'good1']);
+      });
+    });
 
-    test(
-      'review fix: a malformed cached updatedAt never throws — '
-      'DateTime.tryParse falls back to DateTime(0), sorting that entry '
-      'last rather than crashing the whole offline-cache fallback',
-      () async {
-        when(() => mockRemoteDataSource.listSessions()).thenAnswer(
-          (_) async => left(const Failure.networkOffline(message: 'offline')),
-        );
-        when(() => mockSessionsBox.values).thenReturn([
-          _sessionDto('good', '2026-01-01T00:00:00Z').toJson(),
-          _sessionDto('corruptDate', 'not-a-date').toJson(),
-        ]);
+    test('review fix: a malformed cached updatedAt never throws — '
+        'DateTime.tryParse falls back to DateTime(0), sorting that entry '
+        'last rather than crashing the whole offline-cache fallback', () async {
+      when(() => mockRemoteDataSource.listSessions()).thenAnswer(
+        (_) async => left(const Failure.networkOffline(message: 'offline')),
+      );
+      when(() => mockSessionsBox.values).thenReturn([
+        _sessionDto('good', '2026-01-01T00:00:00Z').toJson(),
+        _sessionDto('corruptDate', 'not-a-date').toJson(),
+      ]);
 
-        final result = await repository.listSessions();
+      final result = await repository.listSessions();
 
-        expect(result.isRight(), isTrue);
-        result.match((_) => fail('expected Right'), (sessions) {
-          expect(sessions.map((s) => s.id).toList(), ['good', 'corruptDate']);
-        });
-      },
-    );
+      expect(result.isRight(), isTrue);
+      result.match((_) => fail('expected Right'), (sessions) {
+        expect(sessions.map((s) => s.id).toList(), ['good', 'corruptDate']);
+      });
+    });
   });
 
   group('createSession', () {
-    test('success writes through to the sessions box, then returns Right', () async {
-      final dto = _sessionDto('s2', '2026-01-01T00:00:00Z');
-      when(() => mockRemoteDataSource.createSession())
-          .thenAnswer((_) async => right(dto));
+    test(
+      'success writes through to the sessions box, then returns Right',
+      () async {
+        final dto = _sessionDto('s2', '2026-01-01T00:00:00Z');
+        when(() => mockRemoteDataSource.createSession())
+            .thenAnswer((_) async => right(dto));
 
-      final result = await repository.createSession();
+        final result = await repository.createSession();
 
-      verify(() => mockSessionsBox.put('s2', dto.toJson())).called(1);
-      expect(result.isRight(), isTrue);
-    });
+        verify(() => mockSessionsBox.put('s2', dto.toJson())).called(1);
+        expect(result.isRight(), isTrue);
+      },
+    );
 
     test('blocked offline — no cache fallback, propagates as Left', () async {
       when(() => mockRemoteDataSource.createSession()).thenAnswer(
@@ -239,61 +239,58 @@ void main() {
   });
 
   group('listMessages', () {
-    test('success writes through to the messages box, then returns Right', () async {
-      final dto = _messageDto('m1', 's1', 0);
-      when(() => mockRemoteDataSource.listMessages('s1'))
-          .thenAnswer((_) async => right([dto]));
+    test(
+      'success writes through to the messages box, then returns Right',
+      () async {
+        final dto = _messageDto('m1', 's1', 0);
+        when(() => mockRemoteDataSource.listMessages('s1'))
+            .thenAnswer((_) async => right([dto]));
+
+        final result = await repository.listMessages('s1');
+
+        verify(() => mockMessagesBox.putAll({'m1': dto.toJson()})).called(1);
+        expect(result.isRight(), isTrue);
+      },
+    );
+
+    test('networkOffline falls back to the box dump, filtered to sessionId and '
+        'sorted seq ascending', () async {
+      when(() => mockRemoteDataSource.listMessages('s1')).thenAnswer(
+        (_) async => left(const Failure.networkOffline(message: 'offline')),
+      );
+      when(() => mockMessagesBox.values).thenReturn([
+        _messageDto('m2', 's1', 1).toJson(),
+        _messageDto('other', 's2', 0).toJson(),
+        _messageDto('m1', 's1', 0).toJson(),
+      ]);
 
       final result = await repository.listMessages('s1');
 
-      verify(() => mockMessagesBox.putAll({'m1': dto.toJson()})).called(1);
       expect(result.isRight(), isTrue);
+      result.match((_) => fail('expected Right'), (messages) {
+        expect(messages.map((m) => m.id).toList(), ['m1', 'm2']);
+      });
     });
 
-    test(
-      'networkOffline falls back to the box dump, filtered to sessionId and '
-      'sorted seq ascending',
-      () async {
-        when(() => mockRemoteDataSource.listMessages('s1')).thenAnswer(
-          (_) async => left(const Failure.networkOffline(message: 'offline')),
-        );
-        when(() => mockMessagesBox.values).thenReturn([
-          _messageDto('m2', 's1', 1).toJson(),
-          _messageDto('other', 's2', 0).toJson(),
-          _messageDto('m1', 's1', 0).toJson(),
-        ]);
+    test('review finding: one corrupted cache entry is skipped, never '
+        'discarding every other valid message (including ones from other '
+        'sessions) in the box over it', () async {
+      when(() => mockRemoteDataSource.listMessages('s1')).thenAnswer(
+        (_) async => left(const Failure.networkOffline(message: 'offline')),
+      );
+      when(() => mockMessagesBox.values).thenReturn([
+        _messageDto('m1', 's1', 0).toJson(),
+        {'this': 'is not a valid message shape'},
+        _messageDto('m2', 's1', 1).toJson(),
+      ]);
 
-        final result = await repository.listMessages('s1');
+      final result = await repository.listMessages('s1');
 
-        expect(result.isRight(), isTrue);
-        result.match((_) => fail('expected Right'), (messages) {
-          expect(messages.map((m) => m.id).toList(), ['m1', 'm2']);
-        });
-      },
-    );
-
-    test(
-      'review finding: one corrupted cache entry is skipped, never '
-      'discarding every other valid message (including ones from other '
-      'sessions) in the box over it',
-      () async {
-        when(() => mockRemoteDataSource.listMessages('s1')).thenAnswer(
-          (_) async => left(const Failure.networkOffline(message: 'offline')),
-        );
-        when(() => mockMessagesBox.values).thenReturn([
-          _messageDto('m1', 's1', 0).toJson(),
-          {'this': 'is not a valid message shape'},
-          _messageDto('m2', 's1', 1).toJson(),
-        ]);
-
-        final result = await repository.listMessages('s1');
-
-        expect(result.isRight(), isTrue);
-        result.match((_) => fail('expected Right'), (messages) {
-          expect(messages.map((m) => m.id).toList(), ['m1', 'm2']);
-        });
-      },
-    );
+      expect(result.isRight(), isTrue);
+      result.match((_) => fail('expected Right'), (messages) {
+        expect(messages.map((m) => m.id).toList(), ['m1', 'm2']);
+      });
+    });
   });
 
   group('sendMessage', () {
@@ -376,72 +373,43 @@ void main() {
       ).called(1);
     });
 
-    test(
-      'a ready status with content maps to Right(ChatInsight) — no Hive '
-      'write (pure passthrough)',
-      () async {
-        when(() => mockRemoteDataSource.generateInsight(
+    test('a ready status with content maps to Right(ChatInsight) — no Hive '
+        'write (pure passthrough)', () async {
+      when(
+        () => mockRemoteDataSource.generateInsight(
           any(),
           triggerType: any(named: 'triggerType'),
           triggerKey: any(named: 'triggerKey'),
-        )).thenAnswer(
-          (_) async => right(
-            _insightDto(id: 'ins-9', status: 'ready', content: 'olá'),
-          ),
-        );
+        ),
+      ).thenAnswer(
+        (_) async =>
+            right(_insightDto(id: 'ins-9', status: 'ready', content: 'olá')),
+      );
 
-        final result = await repository.generateInsight(
-          's1',
-          triggerType: InsightTriggerType.messageCount,
-          triggerKey: 'key-1',
-        );
+      final result = await repository.generateInsight(
+        's1',
+        triggerType: InsightTriggerType.messageCount,
+        triggerKey: 'key-1',
+      );
 
-        expect(result.isRight(), isTrue);
-        result.match((_) => fail('expected Right'), (insight) {
-          expect(insight, const ChatInsight(id: 'ins-9', content: 'olá'));
-        });
-        verifyNever(() => mockSessionsBox.put(any(), any()));
-        verifyNever(() => mockMessagesBox.put(any(), any()));
-      },
-    );
+      expect(result.isRight(), isTrue);
+      result.match((_) => fail('expected Right'), (insight) {
+        expect(insight, const ChatInsight(id: 'ins-9', content: 'olá'));
+      });
+      verifyNever(() => mockSessionsBox.put(any(), any()));
+      verifyNever(() => mockMessagesBox.put(any(), any()));
+    });
 
     for (final status in ['generating', 'failed', 'dismissed']) {
-      test(
-        'a non-ready status ($status) maps to Right(null) — RF08: never '
-        'surfaced as a Failure',
-        () async {
-          when(() => mockRemoteDataSource.generateInsight(
+      test('a non-ready status ($status) maps to Right(null) — RF08: never '
+          'surfaced as a Failure', () async {
+        when(
+          () => mockRemoteDataSource.generateInsight(
             any(),
             triggerType: any(named: 'triggerType'),
             triggerKey: any(named: 'triggerKey'),
-          )).thenAnswer((_) async => right(_insightDto(status: status)));
-
-          final result = await repository.generateInsight(
-            's1',
-            triggerType: InsightTriggerType.messageCount,
-            triggerKey: 'key-1',
-          );
-
-          expect(result.isRight(), isTrue);
-          result.match(
-            (_) => fail('expected Right'),
-            (insight) => expect(insight, isNull),
-          );
-        },
-      );
-    }
-
-    test(
-      'a ready status with null content still maps to Right(null) '
-      '(defensive — shouldn\'t happen per the contract)',
-      () async {
-        when(() => mockRemoteDataSource.generateInsight(
-          any(),
-          triggerType: any(named: 'triggerType'),
-          triggerKey: any(named: 'triggerKey'),
-        )).thenAnswer(
-          (_) async => right(_insightDto(status: 'ready', content: null)),
-        );
+          ),
+        ).thenAnswer((_) async => right(_insightDto(status: status)));
 
         final result = await repository.generateInsight(
           's1',
@@ -454,17 +422,43 @@ void main() {
           (_) => fail('expected Right'),
           (insight) => expect(insight, isNull),
         );
-      },
-    );
+      });
+    }
+
+    test('a ready status with null content still maps to Right(null) '
+        '(defensive — shouldn\'t happen per the contract)', () async {
+      when(
+        () => mockRemoteDataSource.generateInsight(
+          any(),
+          triggerType: any(named: 'triggerType'),
+          triggerKey: any(named: 'triggerKey'),
+        ),
+      ).thenAnswer(
+        (_) async => right(_insightDto(status: 'ready', content: null)),
+      );
+
+      final result = await repository.generateInsight(
+        's1',
+        triggerType: InsightTriggerType.messageCount,
+        triggerKey: 'key-1',
+      );
+
+      expect(result.isRight(), isTrue);
+      result.match(
+        (_) => fail('expected Right'),
+        (insight) => expect(insight, isNull),
+      );
+    });
 
     test('a transport Left propagates unchanged, unmapped', () async {
-      when(() => mockRemoteDataSource.generateInsight(
-        any(),
-        triggerType: any(named: 'triggerType'),
-        triggerKey: any(named: 'triggerKey'),
-      )).thenAnswer(
-        (_) async =>
-            left(const Failure.networkOffline(message: 'offline')),
+      when(
+        () => mockRemoteDataSource.generateInsight(
+          any(),
+          triggerType: any(named: 'triggerType'),
+          triggerKey: any(named: 'triggerKey'),
+        ),
+      ).thenAnswer(
+        (_) async => left(const Failure.networkOffline(message: 'offline')),
       );
 
       final result = await repository.generateInsight(

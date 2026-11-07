@@ -42,41 +42,44 @@ void main() {
       verifyNever(() => mockAccessTokenProvider.readAccessToken());
     });
 
-    test('other function with a stored token sends apikey + user bearer',
-        () async {
-      const userToken = 'user-token-value';
-      when(() => mockAccessTokenProvider.readAccessToken())
-          .thenAnswer((_) async => userToken);
+    test(
+      'other function with a stored token sends apikey + user bearer',
+      () async {
+        const userToken = 'user-token-value';
+        when(() => mockAccessTokenProvider.readAccessToken())
+            .thenAnswer((_) async => userToken);
 
-      final options = RequestOptions(path: 'https://host/entries-create');
-      final handler = MockRequestInterceptorHandler();
-      when(() => handler.next(any())).thenReturn(null);
+        final options = RequestOptions(path: 'https://host/entries-create');
+        final handler = MockRequestInterceptorHandler();
+        when(() => handler.next(any())).thenReturn(null);
 
-      await _runOnRequest(interceptor, options, handler);
+        await _runOnRequest(interceptor, options, handler);
 
-      expect(options.headers['apikey'], anonKey);
-      expect(options.headers['Authorization'], 'Bearer $userToken');
-      verify(() => handler.next(options)).called(1);
-    });
-
-    test('other function with no stored token sends apikey, no Authorization',
-        () async {
-      when(() => mockAccessTokenProvider.readAccessToken())
-          .thenAnswer((_) async => null);
-
-      final options = RequestOptions(path: 'https://host/entries-list');
-      final handler = MockRequestInterceptorHandler();
-      when(() => handler.next(any())).thenReturn(null);
-
-      await _runOnRequest(interceptor, options, handler);
-
-      expect(options.headers['apikey'], anonKey);
-      expect(options.headers.containsKey('Authorization'), isFalse);
-      verify(() => handler.next(options)).called(1);
-    });
+        expect(options.headers['apikey'], anonKey);
+        expect(options.headers['Authorization'], 'Bearer $userToken');
+        verify(() => handler.next(options)).called(1);
+      },
+    );
 
     test(
-        'a thrown PlatformException from readAccessToken never crashes the '
+      'other function with no stored token sends apikey, no Authorization',
+      () async {
+        when(() => mockAccessTokenProvider.readAccessToken())
+            .thenAnswer((_) async => null);
+
+        final options = RequestOptions(path: 'https://host/entries-list');
+        final handler = MockRequestInterceptorHandler();
+        when(() => handler.next(any())).thenReturn(null);
+
+        await _runOnRequest(interceptor, options, handler);
+
+        expect(options.headers['apikey'], anonKey);
+        expect(options.headers.containsKey('Authorization'), isFalse);
+        verify(() => handler.next(options)).called(1);
+      },
+    );
+
+    test('a thrown PlatformException from readAccessToken never crashes the '
         'pipeline — proceeds with no Authorization header', () async {
       when(() => mockAccessTokenProvider.readAccessToken())
           .thenThrow(Exception('secure storage unavailable'));
@@ -92,8 +95,7 @@ void main() {
       verify(() => handler.next(options)).called(1);
     });
 
-    test(
-        'a path that makes functionNameOf throw (malformed percent-escape) '
+    test('a path that makes functionNameOf throw (malformed percent-escape) '
         'still completes instead of hanging the request', () async {
       when(() => mockAccessTokenProvider.readAccessToken())
           .thenAnswer((_) async => null);

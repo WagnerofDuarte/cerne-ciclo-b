@@ -139,7 +139,10 @@ void main() {
 
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureStorageChannel, handleSecureStorageCall);
+        .setMockMethodCallHandler(
+          secureStorageChannel,
+          handleSecureStorageCall,
+        );
     fakePathProvider = FakePathProviderPlatform();
     PathProviderPlatform.instance = fakePathProvider;
 
@@ -193,106 +196,100 @@ void main() {
     }
   }
 
-  test(
-    'happy path: driving the real, DI-resolved AudioEntryCubit through '
-    'startRecording() + stopRecording() (fake MicRecorder/AudioTranscriber) '
-    'then save() fires a genuine POST to entries-create with the right '
-    'URL/headers/body (source: audio, mediaDurationSeconds), emits '
-    'AudioSaved, the entry really lands in the real entries Hive box, and '
-    'the temp recording file is deleted',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': {
-          'id': 'e2e-audio-entry-1',
-          'content': 'Hoje foi um bom dia.',
-          'source': 'audio',
-          'chatMessageId': null,
-          'occurredAt': '2026-01-01T00:00:00Z',
-          'serverRevision': 1,
-          'createdAt': '2026-01-01T00:00:00Z',
-          'updatedAt': '2026-01-01T00:00:00Z',
-          'mediaDurationSeconds': 7,
-        },
-      });
-
-      // The exact factory resolution `placeholder_screens.dart`'s "+"
-      // control performs (Boundaries: a fresh instance per "+" tap).
-      final cubit = sl<AudioEntryCubit>();
-      addTearDown(cubit.close);
-
-      await cubit.startRecording();
-      await cubit.stopRecording();
-
-      expect(cubit.state, isA<AudioTranscribed>());
-      expect((cubit.state as AudioTranscribed).text, 'Hoje foi um bom dia.');
-
-      await cubit.save();
-
-      expect(cubit.state, isA<AudioSaved>());
-
-      // Exactly one real request left through the fake transport, built
-      // by the real UrlBuilder/HeaderInterceptor, not a mock of ApiClient.
-      expect(adapter.requests, hasLength(1));
-      final sent = adapter.requests.single;
-      expect(sent.path, sl<UrlBuilder>().build('entries-create'));
-      expect(sent.data, {
+  test('happy path: driving the real, DI-resolved AudioEntryCubit through '
+      'startRecording() + stopRecording() (fake MicRecorder/AudioTranscriber) '
+      'then save() fires a genuine POST to entries-create with the right '
+      'URL/headers/body (source: audio, mediaDurationSeconds), emits '
+      'AudioSaved, the entry really lands in the real entries Hive box, and '
+      'the temp recording file is deleted', () async {
+    adapter.queueJsonResponse(200, {
+      'data': {
+        'id': 'e2e-audio-entry-1',
         'content': 'Hoje foi um bom dia.',
         'source': 'audio',
+        'chatMessageId': null,
+        'occurredAt': '2026-01-01T00:00:00Z',
+        'serverRevision': 1,
+        'createdAt': '2026-01-01T00:00:00Z',
+        'updatedAt': '2026-01-01T00:00:00Z',
         'mediaDurationSeconds': 7,
-      });
-      expect(sent.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
-      expect(sent.headers['Authorization'], 'Bearer e2e-test-access-token');
+      },
+    });
 
-      // The real write-through happened against the real Hive box.
-      final box = sl<Box<Map>>();
-      final stored = box.get('e2e-audio-entry-1');
-      expect(stored, isNotNull);
-      expect(stored!['content'], 'Hoje foi um bom dia.');
-      expect(stored['source'], 'audio');
-      expect(stored['mediaDurationSeconds'], 7);
+    // The exact factory resolution `placeholder_screens.dart`'s "+"
+    // control performs (Boundaries: a fresh instance per "+" tap).
+    final cubit = sl<AudioEntryCubit>();
+    addTearDown(cubit.close);
 
-      // Best-effort cleanup of the temp recording file on a successful
-      // save (`AudioEntryCubit.save()`'s `_deleteRecordingFile`).
-      await waitUntilDeleted(recordingFile);
-      expect(recordingFile.existsSync(), isFalse);
-    },
-  );
+    await cubit.startRecording();
+    await cubit.stopRecording();
 
-  test(
-    'failure path: a non-retryable backend error (VALIDATION_ERROR) '
-    'surfaces through the real pipeline as AudioError carrying '
-    "Failure.message verbatim, fires exactly one request (no retry — "
-    "VALIDATION_ERROR isn't one of the 6 retryable codes), never writes to "
-    'the real entries Hive box, and preserves the recording file for a '
-    'retried save()',
-    () async {
-      adapter.queueJsonResponse(400, {
-        'code': 'VALIDATION_ERROR',
-        'message': 'Conteúdo inválido.',
-        'retryable': false,
-      });
+    expect(cubit.state, isA<AudioTranscribed>());
+    expect((cubit.state as AudioTranscribed).text, 'Hoje foi um bom dia.');
 
-      final cubit = sl<AudioEntryCubit>();
-      addTearDown(cubit.close);
+    await cubit.save();
 
-      await cubit.startRecording();
-      await cubit.stopRecording();
-      await cubit.save();
+    expect(cubit.state, isA<AudioSaved>());
 
-      expect(cubit.state, isA<AudioError>());
-      final errorState = cubit.state as AudioError;
-      expect(errorState.message, 'Conteúdo inválido.');
-      expect(errorState.text, 'Hoje foi um bom dia.');
-      expect(errorState.path, recordingFile.path);
-      expect(adapter.requests, hasLength(1));
+    // Exactly one real request left through the fake transport, built
+    // by the real UrlBuilder/HeaderInterceptor, not a mock of ApiClient.
+    expect(adapter.requests, hasLength(1));
+    final sent = adapter.requests.single;
+    expect(sent.path, sl<UrlBuilder>().build('entries-create'));
+    expect(sent.data, {
+      'content': 'Hoje foi um bom dia.',
+      'source': 'audio',
+      'mediaDurationSeconds': 7,
+    });
+    expect(sent.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
+    expect(sent.headers['Authorization'], 'Bearer e2e-test-access-token');
 
-      final box = sl<Box<Map>>();
-      expect(box.values, isEmpty);
+    // The real write-through happened against the real Hive box.
+    final box = sl<Box<Map>>();
+    final stored = box.get('e2e-audio-entry-1');
+    expect(stored, isNotNull);
+    expect(stored!['content'], 'Hoje foi um bom dia.');
+    expect(stored['source'], 'audio');
+    expect(stored['mediaDurationSeconds'], 7);
 
-      // A save failure preserves the file for a retried Salvar tap — never
-      // deleted on this path (`AudioEntryCubit.save()` only deletes on
-      // success).
-      expect(recordingFile.existsSync(), isTrue);
-    },
-  );
+    // Best-effort cleanup of the temp recording file on a successful
+    // save (`AudioEntryCubit.save()`'s `_deleteRecordingFile`).
+    await waitUntilDeleted(recordingFile);
+    expect(recordingFile.existsSync(), isFalse);
+  });
+
+  test('failure path: a non-retryable backend error (VALIDATION_ERROR) '
+      'surfaces through the real pipeline as AudioError carrying '
+      "Failure.message verbatim, fires exactly one request (no retry — "
+      "VALIDATION_ERROR isn't one of the 6 retryable codes), never writes to "
+      'the real entries Hive box, and preserves the recording file for a '
+      'retried save()', () async {
+    adapter.queueJsonResponse(400, {
+      'code': 'VALIDATION_ERROR',
+      'message': 'Conteúdo inválido.',
+      'retryable': false,
+    });
+
+    final cubit = sl<AudioEntryCubit>();
+    addTearDown(cubit.close);
+
+    await cubit.startRecording();
+    await cubit.stopRecording();
+    await cubit.save();
+
+    expect(cubit.state, isA<AudioError>());
+    final errorState = cubit.state as AudioError;
+    expect(errorState.message, 'Conteúdo inválido.');
+    expect(errorState.text, 'Hoje foi um bom dia.');
+    expect(errorState.path, recordingFile.path);
+    expect(adapter.requests, hasLength(1));
+
+    final box = sl<Box<Map>>();
+    expect(box.values, isEmpty);
+
+    // A save failure preserves the file for a retried Salvar tap — never
+    // deleted on this path (`AudioEntryCubit.save()` only deletes on
+    // success).
+    expect(recordingFile.existsSync(), isTrue);
+  });
 }

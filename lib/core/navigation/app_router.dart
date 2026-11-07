@@ -110,11 +110,10 @@ GoRouter buildAppRouter({
       ),
       GoRoute(
         path: AppRoutePaths.meusRegistros,
-        builder: (context, state) =>
-            MeusRegistrosScreen(
-              cubit: sl<MeusRegistrosCubit>(),
-              searchCubit: sl<EntriesSearchCubit>(),
-            ),
+        builder: (context, state) => MeusRegistrosScreen(
+          cubit: sl<MeusRegistrosCubit>(),
+          searchCubit: sl<EntriesSearchCubit>(),
+        ),
         routes: [
           // spec-4-4 (RF07) — `:id` is either a real server id or a
           // still-pending/failed placeholder's synthetic `tempId`
@@ -124,8 +123,7 @@ GoRouter buildAppRouter({
           GoRoute(
             path: ':id',
             builder: (context, state) => EntryDetailScreen(
-              cubit: sl<EntryDetailCubit>()
-                ..load(state.pathParameters['id']!),
+              cubit: sl<EntryDetailCubit>()..load(state.pathParameters['id']!),
             ),
           ),
         ],

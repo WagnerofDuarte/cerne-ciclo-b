@@ -51,7 +51,8 @@ class ChatTokenEvent extends ChatStreamEvent {
 
   @override
   bool operator ==(Object other) =>
-      identical(this, other) || (other is ChatTokenEvent && other.delta == delta);
+      identical(this, other) ||
+      (other is ChatTokenEvent && other.delta == delta);
 
   @override
   int get hashCode => delta.hashCode;

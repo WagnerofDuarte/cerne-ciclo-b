@@ -150,7 +150,9 @@ void main() {
       final cubit = _buildCubit(fakeRepository);
       final loadFuture = cubit.load('e1');
 
-      await tester.pumpWidget(MaterialApp(home: EntryDetailScreen(cubit: cubit)));
+      await tester.pumpWidget(
+        MaterialApp(home: EntryDetailScreen(cubit: cubit)),
+      );
 
       expect(find.text('Conteúdo do registro.'), findsNothing);
       expect(find.byType(SyncBadge), findsNothing);
@@ -161,45 +163,41 @@ void main() {
     },
   );
 
-  testWidgets(
-    'EntryDetailData renders content, source, local time, and a Sync '
-    'Badge with no onRetryTap — zero edit affordance on the screen '
-    '(Acceptance Criteria)',
-    (tester) async {
-      final fakeRepository = _FakeEntriesRepository()
-        ..queueGetById(right(_entry('e1')));
-      final cubit = _buildCubit(fakeRepository);
-      final loadFuture = cubit.load('e1');
+  testWidgets('EntryDetailData renders content, source, local time, and a Sync '
+      'Badge with no onRetryTap — zero edit affordance on the screen '
+      '(Acceptance Criteria)', (tester) async {
+    final fakeRepository = _FakeEntriesRepository()
+      ..queueGetById(right(_entry('e1')));
+    final cubit = _buildCubit(fakeRepository);
+    final loadFuture = cubit.load('e1');
 
-      await tester.pumpWidget(MaterialApp(home: EntryDetailScreen(cubit: cubit)));
-      await loadFuture;
-      await tester.pump();
+    await tester.pumpWidget(MaterialApp(home: EntryDetailScreen(cubit: cubit)));
+    await loadFuture;
+    await tester.pump();
 
-      expect(find.text('Conteúdo do registro.'), findsOneWidget);
-      expect(find.text('Texto'), findsOneWidget);
-      expect(find.byType(SyncBadge), findsOneWidget);
-      final badge = tester.widget<SyncBadge>(find.byType(SyncBadge));
-      expect(badge.onRetryTap, isNull);
-      expect(find.byIcon(Icons.edit), findsNothing);
-      expect(find.textContaining('Editar'), findsNothing);
-    },
-  );
+    expect(find.text('Conteúdo do registro.'), findsOneWidget);
+    expect(find.text('Texto'), findsOneWidget);
+    expect(find.byType(SyncBadge), findsOneWidget);
+    final badge = tester.widget<SyncBadge>(find.byType(SyncBadge));
+    expect(badge.onRetryTap, isNull);
+    expect(find.byIcon(Icons.edit), findsNothing);
+    expect(find.textContaining('Editar'), findsNothing);
+  });
 
-  testWidgets(
-    'EntryDetailNotFound renders the generic not-found treatment',
-    (tester) async {
-      final fakeRepository = _FakeEntriesRepository()
-        ..queueGetById(left(const Failure.notFound(message: 'Não encontrado')));
-      final cubit = _buildCubit(fakeRepository);
-      final loadFuture = cubit.load('unknown-id');
+  testWidgets('EntryDetailNotFound renders the generic not-found treatment', (
+    tester,
+  ) async {
+    final fakeRepository = _FakeEntriesRepository()
+      ..queueGetById(left(const Failure.notFound(message: 'Não encontrado')));
+    final cubit = _buildCubit(fakeRepository);
+    final loadFuture = cubit.load('unknown-id');
 
-      await tester.pumpWidget(MaterialApp(home: EntryDetailScreen(cubit: cubit)));
-      await loadFuture;
-      await tester.pump();
+    await tester.pumpWidget(MaterialApp(home: EntryDetailScreen(cubit: cubit)));
+    await loadFuture;
+    await tester.pump();
 
-      expect(find.text('Registro não encontrado'), findsOneWidget);
-    },
-  );
+    expect(find.text('Registro não encontrado'), findsOneWidget);
+  });
 
   testWidgets(
     'EntryDetailError (e.g. an offline cache miss) renders the exact same '
@@ -211,7 +209,9 @@ void main() {
       final cubit = _buildCubit(fakeRepository);
       final loadFuture = cubit.load('e1');
 
-      await tester.pumpWidget(MaterialApp(home: EntryDetailScreen(cubit: cubit)));
+      await tester.pumpWidget(
+        MaterialApp(home: EntryDetailScreen(cubit: cubit)),
+      );
       await loadFuture;
       await tester.pump();
 
@@ -228,7 +228,9 @@ void main() {
       final cubit = _buildCubit(fakeRepository);
       final loadFuture = cubit.load('e1');
 
-      await tester.pumpWidget(MaterialApp(home: EntryDetailScreen(cubit: cubit)));
+      await tester.pumpWidget(
+        MaterialApp(home: EntryDetailScreen(cubit: cubit)),
+      );
       await loadFuture;
       await tester.pump();
 

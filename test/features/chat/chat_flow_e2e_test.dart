@@ -131,7 +131,10 @@ class _FakeHttpClientAdapter implements HttpClientAdapter {
   void close({bool force = false}) {}
 }
 
-Map<String, dynamic> _sessionJson({required String id, required String updatedAt}) => {
+Map<String, dynamic> _sessionJson({
+  required String id,
+  required String updatedAt,
+}) => {
   'id': id,
   'title': 'Nova conversa',
   'personaSnapshot': 'empatico',
@@ -276,7 +279,10 @@ void main() {
 
   setUp(() async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureStorageChannel, handleSecureStorageCall);
+        .setMockMethodCallHandler(
+          secureStorageChannel,
+          handleSecureStorageCall,
+        );
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
           connectivityMethodChannel,
@@ -318,222 +324,210 @@ void main() {
     await fakePathProvider.cleanUp();
   });
 
-  test(
-    'happy path: no existing session -> bootstrap creates one, then '
-    'sendMessage() drives a genuine multi-chunk SSE POST to '
-    'chat-messages-send/{sessionId} through the real pipeline, joining '
-    'tokens split across chunk boundaries into one complete AI bubble',
-    () async {
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueJsonResponse(200, {
-        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
-      });
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueSseResponse([
-        'event: message_created\ndata: {"id":"srv-msg-1"}\n\n',
-        // Split mid-event: this chunk ends inside an incomplete token
-        // event's `data:` line, the next one finishes it and immediately
-        // opens a second event in the same chunk.
-        'event: token\ndata: {"delta":"Ol',
-        'á, tudo bem?"}\n\nevent: token\ndata: {"delta":" Vamos conversar."}\n\n',
-        'event: done\ndata: {}\n\n',
-      ]);
+  test('happy path: no existing session -> bootstrap creates one, then '
+      'sendMessage() drives a genuine multi-chunk SSE POST to '
+      'chat-messages-send/{sessionId} through the real pipeline, joining '
+      'tokens split across chunk boundaries into one complete AI bubble', () async {
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueJsonResponse(200, {
+      'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+    });
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueSseResponse([
+      'event: message_created\ndata: {"id":"srv-msg-1"}\n\n',
+      // Split mid-event: this chunk ends inside an incomplete token
+      // event's `data:` line, the next one finishes it and immediately
+      // opens a second event in the same chunk.
+      'event: token\ndata: {"delta":"Ol',
+      'á, tudo bem?"}\n\nevent: token\ndata: {"delta":" Vamos conversar."}\n\n',
+      'event: done\ndata: {}\n\n',
+    ]);
 
-      final cubit = sl<ChatCubit>();
-      await cubit.init();
-      expect(cubit.state, isA<ChatReady>());
+    final cubit = sl<ChatCubit>();
+    await cubit.init();
+    expect(cubit.state, isA<ChatReady>());
 
-      await cubit.sendMessage('Oi, bom dia!');
+    await cubit.sendMessage('Oi, bom dia!');
 
-      final state = cubit.state as ChatReady;
-      expect(state.sessionId, 'session-1');
-      expect(state.isSending, isFalse);
-      expect(state.messages, hasLength(2));
-      expect(state.messages[0].role, ChatMessageRole.user);
-      expect(state.messages[0].content, 'Oi, bom dia!');
-      expect(state.messages[0].status, ChatMessageStatus.complete);
-      expect(state.messages[1].role, ChatMessageRole.assistant);
-      expect(state.messages[1].content, 'Olá, tudo bem? Vamos conversar.');
-      expect(state.messages[1].status, ChatMessageStatus.complete);
+    final state = cubit.state as ChatReady;
+    expect(state.sessionId, 'session-1');
+    expect(state.isSending, isFalse);
+    expect(state.messages, hasLength(2));
+    expect(state.messages[0].role, ChatMessageRole.user);
+    expect(state.messages[0].content, 'Oi, bom dia!');
+    expect(state.messages[0].status, ChatMessageStatus.complete);
+    expect(state.messages[1].role, ChatMessageRole.assistant);
+    expect(state.messages[1].content, 'Olá, tudo bem? Vamos conversar.');
+    expect(state.messages[1].status, ChatMessageStatus.complete);
 
-      expect(adapter.requests, hasLength(4));
-      final sendRequest = adapter.requests.last;
-      expect(
-        sendRequest.path,
-        sl<UrlBuilder>().build('chat-messages-send', ['session-1']),
-      );
-      expect(sendRequest.data, {'content': 'Oi, bom dia!'});
-      expect(sendRequest.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
-      expect(
-        sendRequest.headers['Authorization'],
-        'Bearer e2e-test-access-token',
-      );
+    expect(adapter.requests, hasLength(4));
+    final sendRequest = adapter.requests.last;
+    expect(
+      sendRequest.path,
+      sl<UrlBuilder>().build('chat-messages-send', ['session-1']),
+    );
+    expect(sendRequest.data, {'content': 'Oi, bom dia!'});
+    expect(sendRequest.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
+    expect(
+      sendRequest.headers['Authorization'],
+      'Bearer e2e-test-access-token',
+    );
 
-      // The real write-through happened against the real `chat_sessions`
-      // Hive box (`createSession()`'s own persist-then-return step).
-      final sessionsBox = sl<Box<Map>>(instanceName: 'chat_sessions');
-      expect(sessionsBox.get('session-1'), isNotNull);
-    },
-  );
+    // The real write-through happened against the real `chat_sessions`
+    // Hive box (`createSession()`'s own persist-then-return step).
+    final sessionsBox = sl<Box<Map>>(instanceName: 'chat_sessions');
+    expect(sessionsBox.get('session-1'), isNotNull);
+  });
 
-  test(
-    'review finding: a second sendMessage() on the same cubit, issued '
-    'after the first one fully completed, resolves promptly through the '
-    'real Dio/ApiClient.postStream subscription lifecycle — proves the '
-    'stale-_sendSubscription-nulling fix (chat_cubit.dart\'s '
-    '_consumeStream) actually works against a real subscription, not '
-    'only the fake-StreamController-backed one unit tests use',
-    () async {
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueJsonResponse(200, {
-        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
-      });
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueSseResponse([
-        'event: token\ndata: {"delta":"Primeira resposta."}\n\n'
-            'event: done\ndata: {}\n\n',
-      ]);
-      adapter.queueSseResponse([
-        'event: token\ndata: {"delta":"Segunda resposta."}\n\n'
-            'event: done\ndata: {}\n\n',
-      ]);
+  test('review finding: a second sendMessage() on the same cubit, issued '
+      'after the first one fully completed, resolves promptly through the '
+      'real Dio/ApiClient.postStream subscription lifecycle — proves the '
+      'stale-_sendSubscription-nulling fix (chat_cubit.dart\'s '
+      '_consumeStream) actually works against a real subscription, not '
+      'only the fake-StreamController-backed one unit tests use', () async {
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueJsonResponse(200, {
+      'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+    });
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueSseResponse([
+      'event: token\ndata: {"delta":"Primeira resposta."}\n\n'
+          'event: done\ndata: {}\n\n',
+    ]);
+    adapter.queueSseResponse([
+      'event: token\ndata: {"delta":"Segunda resposta."}\n\n'
+          'event: done\ndata: {}\n\n',
+    ]);
 
-      final cubit = sl<ChatCubit>();
-      await cubit.init();
+    final cubit = sl<ChatCubit>();
+    await cubit.init();
 
-      await cubit.sendMessage('Primeira pergunta.');
-      expect(
-        (cubit.state as ChatReady).messages[1].content,
-        'Primeira resposta.',
-      );
+    await cubit.sendMessage('Primeira pergunta.');
+    expect(
+      (cubit.state as ChatReady).messages[1].content,
+      'Primeira resposta.',
+    );
 
-      // Without the fix, the first call's own now-finished subscription
-      // is never cleared, so this second call's `await
-      // _sendSubscription?.cancel()` would hang on the real subscription
-      // — the timeout turns that hang into a clear failure instead of a
-      // stuck test run.
-      await cubit
-          .sendMessage('Segunda pergunta.')
-          .timeout(const Duration(seconds: 5));
+    // Without the fix, the first call's own now-finished subscription
+    // is never cleared, so this second call's `await
+    // _sendSubscription?.cancel()` would hang on the real subscription
+    // — the timeout turns that hang into a clear failure instead of a
+    // stuck test run.
+    await cubit
+        .sendMessage('Segunda pergunta.')
+        .timeout(const Duration(seconds: 5));
 
-      final state = cubit.state as ChatReady;
-      expect(state.messages, hasLength(4));
-      expect(state.messages[3].content, 'Segunda resposta.');
-      expect(state.messages[3].status, ChatMessageStatus.complete);
-    },
-  );
+    final state = cubit.state as ChatReady;
+    expect(state.messages, hasLength(4));
+    expect(state.messages[3].content, 'Segunda resposta.');
+    expect(state.messages[3].status, ChatMessageStatus.complete);
+  });
 
-  test(
-    'mid-stream drop: a connection that closes with no done/error event '
-    'keeps the AI bubble\'s partial text (never cleared) and marks it '
-    'failed, with no exception escaping the cubit',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': [_sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z')],
-      });
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueSseResponse([
-        'event: message_created\ndata: {"id":"srv-msg-1"}\n\n'
-            'event: token\ndata: {"delta":"Entendo."}\n\n',
-        // Stream ends here with no `done`/`error` event — a mid-stream
-        // drop (I/O matrix).
-      ]);
+  test('mid-stream drop: a connection that closes with no done/error event '
+      'keeps the AI bubble\'s partial text (never cleared) and marks it '
+      'failed, with no exception escaping the cubit', () async {
+    adapter.queueJsonResponse(200, {
+      'data': [
+        _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+      ],
+    });
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueSseResponse([
+      'event: message_created\ndata: {"id":"srv-msg-1"}\n\n'
+          'event: token\ndata: {"delta":"Entendo."}\n\n',
+      // Stream ends here with no `done`/`error` event — a mid-stream
+      // drop (I/O matrix).
+    ]);
 
-      final cubit = sl<ChatCubit>();
-      await cubit.init();
+    final cubit = sl<ChatCubit>();
+    await cubit.init();
 
-      await cubit.sendMessage('Como você está?');
+    await cubit.sendMessage('Como você está?');
 
-      final state = cubit.state as ChatReady;
-      expect(state.isSending, isFalse);
-      expect(state.messages, hasLength(2));
-      expect(state.messages[1].content, 'Entendo.');
-      expect(state.messages[1].status, ChatMessageStatus.failed);
-    },
-  );
+    final state = cubit.state as ChatReady;
+    expect(state.isSending, isFalse);
+    expect(state.messages, hasLength(2));
+    expect(state.messages[1].content, 'Entendo.');
+    expect(state.messages[1].status, ChatMessageStatus.failed);
+  });
 
-  test(
-    'in-band error event: an SSE `error` event with a taxonomy code marks '
-    'the AI bubble failed and fires exactly one POST (chat-messages-send '
-    'is excluded from transparent retry)',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': [_sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z')],
-      });
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueSseResponse([
-        'event: message_created\ndata: {"id":"srv-msg-1"}\n\n'
-            'event: error\ndata: {"code":"RATE_LIMITED","message":"Limite atingido."}\n\n',
-      ]);
+  test('in-band error event: an SSE `error` event with a taxonomy code marks '
+      'the AI bubble failed and fires exactly one POST (chat-messages-send '
+      'is excluded from transparent retry)', () async {
+    adapter.queueJsonResponse(200, {
+      'data': [
+        _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+      ],
+    });
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueSseResponse([
+      'event: message_created\ndata: {"id":"srv-msg-1"}\n\n'
+          'event: error\ndata: {"code":"RATE_LIMITED","message":"Limite atingido."}\n\n',
+    ]);
 
-      final cubit = sl<ChatCubit>();
-      await cubit.init();
+    final cubit = sl<ChatCubit>();
+    await cubit.init();
 
-      await cubit.sendMessage('Mais uma pergunta.');
+    await cubit.sendMessage('Mais uma pergunta.');
 
-      final state = cubit.state as ChatReady;
-      expect(state.isSending, isFalse);
-      expect(state.messages[1].content, '');
-      expect(state.messages[1].status, ChatMessageStatus.failed);
+    final state = cubit.state as ChatReady;
+    expect(state.isSending, isFalse);
+    expect(state.messages[1].content, '');
+    expect(state.messages[1].status, ChatMessageStatus.failed);
 
-      // Exactly 3 requests total (sessions-list, messages-list, the one
-      // send) — no retry attempt behind the scenes.
-      expect(adapter.requests, hasLength(3));
-    },
-  );
+    // Exactly 3 requests total (sessions-list, messages-list, the one
+    // send) — no retry attempt behind the scenes.
+    expect(adapter.requests, hasLength(3));
+  });
 
-  test(
-    'spec-6-3: tap-to-retry on a failed AI bubble (its preceding user '
-    'message already carrying a serverId) regenerates that exact bubble '
-    'in place through the real chat-messages-retry endpoint — no new '
-    'bubble pair, no re-send of the question',
-    () async {
-      adapter.queueJsonResponse(200, {
-        'data': [_sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z')],
-      });
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      // `message_created` arrives (capturing the serverId), then the
-      // stream drops mid-token with no `done`/`error` — I/O matrix's
-      // "Tap retry, normal" precondition.
-      adapter.queueSseResponse([
-        'event: message_created\ndata: {"id":"srv-msg-1"}\n\n'
-            'event: token\ndata: {"delta":"Entendo."}\n\n',
-      ]);
-      adapter.queueSseResponse([
-        'event: token\ndata: {"delta":"Resposta regenerada."}\n\n'
-            'event: done\ndata: {}\n\n',
-      ]);
+  test('spec-6-3: tap-to-retry on a failed AI bubble (its preceding user '
+      'message already carrying a serverId) regenerates that exact bubble '
+      'in place through the real chat-messages-retry endpoint — no new '
+      'bubble pair, no re-send of the question', () async {
+    adapter.queueJsonResponse(200, {
+      'data': [
+        _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+      ],
+    });
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    // `message_created` arrives (capturing the serverId), then the
+    // stream drops mid-token with no `done`/`error` — I/O matrix's
+    // "Tap retry, normal" precondition.
+    adapter.queueSseResponse([
+      'event: message_created\ndata: {"id":"srv-msg-1"}\n\n'
+          'event: token\ndata: {"delta":"Entendo."}\n\n',
+    ]);
+    adapter.queueSseResponse([
+      'event: token\ndata: {"delta":"Resposta regenerada."}\n\n'
+          'event: done\ndata: {}\n\n',
+    ]);
 
-      final cubit = sl<ChatCubit>();
-      await cubit.init();
-      await cubit.sendMessage('Como você está?');
+    final cubit = sl<ChatCubit>();
+    await cubit.init();
+    await cubit.sendMessage('Como você está?');
 
-      var state = cubit.state as ChatReady;
-      expect(state.messages, hasLength(2));
-      final userMessageId = state.messages[0].id;
-      final aiMessageId = state.messages[1].id;
-      expect(state.messages[1].status, ChatMessageStatus.failed);
+    var state = cubit.state as ChatReady;
+    expect(state.messages, hasLength(2));
+    final userMessageId = state.messages[0].id;
+    final aiMessageId = state.messages[1].id;
+    expect(state.messages[1].status, ChatMessageStatus.failed);
 
-      await cubit.retryMessage(aiMessageId);
+    await cubit.retryMessage(aiMessageId);
 
-      state = cubit.state as ChatReady;
-      expect(state.messages, hasLength(2));
-      expect(state.messages[0].id, userMessageId);
-      expect(state.messages[0].content, 'Como você está?');
-      expect(state.messages[1].id, aiMessageId);
-      expect(state.messages[1].content, 'Resposta regenerada.');
-      expect(state.messages[1].status, ChatMessageStatus.complete);
+    state = cubit.state as ChatReady;
+    expect(state.messages, hasLength(2));
+    expect(state.messages[0].id, userMessageId);
+    expect(state.messages[0].content, 'Como você está?');
+    expect(state.messages[1].id, aiMessageId);
+    expect(state.messages[1].content, 'Resposta regenerada.');
+    expect(state.messages[1].status, ChatMessageStatus.complete);
 
-      final retryRequest = adapter.requests.last;
-      expect(
-        retryRequest.path,
-        sl<UrlBuilder>().build('chat-messages-retry', [
-          'session-1',
-          'srv-msg-1',
-        ]),
-      );
-    },
-  );
+    final retryRequest = adapter.requests.last;
+    expect(
+      retryRequest.path,
+      sl<UrlBuilder>().build('chat-messages-retry', ['session-1', 'srv-msg-1']),
+    );
+  });
 
   test(
     'spec-6-3: tap-to-retry on a failed bubble whose stream dropped '
@@ -542,7 +536,9 @@ void main() {
     'bubble slot — never calls chat-messages-retry with no serverId',
     () async {
       adapter.queueJsonResponse(200, {
-        'data': [_sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z')],
+        'data': [
+          _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+        ],
       });
       adapter.queueJsonResponse(200, {'data': <dynamic>[]});
       // Drops before `message_created` ever arrives — the user message
@@ -576,242 +572,221 @@ void main() {
         adapter.requests.every((r) => !r.path.contains('chat-messages-retry')),
         isTrue,
       );
-      final sendUrl = sl<UrlBuilder>().build('chat-messages-send', ['session-1']);
+      final sendUrl = sl<UrlBuilder>().build('chat-messages-send', [
+        'session-1',
+      ]);
       expect(adapter.requests.where((r) => r.path == sendUrl).length, 2);
     },
   );
 
-  test(
-    'spec-6-3: a live "offline" reading from the real connectivity_plus '
-    'event-channel pipeline flips ChatReady.isOffline to true',
-    () async {
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueJsonResponse(200, {
-        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
-      });
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+  test('spec-6-3: a live "offline" reading from the real connectivity_plus '
+      'event-channel pipeline flips ChatReady.isOffline to true', () async {
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueJsonResponse(200, {
+      'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+    });
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
 
-      final cubit = sl<ChatCubit>();
-      await cubit.init();
-      expect((cubit.state as ChatReady).isOffline, isFalse);
+    final cubit = sl<ChatCubit>();
+    await cubit.init();
+    expect((cubit.state as ChatReady).isOffline, isFalse);
 
-      await emitConnectivity(['none']);
+    await emitConnectivity(['none']);
 
-      expect((cubit.state as ChatReady).isOffline, isTrue);
-    },
-  );
+    expect((cubit.state as ChatReady).isOffline, isTrue);
+  });
 
-  test(
-    'spec-6-3: connectivity returning flips ChatReady.isOffline back to '
-    'false through the same real event-channel pipeline',
-    () async {
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueJsonResponse(200, {
-        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
-      });
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+  test('spec-6-3: connectivity returning flips ChatReady.isOffline back to '
+      'false through the same real event-channel pipeline', () async {
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueJsonResponse(200, {
+      'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+    });
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
 
-      final cubit = sl<ChatCubit>();
-      await cubit.init();
+    final cubit = sl<ChatCubit>();
+    await cubit.init();
 
-      await emitConnectivity(['none']);
-      expect((cubit.state as ChatReady).isOffline, isTrue);
+    await emitConnectivity(['none']);
+    expect((cubit.state as ChatReady).isOffline, isTrue);
 
-      await emitConnectivity(['wifi']);
-      expect((cubit.state as ChatReady).isOffline, isFalse);
-    },
-  );
+    await emitConnectivity(['wifi']);
+    expect((cubit.state as ChatReady).isOffline, isFalse);
+  });
 
-  test(
-    'spec-6-4: bookmarkMessage() on a user bubble drives a genuine POST '
-    'to entries-create through the real SaveChatMessageAsEntryUseCase -> '
-    'EntriesRepositoryImpl -> ApiClient pipeline, flips that bubble to '
-    'BookmarkSaved, and persists the new Entry to the real `entries` Hive '
-    'box -- none of the mocked chat_cubit_test.dart/chat_screen_test.dart '
-    'coverage drives this cross-feature call through real production '
-    'wiring',
-    () async {
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueJsonResponse(200, {
-        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
-      });
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueSseResponse([
-        'event: message_created\ndata: {"id":"srv-msg-1"}\n\n'
-            'event: token\ndata: {"delta":"Entendo."}\n\n'
-            'event: done\ndata: {}\n\n',
-      ]);
+  test('spec-6-4: bookmarkMessage() on a user bubble drives a genuine POST '
+      'to entries-create through the real SaveChatMessageAsEntryUseCase -> '
+      'EntriesRepositoryImpl -> ApiClient pipeline, flips that bubble to '
+      'BookmarkSaved, and persists the new Entry to the real `entries` Hive '
+      'box -- none of the mocked chat_cubit_test.dart/chat_screen_test.dart '
+      'coverage drives this cross-feature call through real production '
+      'wiring', () async {
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueJsonResponse(200, {
+      'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+    });
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueSseResponse([
+      'event: message_created\ndata: {"id":"srv-msg-1"}\n\n'
+          'event: token\ndata: {"delta":"Entendo."}\n\n'
+          'event: done\ndata: {}\n\n',
+    ]);
 
-      final cubit = sl<ChatCubit>();
-      await cubit.init();
-      await cubit.sendMessage('Como você está?');
+    final cubit = sl<ChatCubit>();
+    await cubit.init();
+    await cubit.sendMessage('Como você está?');
 
-      var state = cubit.state as ChatReady;
-      final userMessage = state.messages[0];
-      expect(userMessage.role, ChatMessageRole.user);
-      expect(userMessage.serverId, 'srv-msg-1');
-      expect(userMessage.bookmarkState, const BookmarkState.idle());
+    var state = cubit.state as ChatReady;
+    final userMessage = state.messages[0];
+    expect(userMessage.role, ChatMessageRole.user);
+    expect(userMessage.serverId, 'srv-msg-1');
+    expect(userMessage.bookmarkState, const BookmarkState.idle());
 
-      adapter.queueJsonResponse(
-        200,
-        {'data': _entryJson(id: 'entry-1', chatMessageId: 'srv-msg-1')},
-      );
+    adapter.queueJsonResponse(200, {
+      'data': _entryJson(id: 'entry-1', chatMessageId: 'srv-msg-1'),
+    });
 
-      await cubit.bookmarkMessage(userMessage.id);
+    await cubit.bookmarkMessage(userMessage.id);
 
-      state = cubit.state as ChatReady;
-      expect(state.messages[0].bookmarkState, const BookmarkState.saved());
-      // Rest of the session stays untouched by the bookmark save.
-      expect(state.isSending, isFalse);
-      expect(state.messages[1].content, 'Entendo.');
+    state = cubit.state as ChatReady;
+    expect(state.messages[0].bookmarkState, const BookmarkState.saved());
+    // Rest of the session stays untouched by the bookmark save.
+    expect(state.isSending, isFalse);
+    expect(state.messages[1].content, 'Entendo.');
 
-      final createRequest = adapter.requests.last;
-      expect(
-        createRequest.path,
-        sl<UrlBuilder>().build('entries-create'),
-      );
-      expect(createRequest.data, {
-        'content': 'Como você está?',
-        'source': 'chat',
-        'chatMessageId': 'srv-msg-1',
-      });
-      expect(
-        createRequest.headers['Authorization'],
-        'Bearer e2e-test-access-token',
-      );
+    final createRequest = adapter.requests.last;
+    expect(createRequest.path, sl<UrlBuilder>().build('entries-create'));
+    expect(createRequest.data, {
+      'content': 'Como você está?',
+      'source': 'chat',
+      'chatMessageId': 'srv-msg-1',
+    });
+    expect(
+      createRequest.headers['Authorization'],
+      'Bearer e2e-test-access-token',
+    );
 
-      // The real write-through happened against the real `entries` Hive
-      // box (`EntriesRepositoryImpl.create()`'s own persist-then-return
-      // step) -- proves the use case really reached the entries feature's
-      // own repository, not a fake standing in for it.
-      final entriesBox = sl<Box<Map>>();
-      expect(entriesBox.get('entry-1'), isNotNull);
+    // The real write-through happened against the real `entries` Hive
+    // box (`EntriesRepositoryImpl.create()`'s own persist-then-return
+    // step) -- proves the use case really reached the entries feature's
+    // own repository, not a fake standing in for it.
+    final entriesBox = sl<Box<Map>>();
+    expect(entriesBox.get('entry-1'), isNotNull);
 
-      // I/O matrix: "Already saved" -- tapping a BookmarkSaved bubble
-      // again is a client-side no-op, no second entries-create call.
-      await cubit.bookmarkMessage(userMessage.id);
-      expect(adapter.requests, hasLength(5));
-    },
-  );
+    // I/O matrix: "Already saved" -- tapping a BookmarkSaved bubble
+    // again is a client-side no-op, no second entries-create call.
+    await cubit.bookmarkMessage(userMessage.id);
+    expect(adapter.requests, hasLength(5));
+  });
 
-  test(
-    'spec-6-4: a failing entries-create flips only the tapped bubble to '
-    'BookmarkError, leaving the rest of the Chat Session (composer, other '
-    'bubbles) fully usable -- the save never propagates past '
-    'bookmarkMessage()',
-    () async {
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueJsonResponse(200, {
-        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
-      });
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueSseResponse([
-        'event: message_created\ndata: {"id":"srv-msg-1"}\n\n'
-            'event: token\ndata: {"delta":"Entendo."}\n\n'
-            'event: done\ndata: {}\n\n',
-      ]);
+  test('spec-6-4: a failing entries-create flips only the tapped bubble to '
+      'BookmarkError, leaving the rest of the Chat Session (composer, other '
+      'bubbles) fully usable -- the save never propagates past '
+      'bookmarkMessage()', () async {
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueJsonResponse(200, {
+      'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+    });
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueSseResponse([
+      'event: message_created\ndata: {"id":"srv-msg-1"}\n\n'
+          'event: token\ndata: {"delta":"Entendo."}\n\n'
+          'event: done\ndata: {}\n\n',
+    ]);
 
-      final cubit = sl<ChatCubit>();
-      await cubit.init();
-      await cubit.sendMessage('Como você está?');
+    final cubit = sl<ChatCubit>();
+    await cubit.init();
+    await cubit.sendMessage('Como você está?');
 
-      final userMessage = (cubit.state as ChatReady).messages[0];
+    final userMessage = (cubit.state as ChatReady).messages[0];
 
-      adapter.queueErrorResponse('INTERNAL_ERROR', 'Falha ao salvar.');
+    adapter.queueErrorResponse('INTERNAL_ERROR', 'Falha ao salvar.');
 
-      await cubit.bookmarkMessage(userMessage.id);
+    await cubit.bookmarkMessage(userMessage.id);
 
-      final state = cubit.state as ChatReady;
-      expect(state.messages[0].bookmarkState, isA<BookmarkError>());
-      // The session itself is untouched: still ChatReady, composer
-      // re-enabled, the unrelated AI bubble unaffected.
-      expect(state.isSending, isFalse);
-      expect(state.isOffline, isFalse);
-      expect(state.messages[1].content, 'Entendo.');
-      expect(state.messages[1].status, ChatMessageStatus.complete);
-    },
-  );
+    final state = cubit.state as ChatReady;
+    expect(state.messages[0].bookmarkState, isA<BookmarkError>());
+    // The session itself is untouched: still ChatReady, composer
+    // re-enabled, the unrelated AI bubble unaffected.
+    expect(state.isSending, isFalse);
+    expect(state.isOffline, isFalse);
+    expect(state.messages[1].content, 'Entendo.');
+    expect(state.messages[1].status, ChatMessageStatus.complete);
+  });
 
-  test(
-    'spec-6-5: reaching the message-count threshold (5 real sendMessage '
-    'calls) drives a genuine POST to chat-insight-create/{sessionId}, '
-    'unawaited alongside the 5th message\'s own chat-messages-send call, '
-    'with the real triggerType/triggerKey body and headers; a \'ready\' '
-    'response populates ChatReady.activeInsight -- none of the mocked '
-    'chat_cubit_test.dart coverage for this story drives the call through '
-    'the real ApiClient/Dio pipeline',
-    () async {
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueJsonResponse(200, {
-        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
-      });
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+  test('spec-6-5: reaching the message-count threshold (5 real sendMessage '
+      'calls) drives a genuine POST to chat-insight-create/{sessionId}, '
+      'unawaited alongside the 5th message\'s own chat-messages-send call, '
+      'with the real triggerType/triggerKey body and headers; a \'ready\' '
+      'response populates ChatReady.activeInsight -- none of the mocked '
+      'chat_cubit_test.dart coverage for this story drives the call through '
+      'the real ApiClient/Dio pipeline', () async {
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueJsonResponse(200, {
+      'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+    });
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
 
-      final cubit = sl<ChatCubit>();
-      await cubit.init();
+    final cubit = sl<ChatCubit>();
+    await cubit.init();
 
-      for (var i = 0; i < 4; i++) {
-        _queuePlainReply(adapter, 'Resposta $i.');
-        await cubit.sendMessage('Mensagem $i');
-      }
-      expect(
-        adapter.requests.where((r) => r.path.contains('chat-insight-create')),
-        isEmpty,
-      );
+    for (var i = 0; i < 4; i++) {
+      _queuePlainReply(adapter, 'Resposta $i.');
+      await cubit.sendMessage('Mensagem $i');
+    }
+    expect(
+      adapter.requests.where((r) => r.path.contains('chat-insight-create')),
+      isEmpty,
+    );
 
-      adapter.queueResponseForPath(
-        'chat-insight-create',
-        200,
-        {
-          'data': _insightJson(
-            id: 'ins-1',
-            sessionId: 'session-1',
-            triggerType: 'message_count',
-            status: 'ready',
-            content: 'Você mencionou isso algumas vezes.',
-          ),
-        },
-      );
-      _queuePlainReply(adapter, 'Resposta final.');
+    adapter.queueResponseForPath('chat-insight-create', 200, {
+      'data': _insightJson(
+        id: 'ins-1',
+        sessionId: 'session-1',
+        triggerType: 'message_count',
+        status: 'ready',
+        content: 'Você mencionou isso algumas vezes.',
+      ),
+    });
+    _queuePlainReply(adapter, 'Resposta final.');
 
-      await cubit.sendMessage('Mensagem final');
-      // Flushes the microtask hops `_fireInsightTrigger`'s own unawaited
-      // chain (isolatedSideEffect -> ChatRepository.generateInsight ->
-      // ChatRemoteDataSource -> ApiClient.post -> the real Dio/
-      // interceptor pipeline -> this fake adapter) needs to resolve and
-      // reach `_applyInsightResult` -- same convention `emitConnectivity`
-      // already uses for its own cross-channel hops.
-      for (var i = 0; i < 10; i++) {
-        await Future<void>.delayed(Duration.zero);
-      }
+    await cubit.sendMessage('Mensagem final');
+    // Flushes the microtask hops `_fireInsightTrigger`'s own unawaited
+    // chain (isolatedSideEffect -> ChatRepository.generateInsight ->
+    // ChatRemoteDataSource -> ApiClient.post -> the real Dio/
+    // interceptor pipeline -> this fake adapter) needs to resolve and
+    // reach `_applyInsightResult` -- same convention `emitConnectivity`
+    // already uses for its own cross-channel hops.
+    for (var i = 0; i < 10; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
 
-      final state = cubit.state as ChatReady;
-      expect(
-        state.activeInsight,
-        const ChatInsight(
-          id: 'ins-1',
-          content: 'Você mencionou isso algumas vezes.',
-        ),
-      );
+    final state = cubit.state as ChatReady;
+    expect(
+      state.activeInsight,
+      const ChatInsight(
+        id: 'ins-1',
+        content: 'Você mencionou isso algumas vezes.',
+      ),
+    );
 
-      final insightRequest = adapter.requests.firstWhere(
-        (r) => r.path.contains('chat-insight-create'),
-      );
-      expect(
-        insightRequest.path,
-        sl<UrlBuilder>().build('chat-insight-create', ['session-1']),
-      );
-      expect(insightRequest.data, {
-        'triggerType': 'message_count',
-        'triggerKey': 'insight-0',
-      });
-      expect(insightRequest.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
-      expect(
-        insightRequest.headers['Authorization'],
-        'Bearer e2e-test-access-token',
-      );
-    },
-  );
+    final insightRequest = adapter.requests.firstWhere(
+      (r) => r.path.contains('chat-insight-create'),
+    );
+    expect(
+      insightRequest.path,
+      sl<UrlBuilder>().build('chat-insight-create', ['session-1']),
+    );
+    expect(insightRequest.data, {
+      'triggerType': 'message_count',
+      'triggerKey': 'insight-0',
+    });
+    expect(insightRequest.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
+    expect(
+      insightRequest.headers['Authorization'],
+      'Bearer e2e-test-access-token',
+    );
+  });
 
   test(
     'spec-6-5: a failing chat-insight-create call -- mapped through the '
@@ -822,7 +797,10 @@ void main() {
     () async {
       adapter.queueJsonResponse(200, {'data': <dynamic>[]});
       adapter.queueJsonResponse(200, {
-        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+        'data': _sessionJson(
+          id: 'session-1',
+          updatedAt: '2026-01-01T00:00:00Z',
+        ),
       });
       adapter.queueJsonResponse(200, {'data': <dynamic>[]});
 
@@ -855,99 +833,89 @@ void main() {
     },
   );
 
-  test(
-    'spec-6-5 review fix: while the real connectivity_plus event-channel '
-    'pipeline reports "none", a fired inactivity trigger still closes/'
-    'reopens the window structurally but skips the network call entirely '
-    '-- no POST to chat-insight-create ever reaches the real transport, '
-    'and activeInsight stays null. Uncovered by chat_cubit_test.dart, '
-    'which only ever exercises this guard against a fake repository/'
-    'connectivity watcher, never the real event-channel + real ApiClient '
-    'pipeline together',
-    () async {
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueJsonResponse(200, {
-        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
-      });
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+  test('spec-6-5 review fix: while the real connectivity_plus event-channel '
+      'pipeline reports "none", a fired inactivity trigger still closes/'
+      'reopens the window structurally but skips the network call entirely '
+      '-- no POST to chat-insight-create ever reaches the real transport, '
+      'and activeInsight stays null. Uncovered by chat_cubit_test.dart, '
+      'which only ever exercises this guard against a fake repository/'
+      'connectivity watcher, never the real event-channel + real ApiClient '
+      'pipeline together', () async {
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueJsonResponse(200, {
+      'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+    });
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
 
-      // A dedicated instance -- never `sl<ChatCubit>()`, which always
-      // carries production's 2-minute inactivity timeout -- wired to the
-      // exact same real `ChatRepository`/`ConnectivityWatcher` singletons
-      // `sl` already resolves for Home/Chat; only the inactivity timeout
-      // is shortened, the one documented test seam `chat_cubit.dart`'s
-      // own constructor comment calls out ("production never passes
-      // anything else"). Closed explicitly below since it was never
-      // registered with `sl`, so `resetCoreDependencies()` never disposes
-      // it.
-      final cubit = ChatCubit(
-        sl<ChatRepository>(),
-        sl<ConnectivityWatcher>(),
-        sl<SaveChatMessageAsEntryUseCase>(),
-        insightInactivityTimeout: const Duration(milliseconds: 30),
-      );
-      await cubit.init();
+    // A dedicated instance -- never `sl<ChatCubit>()`, which always
+    // carries production's 2-minute inactivity timeout -- wired to the
+    // exact same real `ChatRepository`/`ConnectivityWatcher` singletons
+    // `sl` already resolves for Home/Chat; only the inactivity timeout
+    // is shortened, the one documented test seam `chat_cubit.dart`'s
+    // own constructor comment calls out ("production never passes
+    // anything else"). Closed explicitly below since it was never
+    // registered with `sl`, so `resetCoreDependencies()` never disposes
+    // it.
+    final cubit = ChatCubit(
+      sl<ChatRepository>(),
+      sl<ConnectivityWatcher>(),
+      sl<SaveChatMessageAsEntryUseCase>(),
+      insightInactivityTimeout: const Duration(milliseconds: 30),
+    );
+    await cubit.init();
 
-      await emitConnectivity(['none']);
-      expect((cubit.state as ChatReady).isOffline, isTrue);
+    await emitConnectivity(['none']);
+    expect((cubit.state as ChatReady).isOffline, isTrue);
 
-      // Long enough for the short inactivity timer above to have fired
-      // at least once for real.
-      await Future<void>.delayed(const Duration(milliseconds: 100));
+    // Long enough for the short inactivity timer above to have fired
+    // at least once for real.
+    await Future<void>.delayed(const Duration(milliseconds: 100));
 
-      expect(
-        adapter.requests.where((r) => r.path.contains('chat-insight-create')),
-        isEmpty,
-      );
-      expect((cubit.state as ChatReady).activeInsight, isNull);
+    expect(
+      adapter.requests.where((r) => r.path.contains('chat-insight-create')),
+      isEmpty,
+    );
+    expect((cubit.state as ChatReady).activeInsight, isNull);
 
-      await cubit.close();
-    },
-  );
+    await cubit.close();
+  });
 
-  test(
-    'spec-6-5: dismissInsight() clears ChatReady.activeInsight with no '
-    'further request ever reaching the real transport -- no dismiss '
-    'endpoint exists in the contract (Boundaries)',
-    () async {
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
-      adapter.queueJsonResponse(200, {
-        'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
-      });
-      adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+  test('spec-6-5: dismissInsight() clears ChatReady.activeInsight with no '
+      'further request ever reaching the real transport -- no dismiss '
+      'endpoint exists in the contract (Boundaries)', () async {
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
+    adapter.queueJsonResponse(200, {
+      'data': _sessionJson(id: 'session-1', updatedAt: '2026-01-01T00:00:00Z'),
+    });
+    adapter.queueJsonResponse(200, {'data': <dynamic>[]});
 
-      final cubit = sl<ChatCubit>();
-      await cubit.init();
+    final cubit = sl<ChatCubit>();
+    await cubit.init();
 
-      for (var i = 0; i < 4; i++) {
-        _queuePlainReply(adapter, 'Resposta $i.');
-        await cubit.sendMessage('Mensagem $i');
-      }
-      adapter.queueResponseForPath(
-        'chat-insight-create',
-        200,
-        {
-          'data': _insightJson(
-            id: 'ins-1',
-            sessionId: 'session-1',
-            triggerType: 'message_count',
-            status: 'ready',
-            content: 'Um padrão notado.',
-          ),
-        },
-      );
-      _queuePlainReply(adapter, 'Resposta final.');
-      await cubit.sendMessage('Mensagem final');
-      for (var i = 0; i < 10; i++) {
-        await Future<void>.delayed(Duration.zero);
-      }
-      expect((cubit.state as ChatReady).activeInsight, isNotNull);
+    for (var i = 0; i < 4; i++) {
+      _queuePlainReply(adapter, 'Resposta $i.');
+      await cubit.sendMessage('Mensagem $i');
+    }
+    adapter.queueResponseForPath('chat-insight-create', 200, {
+      'data': _insightJson(
+        id: 'ins-1',
+        sessionId: 'session-1',
+        triggerType: 'message_count',
+        status: 'ready',
+        content: 'Um padrão notado.',
+      ),
+    });
+    _queuePlainReply(adapter, 'Resposta final.');
+    await cubit.sendMessage('Mensagem final');
+    for (var i = 0; i < 10; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect((cubit.state as ChatReady).activeInsight, isNotNull);
 
-      final requestCountBeforeDismiss = adapter.requests.length;
-      cubit.dismissInsight();
+    final requestCountBeforeDismiss = adapter.requests.length;
+    cubit.dismissInsight();
 
-      expect((cubit.state as ChatReady).activeInsight, isNull);
-      expect(adapter.requests, hasLength(requestCountBeforeDismiss));
-    },
-  );
+    expect((cubit.state as ChatReady).activeInsight, isNull);
+    expect(adapter.requests, hasLength(requestCountBeforeDismiss));
+  });
 }

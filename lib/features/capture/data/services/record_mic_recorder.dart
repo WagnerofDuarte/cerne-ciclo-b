@@ -82,10 +82,7 @@ class RecordMicRecorder implements MicRecorder {
     // backend's `mediaDurationSeconds: minimum 0` contract rejects —
     // floored at 0 rather than trusting the wall clock never moves back.
     final elapsed = _now().difference(startedAt).inSeconds;
-    return MicRecording(
-      path: path,
-      durationSeconds: elapsed < 0 ? 0 : elapsed,
-    );
+    return MicRecording(path: path, durationSeconds: elapsed < 0 ? 0 : elapsed);
   }
 
   @override

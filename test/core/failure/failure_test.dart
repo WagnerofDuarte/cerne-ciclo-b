@@ -113,16 +113,14 @@ void main() {
       });
     }
 
-    test('unrecognized code falls back to malformedResponse, never throws',
-        () {
+    test('unrecognized code falls back to malformedResponse, never throws', () {
       final failure = Failure.fromCode('SOME_UNKNOWN_CODE', 'msg');
       expect(failure, isA<MalformedResponse>());
     });
   });
 
   group('retry allowlist matches AD-4 exactly', () {
-    test('exactly the 6 retryable codes are retryable, no more no less',
-        () {
+    test('exactly the 6 retryable codes are retryable, no more no less', () {
       const allCodes = [
         'AUTH_EXPIRED',
         'AUTH_INVALID',

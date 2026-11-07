@@ -200,9 +200,8 @@ class ChatRepositoryImpl implements ChatRepository {
     final messages = <ChatMessage>[];
     for (final json in _messagesBox.values) {
       try {
-        final message = ChatMessageDto.fromJson(
-          Map<String, dynamic>.from(json),
-        ).toEntity();
+        final message = ChatMessageDto.fromJson(Map<String, dynamic>.from(json))
+            .toEntity();
         if (message.sessionId == sessionId) {
           messages.add(message);
         }

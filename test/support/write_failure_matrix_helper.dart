@@ -25,8 +25,7 @@ void runWriteFailureMatrix<T>({
   required Future<Either<Failure, T>> Function() invoke,
 }) {
   group('$endpointName write-failure matrix (RNF09)', () {
-    test('network timeout -> Left(Failure), no unhandled exception',
-        () async {
+    test('network timeout -> Left(Failure), no unhandled exception', () async {
       stubNetworkTimeout();
 
       final result = await invoke();
@@ -34,14 +33,16 @@ void runWriteFailureMatrix<T>({
       expect(result.isLeft(), isTrue);
     });
 
-    test('malformed response -> Left(Failure), no unhandled exception',
-        () async {
-      stubMalformedResponse();
+    test(
+      'malformed response -> Left(Failure), no unhandled exception',
+      () async {
+        stubMalformedResponse();
 
-      final result = await invoke();
+        final result = await invoke();
 
-      expect(result.isLeft(), isTrue);
-    });
+        expect(result.isLeft(), isTrue);
+      },
+    );
 
     test('no connection -> Left(Failure), no unhandled exception', () async {
       stubNoConnection();

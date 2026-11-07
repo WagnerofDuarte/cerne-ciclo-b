@@ -812,34 +812,31 @@ void main() {
     }
   }
 
-  testWidgets(
-    'spec-6-5 — the Insight card renders as the trailing item of the '
-    'message list once ChatReady.activeInsight is set (the message_count '
-    'trigger, driven through 5 real sends)',
-    (tester) async {
-      final repository = _FakeChatRepository()
-        ..generateInsightResult = right(
-          const ChatInsight(id: 'ins-1', content: 'Você mencionou calma 3x.'),
-        );
-      final cubit = await pumpScreen(tester, repository);
-      await tester.pumpAndSettle();
-
-      await sendFiveMessages(tester, repository);
-
-      expect(repository.generateInsightCalls, hasLength(1));
-      expect(find.byType(InsightCard), findsOneWidget);
-      expect(find.text('INSIGHT'), findsOneWidget);
-      expect(find.text('Você mencionou calma 3x.'), findsOneWidget);
-
-      // Interleaved as the trailing item of the same ListView — never a
-      // second, independently scrollable surface.
-      final listView = tester.widget<ListView>(find.byType(ListView));
-      expect(
-        listView.childrenDelegate.estimatedChildCount,
-        (cubit.state as ChatReady).messages.length + 1,
+  testWidgets('spec-6-5 — the Insight card renders as the trailing item of the '
+      'message list once ChatReady.activeInsight is set (the message_count '
+      'trigger, driven through 5 real sends)', (tester) async {
+    final repository = _FakeChatRepository()
+      ..generateInsightResult = right(
+        const ChatInsight(id: 'ins-1', content: 'Você mencionou calma 3x.'),
       );
-    },
-  );
+    final cubit = await pumpScreen(tester, repository);
+    await tester.pumpAndSettle();
+
+    await sendFiveMessages(tester, repository);
+
+    expect(repository.generateInsightCalls, hasLength(1));
+    expect(find.byType(InsightCard), findsOneWidget);
+    expect(find.text('INSIGHT'), findsOneWidget);
+    expect(find.text('Você mencionou calma 3x.'), findsOneWidget);
+
+    // Interleaved as the trailing item of the same ListView — never a
+    // second, independently scrollable surface.
+    final listView = tester.widget<ListView>(find.byType(ListView));
+    expect(
+      listView.childrenDelegate.estimatedChildCount,
+      (cubit.state as ChatReady).messages.length + 1,
+    );
+  });
 
   testWidgets(
     'spec-6-5 — tapping the Insight card\'s dismiss icon wires through to '
@@ -872,47 +869,46 @@ void main() {
     },
   );
 
-  testWidgets(
-    'review: dismissing the Insight card never visibly shifts scroll '
-    'position when the user had deliberately scrolled away from the '
-    "bottom — ChatReady.restoreScrollOffset being unchanged (already "
-    "covered at the cubit level) doesn't by itself prove the ListView's "
-    'own rendered offset stays put',
-    (tester) async {
-      final repository = _FakeChatRepository()
-        ..generateInsightResult = right(
-          const ChatInsight(id: 'ins-1', content: 'um padrão notado'),
-        );
-      final cubit = await pumpScreen(tester, repository);
-      await tester.pumpAndSettle();
+  testWidgets('review: dismissing the Insight card never visibly shifts scroll '
+      'position when the user had deliberately scrolled away from the '
+      "bottom — ChatReady.restoreScrollOffset being unchanged (already "
+      "covered at the cubit level) doesn't by itself prove the ListView's "
+      'own rendered offset stays put', (tester) async {
+    final repository = _FakeChatRepository()
+      ..generateInsightResult = right(
+        const ChatInsight(id: 'ins-1', content: 'um padrão notado'),
+      );
+    final cubit = await pumpScreen(tester, repository);
+    await tester.pumpAndSettle();
 
-      // 3 rounds (15 exchanges) of real sends/replies, so there's
-      // real scrollable content well beyond the viewport height.
-      await sendFiveMessages(tester, repository);
-      await sendFiveMessages(tester, repository);
-      await sendFiveMessages(tester, repository);
-      expect(find.byType(InsightCard), findsOneWidget);
+    // 3 rounds (15 exchanges) of real sends/replies, so there's
+    // real scrollable content well beyond the viewport height.
+    await sendFiveMessages(tester, repository);
+    await sendFiveMessages(tester, repository);
+    await sendFiveMessages(tester, repository);
+    expect(find.byType(InsightCard), findsOneWidget);
 
-      // Scroll well away from the bottom — the card itself is only
-      // ~80px tall (exactly `_scrollToBottomSoon`'s own "near bottom"
-      // threshold), so it can never stay on screen at any offset that
-      // also clears that threshold; drive the dismiss through the
-      // cubit directly instead of a tap, the same way this file's
-      // other state-only assertions (e.g. `activeInsight`) already do,
-      // to isolate "does the rebuild itself shift scroll position" from
-      // the already-covered tap-affordance wiring.
-      final controller = tester.widget<ListView>(find.byType(ListView)).controller!;
-      final maxScrollExtent = controller.position.maxScrollExtent;
-      controller.jumpTo(maxScrollExtent - 500);
-      await tester.pumpAndSettle();
-      expect(maxScrollExtent - controller.offset, greaterThan(80));
-      final offsetBeforeDismiss = controller.offset;
+    // Scroll well away from the bottom — the card itself is only
+    // ~80px tall (exactly `_scrollToBottomSoon`'s own "near bottom"
+    // threshold), so it can never stay on screen at any offset that
+    // also clears that threshold; drive the dismiss through the
+    // cubit directly instead of a tap, the same way this file's
+    // other state-only assertions (e.g. `activeInsight`) already do,
+    // to isolate "does the rebuild itself shift scroll position" from
+    // the already-covered tap-affordance wiring.
+    final controller = tester
+        .widget<ListView>(find.byType(ListView))
+        .controller!;
+    final maxScrollExtent = controller.position.maxScrollExtent;
+    controller.jumpTo(maxScrollExtent - 500);
+    await tester.pumpAndSettle();
+    expect(maxScrollExtent - controller.offset, greaterThan(80));
+    final offsetBeforeDismiss = controller.offset;
 
-      cubit.dismissInsight();
-      await tester.pumpAndSettle();
+    cubit.dismissInsight();
+    await tester.pumpAndSettle();
 
-      expect(find.byType(InsightCard), findsNothing);
-      expect(controller.offset, offsetBeforeDismiss);
-    },
-  );
+    expect(find.byType(InsightCard), findsNothing);
+    expect(controller.offset, offsetBeforeDismiss);
+  });
 }

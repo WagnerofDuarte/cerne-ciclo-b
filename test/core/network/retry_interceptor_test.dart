@@ -9,10 +9,7 @@ class MockDio extends Mock implements Dio {}
 class MockErrorInterceptorHandler extends Mock
     implements ErrorInterceptorHandler {}
 
-DioException _errorWithCode(
-  String code, {
-  RequestOptions? requestOptions,
-}) {
+DioException _errorWithCode(String code, {RequestOptions? requestOptions}) {
   final options = requestOptions ?? RequestOptions(path: '/some-function');
   return DioException(
     requestOptions: options,
@@ -38,9 +35,7 @@ void main() {
     final fallbackOptions = RequestOptions(path: '/fallback');
     registerFallbackValue(fallbackOptions);
     registerFallbackValue(Response<dynamic>(requestOptions: fallbackOptions));
-    registerFallbackValue(
-      DioException(requestOptions: fallbackOptions),
-    );
+    registerFallbackValue(DioException(requestOptions: fallbackOptions));
   });
 
   group('RetryInterceptor.errorCodeOf', () {
@@ -54,8 +49,7 @@ void main() {
       expect(RetryInterceptor.errorCodeOf(err), 'NETWORK_OFFLINE');
     });
 
-    test(
-        'maps a client-side connect timeout to NETWORK_TIMEOUT, not '
+    test('maps a client-side connect timeout to NETWORK_TIMEOUT, not '
         'NETWORK_OFFLINE', () {
       final err = DioException(
         requestOptions: RequestOptions(path: '/some-function'),
@@ -130,67 +124,53 @@ void main() {
       expect(RetryInterceptor.shouldRetry(err, 0), isTrue);
     });
 
-    group(
-      'neverRetriedFunctions — non-idempotent chat POSTs are never '
-      'auto-retried, even with a retryable code (review finding: '
-      'dioErrorCodeOf can return NETWORK_TIMEOUT/NETWORK_OFFLINE from '
-      'DioException.type alone, before any {code,message} body exists, '
-      'so a transparent retry here would silently resend the identical '
-      'chat message / create a second session)',
-      () {
-        for (final function in RetryInterceptor.neverRetriedFunctions) {
-          test(
-            '$function is never retried on a retryable connect timeout '
-            '(no response body yet)',
-            () {
-              final err = DioException(
-                requestOptions: RequestOptions(path: '/$function'),
-                type: DioExceptionType.connectionTimeout,
-              );
-              expect(RetryInterceptor.shouldRetry(err, 0), isFalse);
-            },
-          );
-
-          test(
-            '$function is never retried even when the error body does '
-            'carry a retryable code',
-            () {
-              final err = _errorWithCode(
-                'AI_GENERATION_TIMEOUT',
-                requestOptions: RequestOptions(path: '/$function'),
-              );
-              expect(RetryInterceptor.shouldRetry(err, 0), isFalse);
-            },
-          );
-        }
-
-        test('an unrelated function with the same code still retries', () {
+    group('neverRetriedFunctions — non-idempotent chat POSTs are never '
+        'auto-retried, even with a retryable code (review finding: '
+        'dioErrorCodeOf can return NETWORK_TIMEOUT/NETWORK_OFFLINE from '
+        'DioException.type alone, before any {code,message} body exists, '
+        'so a transparent retry here would silently resend the identical '
+        'chat message / create a second session)', () {
+      for (final function in RetryInterceptor.neverRetriedFunctions) {
+        test('$function is never retried on a retryable connect timeout '
+            '(no response body yet)', () {
           final err = DioException(
-            requestOptions: RequestOptions(path: '/chat-messages-list'),
+            requestOptions: RequestOptions(path: '/$function'),
             type: DioExceptionType.connectionTimeout,
           );
-          expect(RetryInterceptor.shouldRetry(err, 0), isTrue);
+          expect(RetryInterceptor.shouldRetry(err, 0), isFalse);
         });
 
-        test(
-          'review finding: the exclusion still applies against the real '
+        test('$function is never retried even when the error body does '
+            'carry a retryable code', () {
+          final err = _errorWithCode(
+            'AI_GENERATION_TIMEOUT',
+            requestOptions: RequestOptions(path: '/$function'),
+          );
+          expect(RetryInterceptor.shouldRetry(err, 0), isFalse);
+        });
+      }
+
+      test('an unrelated function with the same code still retries', () {
+        final err = DioException(
+          requestOptions: RequestOptions(path: '/chat-messages-list'),
+          type: DioExceptionType.connectionTimeout,
+        );
+        expect(RetryInterceptor.shouldRetry(err, 0), isTrue);
+      });
+
+      test('review finding: the exclusion still applies against the real '
           'request-path shape, which always carries a trailing '
           'pathParams segment (e.g. the session id) — '
           '`HeaderInterceptor.functionNameOf` only reads the first path '
           'segment, so this must behave identically to the bare-path '
-          'cases above',
-          () {
-            final err = DioException(
-              requestOptions: RequestOptions(
-                path: '/chat-messages-send/session-1',
-              ),
-              type: DioExceptionType.connectionTimeout,
-            );
-            expect(RetryInterceptor.shouldRetry(err, 0), isFalse);
-          },
+          'cases above', () {
+        final err = DioException(
+          requestOptions: RequestOptions(path: '/chat-messages-send/session-1'),
+          type: DioExceptionType.connectionTimeout,
         );
-      },
-    );
+        expect(RetryInterceptor.shouldRetry(err, 0), isFalse);
+      });
+    });
   });
 
   group('RetryInterceptor.onError — end-to-end retry behavior', () {
@@ -204,7 +184,10 @@ void main() {
 
     test('retries a retryable error and resolves on success', () async {
       final options = RequestOptions(path: '/dashboard-summary');
-      final err = _errorWithCode('AI_GENERATION_TIMEOUT', requestOptions: options);
+      final err = _errorWithCode(
+        'AI_GENERATION_TIMEOUT',
+        requestOptions: options,
+      );
       final successResponse = Response<dynamic>(
         requestOptions: options,
         statusCode: 200,
@@ -236,58 +219,56 @@ void main() {
       verify(() => handler.next(err)).called(1);
     });
 
-    test(
-      'retry-exhausted: a retryable code keeps failing through all '
-      'maxRetries attempts, finally calling handler.next and never '
-      'handler.resolve',
-      () async {
-        final options = RequestOptions(path: '/dashboard-summary');
+    test('retry-exhausted: a retryable code keeps failing through all '
+        'maxRetries attempts, finally calling handler.next and never '
+        'handler.resolve', () async {
+      final options = RequestOptions(path: '/dashboard-summary');
 
-        when(() => mockDio.fetch<dynamic>(any())).thenAnswer((invocation) {
-          final opts = invocation.positionalArguments.first as RequestOptions;
-          throw DioException(
+      when(() => mockDio.fetch<dynamic>(any())).thenAnswer((invocation) {
+        final opts = invocation.positionalArguments.first as RequestOptions;
+        throw DioException(
+          requestOptions: opts,
+          response: Response(
             requestOptions: opts,
-            response: Response(
-              requestOptions: opts,
-              statusCode: 504,
-              data: {
-                'code': 'NETWORK_TIMEOUT',
-                'message': 'timeout',
-                'retryable': true,
-              },
-            ),
-            type: DioExceptionType.badResponse,
-          );
-        });
-
-        final handler = MockErrorInterceptorHandler();
-        when(() => handler.next(any())).thenReturn(null);
-        when(() => handler.resolve(any())).thenReturn(null);
-
-        DioException currentError =
-            _errorWithCode('NETWORK_TIMEOUT', requestOptions: options);
-
-        // Simulates the real Dio pipeline re-entering onError after each
-        // failed retry (a bare mock doesn't loop by itself), carrying the
-        // incremented attempt count forward each round, through and past
-        // maxRetries.
-        for (var round = 0; round <= RetryInterceptor.maxRetries; round++) {
-          await _runOnError(interceptor, currentError, handler);
-
-          final captured =
-              verify(() => handler.next(captureAny())).captured;
-          currentError = captured.last as DioException;
-        }
-
-        expect(
-          RetryInterceptor.attemptOf(currentError),
-          RetryInterceptor.maxRetries,
+            statusCode: 504,
+            data: {
+              'code': 'NETWORK_TIMEOUT',
+              'message': 'timeout',
+              'retryable': true,
+            },
+          ),
+          type: DioExceptionType.badResponse,
         );
-        verify(() => mockDio.fetch<dynamic>(any()))
-            .called(RetryInterceptor.maxRetries);
-        verifyNever(() => handler.resolve(any()));
-      },
-    );
+      });
+
+      final handler = MockErrorInterceptorHandler();
+      when(() => handler.next(any())).thenReturn(null);
+      when(() => handler.resolve(any())).thenReturn(null);
+
+      DioException currentError = _errorWithCode(
+        'NETWORK_TIMEOUT',
+        requestOptions: options,
+      );
+
+      // Simulates the real Dio pipeline re-entering onError after each
+      // failed retry (a bare mock doesn't loop by itself), carrying the
+      // incremented attempt count forward each round, through and past
+      // maxRetries.
+      for (var round = 0; round <= RetryInterceptor.maxRetries; round++) {
+        await _runOnError(interceptor, currentError, handler);
+
+        final captured = verify(() => handler.next(captureAny())).captured;
+        currentError = captured.last as DioException;
+      }
+
+      expect(
+        RetryInterceptor.attemptOf(currentError),
+        RetryInterceptor.maxRetries,
+      );
+      verify(() => mockDio.fetch<dynamic>(any()))
+          .called(RetryInterceptor.maxRetries);
+      verifyNever(() => handler.resolve(any()));
+    });
   });
 }
 

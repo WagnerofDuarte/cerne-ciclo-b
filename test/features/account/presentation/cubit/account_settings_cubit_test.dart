@@ -40,8 +40,7 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
   }
 
   @override
-  Future<Either<Failure, Unit>> fetchBiometricEnabled() async =>
-      right(unit);
+  Future<Either<Failure, Unit>> fetchBiometricEnabled() async => right(unit);
 
   @override
   Future<Either<Failure, Unit>> setBiometricEnabled(bool enabled) async {
@@ -167,29 +166,31 @@ void main() {
       await cubit.close();
     });
 
-    test('a later successful toggle clears the previous error message',
-        () async {
-      fakeRepository.setBiometricEnabledResult = left(
-        const Failure.networkTimeout(message: 'Sem conexão'),
-      );
-      final cubit = AccountSettingsCubit(fakeRepository);
-      await cubit.toggleBiometric(false);
-      // `toggleBiometric()`'s own await only guarantees its direct
-      // `setBiometricEnabled()` Future resolved — the `biometricEnabled`
-      // mirror it emits travels back through the repository's
-      // `Stream.multi` forwarding subscription, several microtask hops
-      // behind that Future; drain those before asserting on `cubit.state`
-      // (same rationale as `_emittedDuring`'s own `pumpEventQueue()`).
-      await pumpEventQueue();
-      expect(cubit.state.errorMessage, 'Sem conexão');
+    test(
+      'a later successful toggle clears the previous error message',
+      () async {
+        fakeRepository.setBiometricEnabledResult = left(
+          const Failure.networkTimeout(message: 'Sem conexão'),
+        );
+        final cubit = AccountSettingsCubit(fakeRepository);
+        await cubit.toggleBiometric(false);
+        // `toggleBiometric()`'s own await only guarantees its direct
+        // `setBiometricEnabled()` Future resolved — the `biometricEnabled`
+        // mirror it emits travels back through the repository's
+        // `Stream.multi` forwarding subscription, several microtask hops
+        // behind that Future; drain those before asserting on `cubit.state`
+        // (same rationale as `_emittedDuring`'s own `pumpEventQueue()`).
+        await pumpEventQueue();
+        expect(cubit.state.errorMessage, 'Sem conexão');
 
-      fakeRepository.setBiometricEnabledResult = right(unit);
-      await cubit.toggleBiometric(true);
-      await pumpEventQueue();
+        fakeRepository.setBiometricEnabledResult = right(unit);
+        await cubit.toggleBiometric(true);
+        await pumpEventQueue();
 
-      expect(cubit.state.errorMessage, isNull);
-      expect(cubit.state.biometricEnabled, isTrue);
-      await cubit.close();
-    });
+        expect(cubit.state.errorMessage, isNull);
+        expect(cubit.state.biometricEnabled, isTrue);
+        await cubit.close();
+      },
+    );
   });
 }
