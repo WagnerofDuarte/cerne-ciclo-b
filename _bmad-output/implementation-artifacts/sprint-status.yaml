@@ -79,8 +79,8 @@ development_status:
   6-5-proactive-insight-injection-failure-isolation: done
   epic-6-retrospective: optional
 
-  epic-7: backlog
-  7-1-request-a-period-export-job-status-tracking: backlog
+  epic-7: in-progress
+  7-1-request-a-period-export-job-status-tracking: review
   7-2-narrative-independent-raw-data-download: backlog
   7-3-empty-period-handling: backlog
   epic-7-retrospective: optional

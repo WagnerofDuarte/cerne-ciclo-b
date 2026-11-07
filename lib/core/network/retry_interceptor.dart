@@ -33,10 +33,16 @@ class RetryInterceptor extends Interceptor {
   /// (`NETWORK_TIMEOUT`/`NETWORK_OFFLINE`) even before any response body
   /// exists to carry the real `{code,message}`, so excluding by function
   /// name here is the only place this can be enforced.
+  ///
+  /// spec-7-1 — `export-summary-create` joins this set for the same
+  /// reason: it enqueues a brand-new export job with no client-supplied
+  /// idempotency key, so a transparent retry risks creating a second,
+  /// duplicate job rather than resurfacing the original failure once.
   static const Set<String> neverRetriedFunctions = {
     'chat-messages-send',
     'chat-messages-retry',
     'chat-sessions-create',
+    'export-summary-create',
   };
 
   static const int maxRetries = 2;

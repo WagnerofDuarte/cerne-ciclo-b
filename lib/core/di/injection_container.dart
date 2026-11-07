@@ -9,6 +9,7 @@ import '../../features/auth/auth_injection.dart';
 import '../../features/capture/capture_injection.dart';
 import '../../features/chat/chat_injection.dart';
 import '../../features/entries/entries_injection.dart';
+import '../../features/export/export_injection.dart';
 import '../../features/vault/vault_injection.dart';
 import '../network/access_token_provider.dart';
 import '../network/api_client.dart';
@@ -95,6 +96,10 @@ Future<void> setupCoreDependencies() async {
   // `Hive.initFlutter()`-must-run-first requirement `registerEntriesFeature()`
   // already documents for itself.
   await registerChatFeature();
+  // spec-7-1 — no Hive box of its own (AD-15: export jobs are never
+  // persisted locally), so unlike the call above this one needs no
+  // `Hive.initFlutter()` ordering and isn't `async`.
+  registerExportFeature();
 }
 
 /// Test/teardown helper — resets the single `get_it` instance so each test

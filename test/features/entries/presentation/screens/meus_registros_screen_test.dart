@@ -34,6 +34,9 @@ import 'package:cerne/features/entries/presentation/widgets/entries_search_bar.d
 import 'package:cerne/features/entries/presentation/widgets/entry_record_card.dart';
 import 'package:cerne/features/entries/presentation/widgets/entry_skeleton_card.dart';
 import 'package:cerne/features/entries/presentation/widgets/sync_badge.dart';
+import 'package:cerne/features/export/domain/entities/export_job_state.dart';
+import 'package:cerne/features/export/domain/repositories/export_repository.dart';
+import 'package:cerne/features/export/presentation/cubit/export_job_cubit.dart';
 
 /// Same tiny fake `expiry_overlay_host_test.dart` uses — gives synchronous
 /// control over the `SessionStatus` stream `ExpiryOverlayHost` subscribes
@@ -320,6 +323,29 @@ class _UnusedMediaRepository implements MediaRepository {
     required Uint8List imageBytes,
     required String mimeType,
   }) async => throw UnimplementedError('not expected to be called');
+}
+
+/// Review finding (verification-gap layer, spec-7-1) — the export entry
+/// point (download icon -> period picker -> job creation -> status sheet)
+/// had no test coverage at all. Same hand-written fake convention
+/// `export_job_cubit_test.dart` already uses for `ExportRepository`.
+class _FakeExportRepository implements ExportRepository {
+  Either<Failure, String> createJobResult = right('job-1');
+  final List<({DateTime periodStart, DateTime periodEnd})> createJobCalls =
+      [];
+
+  @override
+  Future<Either<Failure, String>> createJob({
+    required DateTime periodStart,
+    required DateTime periodEnd,
+  }) async {
+    createJobCalls.add((periodStart: periodStart, periodEnd: periodEnd));
+    return createJobResult;
+  }
+
+  @override
+  Future<Either<Failure, ExportJobState>> getStatus(String jobId) async =>
+      right(const ExportJobState.generating());
 }
 
 /// spec-5-1 — every `MeusRegistrosScreen` construction in this file now
@@ -1579,6 +1605,119 @@ void main() {
           tester.widget<Icon>(find.byIcon(Icons.filter_list)).color,
           DesignTokens.colorTextSecondary,
         );
+      },
+    );
+  });
+
+  group('export entry point (spec-7-1)', () {
+    testWidgets(
+      'tapping the download icon opens the period picker',
+      (tester) async {
+        await resetCoreDependencies();
+        sl.registerFactory<ExportJobCubit>(
+          () => ExportJobCubit(_FakeExportRepository()),
+        );
+        addTearDown(resetCoreDependencies);
+
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byIcon(Icons.download_outlined));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(DateRangePickerDialog), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'confirming the pre-filled period creates the export job and opens '
+      'the status sheet in Pendente',
+      (tester) async {
+        await resetCoreDependencies();
+        final exportRepository = _FakeExportRepository();
+        sl.registerFactory<ExportJobCubit>(
+          () => ExportJobCubit(exportRepository),
+        );
+        addTearDown(resetCoreDependencies);
+
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byIcon(Icons.download_outlined));
+        await tester.pumpAndSettle();
+
+        // The dialog's own action row is [Cancel, confirm] — by Material
+        // convention the trailing one confirms the already-prefilled
+        // `initialDateRange`, with no need to tap individual calendar days.
+        final confirmButton = find
+            .descendant(
+              of: find.byType(DateRangePickerDialog),
+              matching: find.byType(TextButton),
+            )
+            .last;
+        await tester.tap(confirmButton);
+        // Bounded pumps, not `pumpAndSettle()` — the opened sheet's own
+        // Pendente state shows a `CircularProgressIndicator`, which
+        // animates indefinitely, so waiting for every animation to settle
+        // would never return. One frame plus the sheet's own entrance
+        // duration (200ms) is enough for it to finish rising into place.
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 250));
+
+        expect(exportRepository.createJobCalls, hasLength(1));
+        expect(find.text('Preparando exportação...'), findsOneWidget);
+
+        // Closes the sheet (and, via `ExportStatusSheet.show()`'s own
+        // `finally`, the one-shot `ExportJobCubit` and its poll `Timer`)
+        // before the test ends — flutter_test's own "no pending timers"
+        // invariant is checked right after the test body returns.
+        await tester.tap(find.text('Fechar'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 250));
+      },
+    );
+
+    testWidgets(
+      'a create failure shows a SnackBar with the mapped message and '
+      'never opens the export sheet (Boundaries: "Create fails -> inline '
+      'error, sheet never opens")',
+      (tester) async {
+        await resetCoreDependencies();
+        final exportRepository = _FakeExportRepository()
+          ..createJobResult = left(
+            const Failure.networkOffline(message: 'Sem conexão.'),
+          );
+        sl.registerFactory<ExportJobCubit>(
+          () => ExportJobCubit(exportRepository),
+        );
+        addTearDown(resetCoreDependencies);
+
+        final fakeRepository = _FakeEntriesRepository()
+          ..queueList(right(const EntriesPage(items: [], nextCursor: null)));
+
+        await _pumpScreen(tester, fakeRepository);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byIcon(Icons.download_outlined));
+        await tester.pumpAndSettle();
+
+        final confirmButton = find
+            .descendant(
+              of: find.byType(DateRangePickerDialog),
+              matching: find.byType(TextButton),
+            )
+            .last;
+        await tester.tap(confirmButton);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Sem conexão.'), findsOneWidget);
+        expect(find.text('Preparando exportação...'), findsNothing);
       },
     );
   });

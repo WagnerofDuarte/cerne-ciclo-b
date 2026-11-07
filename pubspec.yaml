@@ -31,6 +31,13 @@ dependencies:
   flutter:
     sdk: flutter
 
+  # spec-7-1 — PT-BR localization for Flutter's own built-in widgets
+  # (`showDateRangePicker`, used by the export period picker); every other
+  # string in the app is already hand-written PT-BR, so this is the one
+  # place a framework-owned dialog needs its own locale configured.
+  flutter_localizations:
+    sdk: flutter
+
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8

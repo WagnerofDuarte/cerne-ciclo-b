@@ -10,9 +10,15 @@ import '../navigation/app_router.dart';
 /// screen can reuse it too, with no duplication. The back arrow always
 /// targets `/` (Boundaries: "matches prototype's `goHome` on all three").
 class BackArrowHeader extends StatelessWidget {
-  const BackArrowHeader({required this.title, super.key});
+  const BackArrowHeader({required this.title, this.trailing, super.key});
 
   final String title;
+
+  /// spec-7-1 — an optional trailing affordance rendered after the title,
+  /// inside this same header row (Meus Registros' own download icon, Code
+  /// Map). `null` (every other existing call site) renders exactly as
+  /// before — no trailing slot at all, not even an empty `SizedBox`.
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +44,7 @@ class BackArrowHeader extends StatelessWidget {
               ),
             ),
           ),
+          ?trailing,
         ],
       ),
     );

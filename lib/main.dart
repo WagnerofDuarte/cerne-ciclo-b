@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:fpdart/fpdart.dart' hide State;
 import 'package:go_router/go_router.dart';
 
@@ -152,6 +153,18 @@ class _CerneAppState extends State<CerneApp> {
   Widget build(BuildContext context) {
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
+      // Review finding (spec-7-1): every hand-written string in the app is
+      // already PT-BR, but `showDateRangePicker` (the export period
+      // picker) is Flutter's own built-in widget — without these, it falls
+      // back to US English ("CANCEL"/"SELECT RANGE") on an otherwise
+      // all-Portuguese screen.
+      locale: const Locale('pt', 'BR'),
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [Locale('pt', 'BR')],
       routerConfig: _router,
       builder: (context, child) => ExpiryOverlayHost(
         sessionRepository: _sessionRepository,

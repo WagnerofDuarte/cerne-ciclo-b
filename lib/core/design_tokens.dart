@@ -724,4 +724,43 @@ class DesignTokens {
   /// affordance), still sitting inside a ≥44pt tap target
   /// ([insertionModalTapTargetMin], reused rather than duplicated).
   static const double chatInsightDismissIconSize = 14.0;
+
+  // ---------------------------------------------------------------------
+  // Export (spec-7-1) — Tela 4's header `ph-download-simple` icon and the
+  // "Export job card" bottom-sheet overlay (`cerne-prototype.html`); none
+  // of these pixel values are in `prototype-extract.md` §3's own token
+  // panel (same "decide and proceed" rationale as the chat tokens above),
+  // only read straight off the raw prototype markup.
+  // ---------------------------------------------------------------------
+
+  /// Meus Registros header's own download icon (`ph-download-simple`,
+  /// next to the back arrow/title) — `font-size:20px`.
+  static const double navDownloadIconSize = 20;
+
+  /// The export sheet's own outer padding — `padding:24px 20px 32px`
+  /// (asymmetric top/bottom, unlike [screenPadding]'s uniform inset);
+  /// neither 24 nor 32 pairs with the other on the 4dp scale here.
+  static const EdgeInsets exportSheetPadding = EdgeInsets.fromLTRB(
+    20,
+    24,
+    20,
+    32,
+  );
+
+  /// The export sheet's own status icon (spinner/check/warning) —
+  /// `font-size:28px` across every `ph-circle-notch`/`ph-check-circle`/
+  /// `ph-warning-circle` state in the prototype's job-card markup.
+  static const double exportStatusIconSize = 28;
+
+  /// The export sheet's own vertical gap between stacked elements (icon,
+  /// status text, progress bar/buttons) — `gap:14px` in the job-card's
+  /// own `display:flex;flex-direction:column` container. Distinct from
+  /// [dialogContentGap] even though both happen to be 14px — unrelated
+  /// overlays, same convention [chatBookmarkIconSize]'s own doc already
+  /// explains for a coinciding value.
+  static const double exportStatusContentGap = 14;
+
+  /// Gap between the "Baixar PDF"/"Baixar dados brutos" buttons on
+  /// Concluído — `gap:10px`.
+  static const double exportStatusButtonGap = 10;
 }

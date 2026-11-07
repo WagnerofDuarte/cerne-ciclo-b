@@ -14,6 +14,9 @@ import '../../../capture/presentation/cubit/audio_entry_cubit.dart';
 import '../../../capture/presentation/cubit/photo_entry_cubit.dart';
 import '../../../capture/presentation/cubit/text_entry_cubit.dart';
 import '../../../capture/presentation/widgets/insertion_modal.dart';
+import '../../../export/domain/entities/export_job_state.dart';
+import '../../../export/presentation/cubit/export_job_cubit.dart';
+import '../../../export/presentation/widgets/export_status_sheet.dart';
 import '../../domain/entities/entry.dart';
 import '../../domain/entities/entry_date_group.dart';
 import '../../domain/entities/sync_badge_state.dart';
@@ -82,6 +85,14 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
   /// detail-route instances); cleared once the pushed route is popped, via
   /// `whenComplete` below.
   bool _navigatingToDetail = false;
+
+  /// Review finding (edge-case-hunter layer, spec-7-1) — same rationale as
+  /// [_navigatingToDetail] above, for `_onExportTap`: guards against a
+  /// rapid double-tap on the export icon opening a second
+  /// `showDateRangePicker`/creating a second job while the first tap's own
+  /// awaited chain is still in flight. Cleared in every exit path of
+  /// `_onExportTap` (`finally`).
+  bool _exportInFlight = false;
 
   @override
   void initState() {
@@ -174,6 +185,62 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
         });
   }
 
+  /// spec-7-1 — the header's download icon: opens a free-form period
+  /// picker (Design Notes: `showDateRangePicker`, docs/input silent on
+  /// the widget), then creates the export job (`ExportJobCubit.start()`).
+  /// A create failure never opens the sheet (Boundaries) — an inline
+  /// `SnackBar` with the mapped `Failure.message` instead, and the
+  /// one-shot cubit is closed immediately rather than left to
+  /// `ExportStatusSheet.show()`'s own disposal (which never runs, since
+  /// the sheet itself never opens on this path).
+  Future<void> _onExportTap() async {
+    if (_exportInFlight) {
+      return;
+    }
+    _exportInFlight = true;
+    try {
+      final now = DateTime.now();
+      final range = await showDateRangePicker(
+        context: context,
+        firstDate: DateTime(2000),
+        lastDate: now,
+        initialDateRange: DateTimeRange(
+          start: now.subtract(const Duration(days: 30)),
+          end: now,
+        ),
+      );
+      if (range == null || !mounted) {
+        return;
+      }
+      final exportCubit = sl<ExportJobCubit>();
+      final started = await exportCubit.start(
+        periodStart: range.start,
+        periodEnd: range.end,
+      );
+      if (!mounted) {
+        await exportCubit.close();
+        return;
+      }
+      if (!started) {
+        final message = switch (exportCubit.state) {
+          ExportJobError(failure: final failure) => failure.message,
+          _ => 'Não foi possível solicitar a exportação.',
+        };
+        await exportCubit.close();
+        if (!mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
+        return;
+      }
+      await ExportStatusSheet.show(context, cubit: exportCubit);
+    } finally {
+      _exportInFlight = false;
+    }
+  }
+
   void _onScroll() {
     if (!_scrollController.hasClients) {
       return;
@@ -199,7 +266,10 @@ class _MeusRegistrosScreenState extends State<MeusRegistrosScreen> {
         backgroundColor: DesignTokens.colorSurfaceBg,
         body: Column(
           children: [
-            const BackArrowHeader(title: 'Meus Registros'),
+            BackArrowHeader(
+              title: 'Meus Registros',
+              trailing: _ExportIconButton(onTap: _onExportTap),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(
                 DesignTokens.spacingMd,
@@ -807,6 +877,40 @@ class _ActiveFilterChip extends StatelessWidget {
                 color: DesignTokens.colorCategoryChipText,
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// spec-7-1 — Meus Registros header's own download icon
+/// (`ph-download-simple`), tappable inside a ≥44pt target
+/// ([DesignTokens.insertionModalTapTargetMin], reused rather than
+/// duplicated) even though the glyph itself renders much smaller
+/// ([DesignTokens.navDownloadIconSize]).
+class _ExportIconButton extends StatelessWidget {
+  const _ExportIconButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Exportar registros',
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: onTap,
+        child: SizedBox(
+          width: DesignTokens.insertionModalTapTargetMin,
+          height: DesignTokens.insertionModalTapTargetMin,
+          child: Center(
+            child: Icon(
+              Icons.download_outlined,
+              size: DesignTokens.navDownloadIconSize,
+              color: DesignTokens.colorTextPrimary,
+            ),
           ),
         ),
       ),
