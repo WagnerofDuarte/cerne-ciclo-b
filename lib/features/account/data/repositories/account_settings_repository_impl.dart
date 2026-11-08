@@ -209,6 +209,9 @@ class AccountSettingsRepositoryImpl implements AccountSettingsRepository {
   }
 
   @override
+  Future<Either<Failure, Unit>> deleteAccount() => _remoteDataSource.deleteAccount();
+
+  @override
   Future<void> dispose() async {
     await _controller.close();
   }

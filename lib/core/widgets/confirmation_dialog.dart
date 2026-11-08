@@ -26,13 +26,40 @@ class ConfirmationDialog extends StatelessWidget {
     required this.barrierColor,
     this.titleColor = DesignTokens.colorTextPrimary,
     this.caption,
-  });
+    this.confirmButtonColor,
+    this.cancelLabel,
+    this.onCancel,
+  }) : assert(
+         (cancelLabel == null) == (onCancel == null),
+         'cancelLabel and onCancel must be supplied together',
+       );
 
   final IconData icon;
   final String title;
   final String message;
   final String confirmLabel;
   final VoidCallback onConfirm;
+
+  /// Story 8.5 — forwarded to the confirm [AppButton]'s own
+  /// `backgroundColor`. `null` keeps the exact pre-existing filled-primary
+  /// look (Story 1.5's session-expiry confirm); the account-deletion
+  /// confirm passes `colorError` for its destructive "Apagar tudo" button.
+  final Color? confirmButtonColor;
+
+  /// Story 8.5 — the outline "Cancelar"-style second button, shown only
+  /// when both this and [onCancel] are non-null (Boundaries: "both null
+  /// together -> no cancel button, exact current session-expiry shape
+  /// preserved"). Session-expiry (Story 1.5) passes neither — its overlay
+  /// has only the one confirm action.
+  final String? cancelLabel;
+
+  /// Story 8.5 — the cancel button's own tap handler. The widget itself
+  /// never pops the dialog on the caller's behalf (same convention
+  /// [onConfirm] already follows, e.g. `expiry_overlay_host.dart`'s own
+  /// `Navigator.of(dialogContext).pop()` inside its `onConfirm`) — the
+  /// caller's callback pops the dialog and nothing else (Boundaries:
+  /// "pops the dialog only, no network call").
+  final VoidCallback? onCancel;
 
   /// The full-bleed scrim color behind the centered card — callers pass
   /// `DesignTokens.colorScrim` (session-expiry, Story 1.5) or the heavier
@@ -136,6 +163,9 @@ class ConfirmationDialog extends StatelessWidget {
                     confirmLabel: confirmLabel,
                     onConfirm: onConfirm,
                     caption: caption,
+                    confirmButtonColor: confirmButtonColor,
+                    cancelLabel: cancelLabel,
+                    onCancel: onCancel,
                   ),
                 ),
               ),
@@ -156,6 +186,9 @@ class _Card extends StatelessWidget {
     required this.confirmLabel,
     required this.onConfirm,
     required this.caption,
+    required this.confirmButtonColor,
+    required this.cancelLabel,
+    required this.onCancel,
   });
 
   final IconData icon;
@@ -165,6 +198,9 @@ class _Card extends StatelessWidget {
   final String confirmLabel;
   final VoidCallback onConfirm;
   final String? caption;
+  final Color? confirmButtonColor;
+  final String? cancelLabel;
+  final VoidCallback? onCancel;
 
   @override
   Widget build(BuildContext context) {
@@ -203,7 +239,21 @@ class _Card extends StatelessWidget {
             ),
           ),
           const SizedBox(height: DesignTokens.dialogContentGap),
-          AppButton(label: confirmLabel, onPressed: onConfirm),
+          AppButton(
+            label: confirmLabel,
+            onPressed: onConfirm,
+            backgroundColor: confirmButtonColor,
+          ),
+          // Story 8.5 — the outline "Cancelar" button, shown only when both
+          // cancelLabel/onCancel are supplied (class doc).
+          if (cancelLabel != null && onCancel != null) ...[
+            const SizedBox(height: DesignTokens.dialogContentGap),
+            AppButton(
+              label: cancelLabel!,
+              onPressed: onCancel,
+              variant: AppButtonVariant.secondaryOutline,
+            ),
+          ],
           if (caption != null) ...[
             const SizedBox(height: DesignTokens.dialogContentGap),
             Text(

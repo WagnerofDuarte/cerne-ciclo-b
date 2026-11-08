@@ -358,6 +358,14 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
     return right(unit);
   }
 
+  // Story 8.5 — never exercised by this suite (its own job is the
+  // boot-time biometric fetch/navigation gate, not account deletion), same
+  // "throw if ever reached" convention this fake's sibling fakes already
+  // use for members outside their own scope.
+  @override
+  Future<Either<Failure, Unit>> deleteAccount() async =>
+      throw UnimplementedError('not expected to be called');
+
   @override
   Future<void> dispose() => _controller.close();
 

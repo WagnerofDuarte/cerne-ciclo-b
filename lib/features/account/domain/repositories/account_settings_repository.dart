@@ -75,6 +75,14 @@ abstract class AccountSettingsRepository {
   /// without touching [currentDisplayName].
   Future<Either<Failure, Unit>> setDisplayName(String name);
 
+  /// Story 8.5 — `DELETE /account` (`account-delete`), the "Apagar conta"
+  /// confirm's own call: a plain passthrough to
+  /// `AccountRemoteDataSource.deleteAccount()`, no local state of this
+  /// repository's own to update on success (unlike [setBiometricEnabled]/
+  /// [setDisplayName]) — `AccountSettingsCubit.deleteAccount()` owns
+  /// everything that happens next (the shared `_finishSession()` sequence).
+  Future<Either<Failure, Unit>> deleteAccount();
+
   /// Releases the underlying stream resource. Wired as `get_it`'s
   /// `dispose:` callback on registration, same rationale as
   /// `VaultRepository.dispose()`/`SessionRepository.dispose()`.

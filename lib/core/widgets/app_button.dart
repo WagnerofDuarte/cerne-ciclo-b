@@ -19,6 +19,7 @@ class AppButton extends StatelessWidget {
     required this.onPressed,
     this.variant = AppButtonVariant.primary,
     this.textColor,
+    this.backgroundColor,
   });
 
   /// Button label. Rendered with no `maxLines`/`overflow` clamp so it
@@ -36,6 +37,14 @@ class AppButton extends StatelessWidget {
   /// `colorTextSecondary` depending on context (e.g. "Fechar"/"Limpar").
   /// Defaults to `colorPrimary`.
   final Color? textColor;
+
+  /// Story 8.5 — only consulted for [AppButtonVariant.primary] (mirrors
+  /// [textColor]'s own "only consulted for textGhost" convention): the
+  /// account-deletion confirm button fills with `colorError` instead of
+  /// `colorPrimary` while staying the same filled shape. Defaults to
+  /// `colorPrimary`, the exact pre-existing fill — every other primary
+  /// button in this codebase keeps rendering unchanged.
+  final Color? backgroundColor;
 
   @override
   Widget build(BuildContext context) {
@@ -66,7 +75,7 @@ class AppButton extends StatelessWidget {
               if (states.contains(WidgetState.disabled)) {
                 return DesignTokens.colorBorder;
               }
-              return DesignTokens.colorPrimary;
+              return backgroundColor ?? DesignTokens.colorPrimary;
             }),
             foregroundColor: WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.disabled)) {

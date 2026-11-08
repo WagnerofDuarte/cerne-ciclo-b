@@ -13,6 +13,12 @@ import 'package:cerne/core/network/access_token_provider.dart';
 import 'package:cerne/core/network/retry_interceptor.dart';
 import 'package:cerne/core/network/url_builder.dart';
 import 'package:cerne/features/account/domain/repositories/account_settings_repository.dart';
+import 'package:cerne/features/account/presentation/cubit/account_settings_cubit.dart';
+import 'package:cerne/features/auth/domain/entities/session_status.dart';
+import 'package:cerne/features/auth/domain/repositories/session_repository.dart';
+import 'package:cerne/features/chat/chat_injection.dart';
+import 'package:cerne/features/vault/domain/entities/vault_status.dart';
+import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 
 import '../../support/fake_path_provider_platform.dart';
 
@@ -352,6 +358,137 @@ void main() {
           (failure) => expect(failure, isA<MalformedResponse>()),
           (_) => fail('expected Left'),
         );
+      },
+    );
+  });
+
+  // Story 8.4 — closes spec-8-4-logout.md's own deferred Review Finding:
+  // "No real-DI (sl<...>-resolved) e2e test exists yet for the logout
+  // orchestration end-to-end ... revisit there [this file] or as a
+  // follow-up." The existing fakes-based router test
+  // (`pumpWithLogoutFakesAndVaultGate` in `account_settings_screen_test.
+  // dart`) already proves the lock-before-redirect widget-tree ordering;
+  // this group instead drives the real `sl`-resolved `AccountSettingsCubit`
+  // directly (same "call the public API, not tester.tap" rationale this
+  // file's own doc gives), proving the genuine `auth-logout` POST, real
+  // headers, and the real cross-repository cache-clear orchestration all
+  // fire together.
+  group('Story 8.4 — logout', () {
+    test(
+      'happy path: logout() locks the vault synchronously (before the '
+      'queued backend response ever resolves), fires a genuine POST to '
+      'auth-logout with real headers, clears the stored session, flips '
+      'SessionStatus to unauthenticated, and empties both the entries '
+      'and chat Hive boxes',
+      () async {
+        adapter.queueJsonResponse(200, {
+          'data': {'ok': true},
+        });
+
+        final vaultRepository = sl<VaultRepository>();
+        final sessionRepository = sl<SessionRepository>();
+        final entriesBox = sl<Box<Map>>();
+        final chatSessionsBox = sl<Box<Map>>(
+          instanceName: chatSessionsBoxName,
+        );
+        final chatMessagesBox = sl<Box<Map>>(
+          instanceName: chatMessagesBoxName,
+        );
+
+        // Seed the state logout must actually change: an unlocked vault,
+        // an authenticated session, and non-empty caches in every box —
+        // first-ever submitPin() unlocks unconditionally (VaultRepository
+        // doc), markAuthenticated() is the same sync in-memory flip a real
+        // login already triggers.
+        await vaultRepository.submitPin('1234');
+        sessionRepository.markAuthenticated();
+        await entriesBox.put('e1', {'id': 'e1'});
+        await chatSessionsBox.put('s1', {'id': 's1'});
+        await chatMessagesBox.put('m1', {'id': 'm1'});
+
+        expect(vaultRepository.currentStatus, VaultStatus.unlocked);
+        expect(sessionRepository.currentStatus, SessionStatus.authenticated);
+
+        final cubit = sl<AccountSettingsCubit>();
+        final logoutFuture = cubit.logout();
+
+        // Boundaries: VaultRepository.lock() fires synchronously, BEFORE
+        // the await on SessionRepository.logout() — true the instant
+        // control returns here, before the queued network response has
+        // had any chance to resolve.
+        expect(vaultRepository.currentStatus, VaultStatus.locked);
+
+        await logoutFuture;
+
+        final request = adapter.requests.single;
+        expect(request.path, sl<UrlBuilder>().build('auth-logout'));
+        expect(request.method, 'POST');
+        expect(request.headers['apikey'], dotenv.get('SUPABASE_ANON_KEY'));
+        expect(
+          request.headers['Authorization'],
+          'Bearer e2e-test-access-token',
+        );
+
+        expect(await sl<AccessTokenProvider>().readAccessToken(), isNull);
+        expect(sessionRepository.currentStatus, SessionStatus.unauthenticated);
+        expect(entriesBox.isEmpty, isTrue);
+        expect(chatSessionsBox.isEmpty, isTrue);
+        expect(chatMessagesBox.isEmpty, isTrue);
+        expect(cubit.state.isLoggingOut, isFalse);
+      },
+    );
+
+    test(
+      'backend failure (auth-logout returns a non-retryable error): the '
+      'local session still clears, the vault still locks, both caches '
+      'still empty, and isLoggingOut still resets — no error ever '
+      'surfaced (Boundaries: "local session already ended regardless" / '
+      '"Never: surfacing a backend-logout-failure error")',
+      () async {
+        adapter.queueErrorResponse('VALIDATION_ERROR', 'ignored');
+
+        final vaultRepository = sl<VaultRepository>();
+        final sessionRepository = sl<SessionRepository>();
+        final entriesBox = sl<Box<Map>>();
+        final chatSessionsBox = sl<Box<Map>>(
+          instanceName: chatSessionsBoxName,
+        );
+
+        await vaultRepository.submitPin('1234');
+        sessionRepository.markAuthenticated();
+        await entriesBox.put('e1', {'id': 'e1'});
+        await chatSessionsBox.put('s1', {'id': 's1'});
+
+        final cubit = sl<AccountSettingsCubit>();
+        await cubit.logout();
+
+        expect(vaultRepository.currentStatus, VaultStatus.locked);
+        expect(sessionRepository.currentStatus, SessionStatus.unauthenticated);
+        expect(await sl<AccessTokenProvider>().readAccessToken(), isNull);
+        expect(entriesBox.isEmpty, isTrue);
+        expect(chatSessionsBox.isEmpty, isTrue);
+        expect(cubit.state.isLoggingOut, isFalse);
+        expect(cubit.state.errorMessage, isNull);
+        expect(cubit.state.nameErrorMessage, isNull);
+      },
+    );
+
+    test(
+      'double-tap: calling logout() again while the first call is still '
+      'in flight no-ops — exactly one auth-logout request fires '
+      '(I/O matrix: "Double-tap Sair -> second tap no-ops")',
+      () async {
+        adapter.queueJsonResponse(200, {
+          'data': {'ok': true},
+        });
+
+        final cubit = sl<AccountSettingsCubit>();
+        final first = cubit.logout();
+        final second = cubit.logout();
+
+        await Future.wait([first, second]);
+
+        expect(adapter.requests, hasLength(1));
       },
     );
   });

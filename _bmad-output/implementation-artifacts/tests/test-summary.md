@@ -308,6 +308,77 @@ above — exercised through the same e2e suite.
   do the same rather than trust-and-propagate this section's own prior
   arithmetic.)
 
+### spec-8-4-logout addendum (code review, re-run just now)
+
+- `fvm flutter analyze` — 0 issues (project-wide), including the
+  review-patch changes to `account_settings_screen.dart`/
+  `account_settings_cubit.dart`/`chat_repository_impl.dart` below.
+- `fvm flutter test` — **1276/1276 passed**, no regressions. The entry
+  above only covered story 8.3's own two new e2e groups (+9); it never
+  accounted for story 8.4's own test additions landing in this same
+  commit (new/extended coverage across `session_repository_impl_test.dart`,
+  `auth_remote_data_source_test.dart`, `vault_repository_impl_test.dart`,
+  `entries_repository_impl_test.dart`, `chat_repository_impl_test.dart`,
+  `account_settings_cubit_test.dart`, `account_settings_screen_test.dart`)
+  — the real total for this commit is 1276/1276, +25 over the 1251
+  baseline, not +9.
+
+### spec-8-4-logout real-DI e2e addendum (QA follow-up)
+
+- Closes this same spec's own deferred Review Finding: "No real-DI
+  (`sl<...>`-resolved) e2e test exists yet for the logout orchestration
+  end-to-end ... revisit there [`account_settings_flow_e2e_test.dart`]
+  or as a follow-up." The existing fakes-based router test
+  (`pumpWithLogoutFakesAndVaultGate` in `account_settings_screen_test.dart`)
+  already proved the lock-before-redirect widget-tree ordering; this was
+  a coverage-depth gap, not a correctness gap, per that finding's own
+  text.
+- Added 3 tests to `account_settings_flow_e2e_test.dart`'s new "Story
+  8.4 — logout" group, driving the real `sl`-resolved
+  `AccountSettingsCubit` (same real-`Dio`/real-interceptors/faked-
+  transport-boundary pattern this file's own doc comment describes),
+  not through `tester.tap`:
+  1. Happy path — proves `VaultRepository.lock()` fires synchronously
+     before the awaited `auth-logout` call resolves, a genuine POST to
+     `auth-logout` with real headers, the stored session clearing,
+     `SessionStatus` flipping to `unauthenticated`, and both the
+     `entries` and `chat_sessions`/`chat_messages` Hive boxes ending up
+     empty.
+  2. Backend failure (`VALIDATION_ERROR`) — proves the local session
+     still clears, the vault still locks, both caches still clear, and
+     no error ever surfaces (Boundaries: "local session already ended
+     regardless" / "Never: surfacing a backend-logout-failure error").
+  3. Double-tap — proves a second concurrent `logout()` call no-ops
+     (exactly one request fires), matching the I/O matrix's "second tap
+     no-ops" row.
+- `fvm flutter analyze` — 0 issues (project-wide).
+- `fvm flutter test` — **1279/1279 passed**, no regressions (+3 over
+  the 1276 baseline above).
+
+### spec-8-5-account-deletion addendum
+
+- New/extended coverage: `AppButton.backgroundColor` (primary-only
+  scoping), `ConfirmationDialog`'s `cancelLabel`/`onCancel`/
+  `confirmButtonColor` plus the paired-params `assert`,
+  `AccountRemoteDataSource.deleteAccount()` (exact `account-delete`
+  endpoint/body, `Right`-discards-body, `Left`-passthrough),
+  `AccountSettingsRepositoryImpl.deleteAccount()` (passthrough),
+  `AccountSettingsCubit.deleteAccount()`'s full I/O matrix (re-entry
+  guard, success running the shared `_finishSession()`, failure
+  surfacing the message, the outer `try`/`finally`'s throw-safety —
+  code-review patch), and the screen's full Acceptance Criteria + I/O
+  matrix against the real widget tree (dialog appearance/red title,
+  Cancelar no-op, confirm-then-relock, failure's inline red error,
+  double-tap no-op).
+- `fvm flutter analyze` — 0 issues (project-wide).
+- `fvm flutter test` — **1304/1304 passed**, no regressions (+25 over
+  the 1279 baseline above). This also corrects the stale `1279/1279`
+  figure for the working tree as it stood before this story — the
+  prior addendum's count only covered up to spec-8-4's own real-DI
+  e2e follow-up, not any drift since (see deferred-work.md's
+  "spec-8-5-account-deletion" entry on the ledger staleness this
+  closes).
+
 ## Coverage
 
 - Features with `*_flow_e2e_test.dart` coverage: capture, entries,

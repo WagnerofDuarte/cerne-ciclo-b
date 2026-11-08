@@ -31,6 +31,20 @@ class AccountRemoteDataSource {
   Future<Either<Failure, AccountSettingsDto>> updateDisplayName(String name) =>
       _patch({'displayName': name});
 
+  /// Story 8.5 — `account-delete` (`DELETE /account`), bearerAuth, exactly
+  /// `{"confirmation": "DELETE"}` (Boundaries/Code Map). No DTO shape worth
+  /// decoding — same "only whether the call itself succeeded matters"
+  /// rationale as `AuthRemoteDataSource.logout()`'s own `{data: {ok:
+  /// true}}` response, mapped straight to `Right(unit)`, discarding the
+  /// body.
+  Future<Either<Failure, Unit>> deleteAccount() async {
+    final result = await _apiClient.delete(
+      'account-delete',
+      data: const {'confirmation': 'DELETE'},
+    );
+    return result.map((_) => unit);
+  }
+
   Future<Either<Failure, AccountSettingsDto>> _patch(
     Map<String, dynamic> data,
   ) async {

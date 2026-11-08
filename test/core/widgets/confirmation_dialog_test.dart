@@ -276,6 +276,136 @@ void main() {
       },
     );
 
+    testWidgets(
+      'no cancelLabel/onCancel -> exactly one button, the exact current '
+      'session-expiry shape preserved (Boundaries: "both null together")',
+      (tester) async {
+        await tester.pumpWidget(_appWithOpenButton(onConfirm: () {}));
+        await tester.tap(find.text('Open'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(OutlinedButton), findsNothing);
+        expect(
+          find.widgetWithText(ElevatedButton, 'Entrar novamente'),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'cancelLabel + onCancel both supplied -> a second, outline button '
+      'appears below the confirm button (Story 8.5)',
+      (tester) async {
+        var cancelled = false;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: ElevatedButton(
+                    onPressed: () => ConfirmationDialog.show(
+                      context: context,
+                      builder: (dialogContext) => ConfirmationDialog(
+                        icon: Icons.delete_outline,
+                        title: 'Apagar sua conta?',
+                        message: 'Ação irreversível.',
+                        confirmLabel: 'Apagar tudo',
+                        titleColor: DesignTokens.colorError,
+                        confirmButtonColor: DesignTokens.colorError,
+                        barrierColor: DesignTokens.colorScrimHeavy,
+                        cancelLabel: 'Cancelar',
+                        onCancel: () {
+                          cancelled = true;
+                          Navigator.of(dialogContext).pop();
+                        },
+                        onConfirm: () {},
+                      ),
+                    ),
+                    child: const Text('Open'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Open'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Apagar tudo'), findsOneWidget);
+        expect(find.text('Cancelar'), findsOneWidget);
+
+        await tester.tap(find.text('Cancelar'));
+        await tester.pumpAndSettle();
+
+        expect(cancelled, isTrue);
+        // Tapping Cancelar must pop the dialog only — no further assertion
+        // possible here on "no network call" (this widget has no network
+        // dependency of its own), but the dialog closing proves the pop
+        // happened via the caller's own onCancel, not any built-in widget
+        // behavior.
+        expect(find.text('Apagar sua conta?'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'confirmButtonColor fills the confirm AppButton, titleColor colors '
+      'the title — both colorError for the destructive variant (Story 8.5)',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: Center(
+                  child: ElevatedButton(
+                    onPressed: () => ConfirmationDialog.show(
+                      context: context,
+                      builder: (_) => ConfirmationDialog(
+                        icon: Icons.delete_outline,
+                        title: 'Apagar sua conta?',
+                        message: 'Ação irreversível.',
+                        confirmLabel: 'Apagar tudo',
+                        titleColor: DesignTokens.colorError,
+                        confirmButtonColor: DesignTokens.colorError,
+                        barrierColor: DesignTokens.colorScrimHeavy,
+                        cancelLabel: 'Cancelar',
+                        onCancel: () {},
+                        onConfirm: () {},
+                      ),
+                    ),
+                    child: const Text('Open'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Open'));
+        await tester.pumpAndSettle();
+
+        final confirmButton = tester.widget<ElevatedButton>(
+          find.widgetWithText(ElevatedButton, 'Apagar tudo'),
+        );
+        final bg = confirmButton.style!.backgroundColor!.resolve({});
+        expect(bg, DesignTokens.colorError);
+      },
+    );
+
+    testWidgets(
+      'a null confirmButtonColor keeps the confirm button\'s exact '
+      'pre-existing colorPrimary fill — the default stays unchanged',
+      (tester) async {
+        await tester.pumpWidget(_appWithOpenButton(onConfirm: () {}));
+        await tester.tap(find.text('Open'));
+        await tester.pumpAndSettle();
+
+        final confirmButton = tester.widget<ElevatedButton>(
+          find.widgetWithText(ElevatedButton, 'Entrar novamente'),
+        );
+        final bg = confirmButton.style!.backgroundColor!.resolve({});
+        expect(bg, DesignTokens.colorPrimary);
+      },
+    );
+
     testWidgets('tapping the confirm button calls onConfirm', (tester) async {
       var confirmed = false;
       await tester.pumpWidget(

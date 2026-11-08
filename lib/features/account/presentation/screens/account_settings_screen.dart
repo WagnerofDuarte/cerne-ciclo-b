@@ -8,6 +8,7 @@ import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
 import '../../../../core/widgets/avatar.dart';
 import '../../../../core/widgets/back_arrow_header.dart';
+import '../../../../core/widgets/confirmation_dialog.dart';
 import '../../../dashboard/domain/entities/dashboard_aggregate.dart';
 import '../../../dashboard/presentation/cubit/dashboard_cubit.dart';
 import '../../../dashboard/presentation/cubit/dashboard_narrative_cubit.dart';
@@ -51,6 +52,21 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
   /// `onChanged` is this screen's single source for both the controller's
   /// displayed text and the cubit's `nameDraft`.
   late final TextEditingController _nameController;
+
+  /// Review finding (code review): tracks whether the narrative-
+  /// unavailable announcement has already fired for the current
+  /// `totalCount > 30` streak, across `DashboardCubit.load()`'s own
+  /// `ResourceLoading` emissions — `load()` always emits `ResourceLoading`
+  /// before `ResourceData` (`dashboard_cubit.dart`), so comparing only
+  /// against the immediately-previous emitted state (the original
+  /// `listenWhen` approach) could never actually suppress a repeat
+  /// announcement on a `confirmedWrites`-triggered reload: the state right
+  /// before the next qualifying `ResourceData` is always `ResourceLoading`,
+  /// never a qualifying `ResourceData`, so the old guard was true again
+  /// every time. Reset only on an explicit `ResourceData` crossing back to
+  /// `totalCount <= 30` — `ResourceLoading`/`ResourceError` emissions leave
+  /// it untouched.
+  bool _dashboardOverflowAnnounced = false;
 
   @override
   void initState() {
@@ -263,6 +279,43 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
       View.of(context),
       message,
       TextDirection.ltr,
+    );
+  }
+
+  /// Story 8.5 — the "Apagar conta" button's own tap handler: opens the
+  /// destructive-variant `ConfirmationDialog` (Boundaries). `onCancel`
+  /// pops the dialog only, no network call; `onConfirm` pops the dialog
+  /// synchronously, then calls `AccountSettingsCubit.deleteAccount()` —
+  /// same "caller pops its own dialog" convention `expiry_overlay_host.
+  /// dart`'s own `onConfirm` already follows (`ConfirmationDialog`'s class
+  /// doc).
+  void _openDeleteAccountDialog(BuildContext context) {
+    final cubit = context.read<AccountSettingsCubit>();
+    ConfirmationDialog.show(
+      context: context,
+      builder: (dialogContext) => ConfirmationDialog(
+        icon: Icons.delete_outline,
+        title: 'Apagar sua conta?',
+        message:
+            'Essa ação é permanente e não pode ser desfeita. Todos os seus '
+            'dados serão apagados para sempre, conforme a LGPD.',
+        confirmLabel: 'Apagar tudo',
+        titleColor: DesignTokens.colorError,
+        confirmButtonColor: DesignTokens.colorError,
+        barrierColor: DesignTokens.colorScrimHeavy,
+        cancelLabel: 'Cancelar',
+        onCancel: () {
+          if (dialogContext.mounted) {
+            Navigator.of(dialogContext).pop();
+          }
+        },
+        onConfirm: () {
+          if (dialogContext.mounted) {
+            Navigator.of(dialogContext).pop();
+          }
+          cubit.deleteAccount();
+        },
+      ),
     );
   }
 
@@ -515,20 +568,32 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                           // error — not just the one missed transition
                           // this listener exists to catch. Only fires on
                           // the transition *into* `totalCount > 30`.
-                          listenWhen: (previous, current) =>
-                              !(previous is ResourceData<DashboardAggregate> &&
-                                  previous.data.totalCount > 30) &&
-                              current is ResourceData<DashboardAggregate> &&
-                              current.data.totalCount > 30,
+                          //
+                          // Code-review patch: a `listenWhen` comparing
+                          // only to the immediately-previous *emitted*
+                          // state can't express that — `load()` always
+                          // emits `ResourceLoading` first, so the state
+                          // right before any reload's `ResourceData` is
+                          // never itself a qualifying `ResourceData`. The
+                          // "only once" tracking now lives in
+                          // [_dashboardOverflowAnnounced] instead, updated
+                          // only on actual `ResourceData` emissions.
                           listener: (context, state) {
-                            if (state is! ResourceData<DashboardAggregate> ||
-                                state.data.totalCount <= 30) {
+                            if (state is! ResourceData<DashboardAggregate>) {
+                              return;
+                            }
+                            if (state.data.totalCount <= 30) {
+                              _dashboardOverflowAnnounced = false;
+                              return;
+                            }
+                            if (_dashboardOverflowAnnounced) {
                               return;
                             }
                             final narrativeState = context
                                 .read<DashboardNarrativeCubit>()
                                 .state;
                             if (narrativeState is ResourceError<String>) {
+                              _dashboardOverflowAnnounced = true;
                               _announce(
                                 DashboardChartSection
                                     .narrativeUnavailableMessage,
@@ -554,6 +619,42 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                             ? null
                             : widget.cubit.logout,
                       ),
+                    ),
+                    // Story 8.5 — "Apagar conta": the scroll column's last
+                    // child, after "Sair" (Code Map,
+                    // prototype-extract.md:116).
+                    const SizedBox(height: DesignTokens.spacingXl),
+                    BlocConsumer<AccountSettingsCubit, AccountSettingsState>(
+                      listener: (context, state) {
+                        if (state.deleteAccountErrorMessage != null) {
+                          _announce(state.deleteAccountErrorMessage!);
+                        }
+                      },
+                      builder: (context, state) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            AppButton(
+                              label: 'Apagar conta',
+                              variant: AppButtonVariant.textGhost,
+                              textColor: DesignTokens.colorError,
+                              onPressed: state.isDeletingAccount
+                                  ? null
+                                  : () => _openDeleteAccountDialog(context),
+                            ),
+                            if (state.deleteAccountErrorMessage != null) ...[
+                              const SizedBox(height: DesignTokens.spacingSm),
+                              Text(
+                                state.deleteAccountErrorMessage!,
+                                style: DesignTokens.textBodyMd.copyWith(
+                                  color: DesignTokens.colorError,
+                                ),
+                              ),
+                            ],
+                          ],
+                        );
+                      },
                     ),
                   ],
                 ),

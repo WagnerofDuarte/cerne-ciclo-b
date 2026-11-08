@@ -25,6 +25,8 @@ class AccountSettingsState {
     this.isSavingName = false,
     this.nameErrorMessage,
     this.isLoggingOut = false,
+    this.isDeletingAccount = false,
+    this.deleteAccountErrorMessage,
   });
 
   final bool biometricEnabled;
@@ -46,8 +48,10 @@ class AccountSettingsState {
   /// spec-8-3 — the profile name shown in display mode, read from
   /// `AccountSettingsRepository.currentDisplayName` at construction
   /// (Boundaries), then kept in sync by [AccountSettingsCubit.
-  /// confirmEditingName]'s own success branch — never re-read from the
-  /// repository afterwards.
+  /// confirmEditingName]'s own success branch, which re-reads
+  /// `_repository.currentDisplayName` on every save (code-review patch:
+  /// the repository's own value echoes any backend-side normalization,
+  /// which the locally-sent string alone would miss).
   final String displayName;
 
   /// spec-8-3 — the account e-mail, read the same way as [displayName] and
@@ -84,6 +88,22 @@ class AccountSettingsState {
   /// [isSaving]/[isSavingName] already use for their own in-flight calls.
   final bool isLoggingOut;
 
+  /// Story 8.5 — `true` for the duration of one
+  /// [AccountSettingsCubit.deleteAccount] call, guarding against re-entry
+  /// (double-tap no-ops, Boundaries) — `account_settings_screen.dart`
+  /// disables the "Apagar conta" button while this is `true`, same
+  /// convention [isLoggingOut] already uses for its own in-flight call.
+  final bool isDeletingAccount;
+
+  /// Story 8.5 — set only once [AccountSettingsCubit.deleteAccount]'s own
+  /// `account-delete` call fails; shown inline, `colorError`, below the
+  /// "Apagar conta" button (Boundaries) — unlike [isLoggingOut]'s own
+  /// backend-logout-failure, which is swallowed (Never: "surfacing a
+  /// backend-logout-failure error"), a failed account deletion must be
+  /// shown (I/O matrix: "Left.message shown (unlike logout's swallowed
+  /// failure)").
+  final String? deleteAccountErrorMessage;
+
   AccountSettingsState copyWith({
     bool? biometricEnabled,
     String? errorMessage,
@@ -97,6 +117,9 @@ class AccountSettingsState {
     String? nameErrorMessage,
     bool clearNameErrorMessage = false,
     bool? isLoggingOut,
+    bool? isDeletingAccount,
+    String? deleteAccountErrorMessage,
+    bool clearDeleteAccountErrorMessage = false,
   }) {
     return AccountSettingsState(
       biometricEnabled: biometricEnabled ?? this.biometricEnabled,
@@ -113,6 +136,10 @@ class AccountSettingsState {
           ? null
           : (nameErrorMessage ?? this.nameErrorMessage),
       isLoggingOut: isLoggingOut ?? this.isLoggingOut,
+      isDeletingAccount: isDeletingAccount ?? this.isDeletingAccount,
+      deleteAccountErrorMessage: clearDeleteAccountErrorMessage
+          ? null
+          : (deleteAccountErrorMessage ?? this.deleteAccountErrorMessage),
     );
   }
 
@@ -129,7 +156,9 @@ class AccountSettingsState {
           other.nameDraft == nameDraft &&
           other.isSavingName == isSavingName &&
           other.nameErrorMessage == nameErrorMessage &&
-          other.isLoggingOut == isLoggingOut);
+          other.isLoggingOut == isLoggingOut &&
+          other.isDeletingAccount == isDeletingAccount &&
+          other.deleteAccountErrorMessage == deleteAccountErrorMessage);
 
   @override
   int get hashCode => Object.hash(
@@ -143,6 +172,8 @@ class AccountSettingsState {
     isSavingName,
     nameErrorMessage,
     isLoggingOut,
+    isDeletingAccount,
+    deleteAccountErrorMessage,
   );
 
   @override
@@ -152,7 +183,8 @@ class AccountSettingsState {
       'displayName: $displayName, email: $email, '
       'isEditingName: $isEditingName, nameDraft: $nameDraft, '
       'isSavingName: $isSavingName, nameErrorMessage: $nameErrorMessage, '
-      'isLoggingOut: $isLoggingOut)';
+      'isLoggingOut: $isLoggingOut, isDeletingAccount: $isDeletingAccount, '
+      'deleteAccountErrorMessage: $deleteAccountErrorMessage)';
 }
 
 /// Calls [AccountSettingsRepository] directly (no use-case — same small-
@@ -350,31 +382,103 @@ class AccountSettingsCubit extends Cubit<AccountSettingsState> {
       return;
     }
     emit(state.copyWith(isLoggingOut: true));
+    try {
+      await _finishSession();
+    } finally {
+      // Code-review patch: guarantees `isLoggingOut` resets even if an
+      // unexpected throw escapes the chain above (none currently do, but
+      // nothing enforces that) — without this, such a throw would leave
+      // the "Sair" button permanently disabled.
+      if (!isClosed) {
+        emit(state.copyWith(isLoggingOut: false));
+      }
+    }
+  }
+
+  /// Story 8.5 — extracted from [logout]'s own body (spec-8-4-logout.md's
+  /// own Design Notes directive this story closes): the vault-lock +
+  /// session-logout + both-Hive-cache-clear sequence, shared verbatim by
+  /// both [logout] and [deleteAccount]'s own success path — neither
+  /// `isLoggingOut`/`isDeletingAccount` nor any UI concern lives here,
+  /// only the side effects every caller settles its own in-flight flag
+  /// around.
+  Future<void> _finishSession() async {
     _vaultRepository.lock();
     await _sessionRepository.logout();
-    final cacheResults = await Future.wait([
-      _entriesRepository.clearLocalCache(),
-      _chatRepository.clearLocalCache(),
-    ]);
     // Review finding: neither result was ever inspected — a cache-clear
     // failure (e.g. Hive disk-full) was silently swallowed with zero
     // record anywhere. `debugPrint`-only (never surfaced to the UI, same
     // "no UI-visible error" boundary the session-logout call itself
     // follows), mirroring this codebase's existing silent-swallow-with-
     // debugPrint convention (`ApiClient.postStream`/`HeaderInterceptor`).
-    for (final result in cacheResults) {
-      result.match(
+    final cacheResults = await Future.wait([
+      _entriesRepository.clearLocalCache(),
+      _chatRepository.clearLocalCache(),
+    ]);
+    // Code-review patch: tags each failure with its source repository —
+    // an untagged message would make a real disk-full failure
+    // unattributable from logs alone.
+    const cacheSources = ['entries', 'chat'];
+    for (var i = 0; i < cacheResults.length; i++) {
+      cacheResults[i].match(
         (failure) => debugPrint(
-          'AccountSettingsCubit.logout: clearLocalCache failed — '
-          '${failure.message}',
+          'AccountSettingsCubit._finishSession: ${cacheSources[i]}.'
+          'clearLocalCache failed — ${failure.message}',
         ),
         (_) {},
       );
     }
-    if (isClosed) {
+  }
+
+  /// Story 8.5 — the "Apagar conta" dialog's confirm flow, end to end.
+  /// Guards re-entry via [AccountSettingsState.isDeletingAccount]
+  /// (Boundaries: a double-tap no-ops, same convention [logout]'s own
+  /// [AccountSettingsState.isLoggingOut] uses). Unlike [logout], a failed
+  /// `account-delete` call IS surfaced (I/O matrix: "Left.message shown
+  /// (unlike logout's swallowed failure)") — the account is still intact
+  /// server-side, so this is a real, actionable error, not a redundant
+  /// local-session-already-ended one. Only a successful delete runs
+  /// [_finishSession] (Design Notes: intentional — the account is already
+  /// gone server-side by the time it fires `auth-logout`, harmless).
+  ///
+  /// Code-review patch: the whole body (from the initial `emit` through to
+  /// completion) is wrapped in one outer `try`/`finally` that
+  /// unconditionally resets `isDeletingAccount` — same rationale [logout]'s
+  /// own `finally` guard already documents: without it, an unexpected
+  /// throw anywhere in this chain (e.g. `_repository.deleteAccount()`
+  /// itself throwing instead of resolving to an `Either`) would leave
+  /// `isDeletingAccount` stuck `true` forever, permanently disabling the
+  /// "Apagar conta" button. The failure branch below only sets
+  /// `deleteAccountErrorMessage`, never `isDeletingAccount` itself — the
+  /// outer `finally` resetting it afterwards leaves the just-set message
+  /// untouched (`copyWith` only overrides fields it's explicitly passed).
+  Future<void> deleteAccount() async {
+    if (state.isDeletingAccount) {
       return;
     }
-    emit(state.copyWith(isLoggingOut: false));
+    emit(
+      state.copyWith(
+        isDeletingAccount: true,
+        clearDeleteAccountErrorMessage: true,
+      ),
+    );
+    try {
+      final result = await _repository.deleteAccount();
+      // Same close()-race guard as toggleBiometric's/logout's own.
+      if (isClosed) {
+        return;
+      }
+      await result.match(
+        (failure) async {
+          emit(state.copyWith(deleteAccountErrorMessage: failure.message));
+        },
+        (_) => _finishSession(),
+      );
+    } finally {
+      if (!isClosed) {
+        emit(state.copyWith(isDeletingAccount: false));
+      }
+    }
   }
 
   @override

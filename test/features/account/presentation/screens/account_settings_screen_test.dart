@@ -5,10 +5,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:cerne/core/design_tokens.dart';
 import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/core/navigation/app_route_paths.dart';
 import 'package:cerne/core/widgets/avatar.dart';
 import 'package:cerne/core/widgets/back_arrow_header.dart';
+import 'package:cerne/core/widgets/confirmation_dialog.dart';
 import 'package:cerne/features/account/domain/repositories/account_settings_repository.dart';
 import 'package:cerne/features/account/presentation/cubit/account_settings_cubit.dart';
 import 'package:cerne/features/account/presentation/screens/account_settings_screen.dart';
@@ -123,6 +125,30 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
       _emit(previous);
     }
     return result;
+  }
+
+  // Story 8.5 — scriptable like [setBiometricEnabledResult]/
+  // [setDisplayNameResult] above: defaults to a failure so a test must
+  // opt in to the success path explicitly.
+  Either<Failure, Unit> deleteAccountResult = left(
+    const Failure.malformedResponse(message: 'fake: not configured'),
+  );
+
+  int deleteAccountCallCount = 0;
+
+  /// Lets a test hold `deleteAccount()` unresolved, to observe
+  /// `state.isDeletingAccount` mid-flight — same rationale
+  /// [setDisplayNameGate] already gives for name saves.
+  Completer<void>? deleteAccountGate;
+
+  @override
+  Future<Either<Failure, Unit>> deleteAccount() async {
+    deleteAccountCallCount += 1;
+    final gate = deleteAccountGate;
+    if (gate != null) {
+      await gate.future;
+    }
+    return deleteAccountResult;
   }
 
   @override
@@ -552,6 +578,14 @@ _pumpScreenWithProfile(
 /// proves the screen is *reachable*; this suite proves its own rendering
 /// and interaction in isolation.
 void main() {
+  // Story 8.5 — `ConfirmationDialog.isOpen` is a static single-overlay
+  // guard, shared across every instance by design (UX-DR16/25/27/36,
+  // `confirmation_dialog_test.dart`'s own identical `setUp`) — reset
+  // before each test so a previous test's still-open "Apagar conta"
+  // dialog (e.g. one that never tapped a button to dismiss it) never
+  // silently no-ops a later test's own `ConfirmationDialog.show()` call.
+  setUp(() => ConfirmationDialog.isOpen = false);
+
   testWidgets(
     // Review finding (round 2): renamed from "...exactly one switch — no '
     // other content (AC: shows only the biometric toggle)" — spec-8-1 now
@@ -1434,6 +1468,199 @@ void main() {
         expect(fakeChatRepository.clearLocalCacheCallCount, 1);
         expect(tester.takeException(), isNull);
         expect(find.textContaining('Offline'), findsNothing);
+      },
+    );
+  });
+
+  // Story 8.5 — the "Apagar conta" button's own Acceptance Criteria,
+  // proved directly against the real screen widget (Code Map: "'Apagar
+  // conta' trigger + inline error, after 'Sair'; dialog builder").
+  group('"Apagar conta" button (Story 8.5)', () {
+    /// Same rationale as the "Sair" group's own `pumpWithLogoutFakes` —
+    /// gives each test a fresh, controllable fake quintet plus the real
+    /// screen, built around the plain, non-navigating router stub (none of
+    /// these tests need a real vault-gate redirect to assert on).
+    Future<
+      (
+        _FakeAccountSettingsRepository,
+        _FakeSessionRepository,
+        _FakeVaultRepository,
+        _FakeEntriesRepository,
+        _FakeChatRepository,
+      )
+    >
+    pumpWithDeleteAccountFakes(WidgetTester tester) async {
+      final fakeAccountRepository = _FakeAccountSettingsRepository();
+      final fakeSessionRepository = _FakeSessionRepository();
+      final fakeVaultRepository = _FakeVaultRepository();
+      final fakeEntriesRepository = _FakeEntriesRepository();
+      final fakeChatRepository = _FakeChatRepository();
+      final cubit = AccountSettingsCubit(
+        fakeAccountRepository,
+        fakeSessionRepository,
+        fakeVaultRepository,
+        fakeEntriesRepository,
+        fakeChatRepository,
+      );
+      addTearDown(() => cubit.close());
+      addTearDown(fakeAccountRepository.dispose);
+
+      final router = _routerWith(
+        AccountSettingsScreen(
+          cubit: cubit,
+          dashboardCubit: _buildDashboardCubit(),
+          narrativeCubit: _buildNarrativeCubit(),
+        ),
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+
+      return (
+        fakeAccountRepository,
+        fakeSessionRepository,
+        fakeVaultRepository,
+        fakeEntriesRepository,
+        fakeChatRepository,
+      );
+    }
+
+    testWidgets(
+      'shows an "Apagar conta" button below "Sair"',
+      (tester) async {
+        await pumpWithDeleteAccountFakes(tester);
+
+        expect(find.text('Sair'), findsOneWidget);
+        expect(find.text('Apagar conta'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'tapping "Apagar conta" opens the destructive-variant dialog with a '
+      'red title, "Apagar tudo" and an outline "Cancelar" (AC: "the '
+      'destructive-variant dialog appears with a red title")',
+      (tester) async {
+        await pumpWithDeleteAccountFakes(tester);
+
+        await tester.tap(find.text('Apagar conta'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Apagar sua conta?'), findsOneWidget);
+        final titleText = tester.widget<Text>(
+          find.text('Apagar sua conta?'),
+        );
+        expect(titleText.style!.color, DesignTokens.colorError);
+        expect(find.text('Apagar tudo'), findsOneWidget);
+        expect(find.text('Cancelar'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'tapping "Cancelar" closes the dialog with no network call and the '
+      'screen unchanged (I/O matrix)',
+      (tester) async {
+        final (fakeAccountRepository, _, fakeVaultRepository, _, _) =
+            await pumpWithDeleteAccountFakes(tester);
+
+        await tester.tap(find.text('Apagar conta'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Cancelar'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Apagar sua conta?'), findsNothing);
+        expect(fakeAccountRepository.deleteAccountCallCount, 0);
+        expect(fakeVaultRepository.lockCallCount, 0);
+        expect(find.text('Apagar conta'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'confirming "Apagar tudo" closes the dialog immediately, fires '
+      'deleteAccount(), and on success relocks the vault + clears both '
+      'local caches (AC: "DELETE /account fires and, on success, the '
+      'account/data are gone")',
+      (tester) async {
+        final (
+          fakeAccountRepository,
+          fakeSessionRepository,
+          fakeVaultRepository,
+          fakeEntriesRepository,
+          fakeChatRepository,
+        ) = await pumpWithDeleteAccountFakes(tester);
+        fakeAccountRepository.deleteAccountResult = right(unit);
+
+        await tester.tap(find.text('Apagar conta'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Apagar tudo'));
+        // The dialog's own onConfirm pops it synchronously, before
+        // deleteAccount() is even called (Boundaries: "onConfirm pops the
+        // dialog synchronously, then calls ... deleteAccount()") — settled
+        // here past the 180ms exit fade to assert its final state.
+        await tester.pumpAndSettle();
+
+        expect(find.text('Apagar sua conta?'), findsNothing);
+        expect(fakeAccountRepository.deleteAccountCallCount, 1);
+        expect(fakeVaultRepository.lockCallCount, 1);
+        expect(fakeSessionRepository.logoutCallCount, 1);
+        expect(fakeEntriesRepository.clearLocalCacheCallCount, 1);
+        expect(fakeChatRepository.clearLocalCacheCallCount, 1);
+      },
+    );
+
+    testWidgets(
+      'a failed account-delete (offline/expired/...) shows an inline red '
+      'error below "Apagar conta", leaves the vault unlocked and clears '
+      'nothing (I/O matrix: "dialog already closed; inline red error... '
+      'vault stays unlocked, nothing cleared")',
+      (tester) async {
+        final (
+          fakeAccountRepository,
+          _,
+          fakeVaultRepository,
+          fakeEntriesRepository,
+          fakeChatRepository,
+        ) = await pumpWithDeleteAccountFakes(tester);
+        fakeAccountRepository.deleteAccountResult = left(
+          const Failure.networkOffline(message: 'Offline'),
+        );
+
+        await tester.tap(find.text('Apagar conta'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Apagar tudo'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Apagar sua conta?'), findsNothing);
+        expect(find.textContaining('Offline'), findsOneWidget);
+        final errorText = tester.widget<Text>(find.textContaining('Offline'));
+        expect(errorText.style!.color, DesignTokens.colorError);
+        expect(fakeVaultRepository.lockCallCount, 0);
+        expect(fakeEntriesRepository.clearLocalCacheCallCount, 0);
+        expect(fakeChatRepository.clearLocalCacheCallCount, 0);
+      },
+    );
+
+    testWidgets(
+      'disables the button while a deletion is in flight, so a double-tap '
+      'can never start a second, overlapping call (I/O matrix: '
+      '"Double-tap Apagar conta")',
+      (tester) async {
+        final (fakeAccountRepository, _, _, _, _) =
+            await pumpWithDeleteAccountFakes(tester);
+        fakeAccountRepository.deleteAccountGate = Completer<void>();
+
+        await tester.tap(find.text('Apagar conta'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Apagar tudo'));
+        await tester.pump();
+
+        final button = tester.widget<TextButton>(
+          find.widgetWithText(TextButton, 'Apagar conta'),
+        );
+        expect(button.onPressed, isNull);
+
+        fakeAccountRepository.deleteAccountGate!.complete();
+        await tester.pumpAndSettle();
+
+        expect(fakeAccountRepository.deleteAccountCallCount, 1);
       },
     );
   });

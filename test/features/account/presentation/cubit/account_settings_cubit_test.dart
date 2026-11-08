@@ -109,6 +109,30 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
     return result;
   }
 
+  // Story 8.5 — scriptable like [setBiometricEnabledResult]/
+  // [setDisplayNameResult] above: defaults to a failure so a test must
+  // opt in to the success path explicitly.
+  Either<Failure, Unit> deleteAccountResult = left(
+    const Failure.malformedResponse(message: 'fake: not configured'),
+  );
+
+  int deleteAccountCallCount = 0;
+
+  /// Lets a test hold `deleteAccount()` unresolved, to observe
+  /// `state.isDeletingAccount` mid-flight — same rationale
+  /// [setDisplayNameGate] already gives for name saves.
+  Completer<void>? deleteAccountGate;
+
+  @override
+  Future<Either<Failure, Unit>> deleteAccount() async {
+    deleteAccountCallCount += 1;
+    final gate = deleteAccountGate;
+    if (gate != null) {
+      await gate.future;
+    }
+    return deleteAccountResult;
+  }
+
   @override
   Future<void> dispose() => _controller.close();
 
@@ -791,6 +815,130 @@ void main() {
       fakeSessionRepository.logoutGate!.complete();
 
       await expectLater(logoutFuture, completes);
+    });
+  });
+
+  // Story 8.5 — the full I/O & Edge-Case Matrix for the "Apagar conta"
+  // flow (spec-8-5-account-deletion.md).
+  group('deleteAccount() — Story 8.5', () {
+    test('isDeletingAccount is true for the duration of the call, then '
+        'false once everything settles', () async {
+      fakeRepository.deleteAccountGate = Completer<void>();
+      final cubit = buildCubit();
+      expect(cubit.state.isDeletingAccount, isFalse);
+
+      final deleteFuture = cubit.deleteAccount();
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.isDeletingAccount, isTrue);
+
+      fakeRepository.deleteAccountGate!.complete();
+      await deleteFuture;
+
+      expect(cubit.state.isDeletingAccount, isFalse);
+      await cubit.close();
+    });
+
+    test('success -> runs the same lock+session-logout+cache-clear '
+        'sequence logout() uses (the shared _finishSession helper, '
+        'Boundaries)', () async {
+      fakeRepository.deleteAccountResult = right(unit);
+      final cubit = buildCubit();
+
+      await cubit.deleteAccount();
+
+      expect(fakeRepository.deleteAccountCallCount, 1);
+      expect(fakeVaultRepository.lockCallCount, 1);
+      expect(fakeSessionRepository.logoutCallCount, 1);
+      expect(fakeEntriesRepository.clearLocalCacheCallCount, 1);
+      expect(fakeChatRepository.clearLocalCacheCallCount, 1);
+      expect(cubit.state.isDeletingAccount, isFalse);
+      expect(cubit.state.deleteAccountErrorMessage, isNull);
+      await cubit.close();
+    });
+
+    test('failure -> isDeletingAccount resets, deleteAccountErrorMessage is '
+        'set to the Failure\'s message, and the session is NEVER finished '
+        '— the vault stays unlocked, nothing is cleared (I/O matrix: '
+        '"vault stays unlocked, nothing cleared")', () async {
+      fakeRepository.deleteAccountResult = left(
+        const Failure.networkOffline(message: 'fake: offline'),
+      );
+      final cubit = buildCubit();
+
+      await cubit.deleteAccount();
+
+      expect(cubit.state.isDeletingAccount, isFalse);
+      expect(cubit.state.deleteAccountErrorMessage, 'fake: offline');
+      expect(fakeVaultRepository.lockCallCount, 0);
+      expect(fakeSessionRepository.logoutCallCount, 0);
+      expect(fakeEntriesRepository.clearLocalCacheCallCount, 0);
+      expect(fakeChatRepository.clearLocalCacheCallCount, 0);
+      await cubit.close();
+    });
+
+    test('a later call clears a previous attempt\'s leftover error message '
+        'at the start, before the new call\'s own result is known', () async {
+      fakeRepository.deleteAccountResult = left(
+        const Failure.networkOffline(message: 'fake: offline'),
+      );
+      final cubit = buildCubit();
+      await cubit.deleteAccount();
+      expect(cubit.state.deleteAccountErrorMessage, isNotNull);
+
+      fakeRepository.deleteAccountGate = Completer<void>();
+      final secondFuture = cubit.deleteAccount();
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.deleteAccountErrorMessage, isNull);
+
+      fakeRepository.deleteAccountGate!.complete();
+      await secondFuture;
+      await cubit.close();
+    });
+
+    test('a double-tap (second call while the first is still in flight) '
+        'no-ops — the button\'s own disabled state is the first line of '
+        'defense, this guard is the backstop (I/O matrix: "Double-tap '
+        'Apagar conta")', () async {
+      fakeRepository.deleteAccountGate = Completer<void>();
+      final cubit = buildCubit();
+
+      final firstDelete = cubit.deleteAccount();
+      await Future<void>.delayed(Duration.zero);
+      await cubit.deleteAccount();
+
+      expect(fakeRepository.deleteAccountCallCount, 1);
+
+      fakeRepository.deleteAccountGate!.complete();
+      await firstDelete;
+      await cubit.close();
+    });
+
+    test('isClosed guard — a cubit closed mid-call (before the repository '
+        'result resolves) never throws trying to emit on it', () async {
+      fakeRepository.deleteAccountGate = Completer<void>();
+      final cubit = buildCubit();
+
+      final deleteFuture = cubit.deleteAccount();
+      await Future<void>.delayed(Duration.zero);
+      await cubit.close();
+      fakeRepository.deleteAccountGate!.complete();
+
+      await expectLater(deleteFuture, completes);
+    });
+
+    test('isClosed guard — a cubit closed mid-_finishSession (after a '
+        'successful delete, before sessionRepository.logout() resolves) '
+        'never throws trying to emit on it', () async {
+      fakeRepository.deleteAccountResult = right(unit);
+      fakeSessionRepository.logoutGate = Completer<void>();
+      final cubit = buildCubit();
+
+      final deleteFuture = cubit.deleteAccount();
+      await Future<void>.delayed(Duration.zero);
+      await cubit.close();
+      fakeSessionRepository.logoutGate!.complete();
+
+      await expectLater(deleteFuture, completes);
     });
   });
 }

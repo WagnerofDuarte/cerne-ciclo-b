@@ -92,6 +92,64 @@ void main() {
     );
   });
 
+  group('AppButton — primary, backgroundColor (Story 8.5)', () {
+    testWidgets(
+      'an explicit backgroundColor overrides the fill, never the default '
+      'colorPrimary',
+      (tester) async {
+        await tester.pumpWidget(
+          _wrap(
+            AppButton(
+              label: 'Apagar tudo',
+              onPressed: () {},
+              backgroundColor: DesignTokens.colorError,
+            ),
+          ),
+        );
+
+        final button = _buttonOf(tester);
+        final bg = button.style!.backgroundColor!.resolve({});
+        expect(bg, DesignTokens.colorError);
+        expect(bg, isNot(DesignTokens.colorPrimary));
+      },
+    );
+
+    testWidgets(
+      'null backgroundColor keeps the exact pre-existing colorPrimary fill',
+      (tester) async {
+        await tester.pumpWidget(
+          _wrap(AppButton(label: 'Entrar', onPressed: () {})),
+        );
+
+        final button = _buttonOf(tester);
+        final bg = button.style!.backgroundColor!.resolve({});
+        expect(bg, DesignTokens.colorPrimary);
+      },
+    );
+
+    testWidgets(
+      'disabled still renders colorBorder, ignoring a non-null '
+      'backgroundColor',
+      (tester) async {
+        await tester.pumpWidget(
+          _wrap(
+            const AppButton(
+              label: 'Apagar tudo',
+              onPressed: null,
+              backgroundColor: DesignTokens.colorError,
+            ),
+          ),
+        );
+
+        final button = _buttonOf(tester);
+        final bg = button.style!.backgroundColor!.resolve({
+          WidgetState.disabled,
+        });
+        expect(bg, DesignTokens.colorBorder);
+      },
+    );
+  });
+
   group('AppButton — secondaryOutline', () {
     testWidgets('enabled renders colorPrimary outline, no fill', (
       tester,

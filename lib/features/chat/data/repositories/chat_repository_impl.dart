@@ -166,20 +166,23 @@ class ChatRepositoryImpl implements ChatRepository {
     // otherwise a throw clearing `_sessionsBox` would skip `_messagesBox.
     // clear()` entirely, leaving it uncleared on logout with no record of
     // why. Both are always attempted; `Left` only if at least one failed.
-    Object? firstError;
+    // Code-review patch: each error is tagged with which box produced it —
+    // an untagged `firstError` would make a real disk-full failure
+    // unattributable from logs alone.
+    String? firstError;
     try {
       await _sessionsBox.clear();
     } catch (error) {
-      firstError = error;
+      firstError = 'chat_sessions: $error';
     }
     try {
       await _messagesBox.clear();
     } catch (error) {
-      firstError ??= error;
+      firstError ??= 'chat_messages: $error';
     }
     if (firstError != null) {
       // Same RNF09 rationale as every other Hive-write guard in this file.
-      return left(Failure.malformedResponse(message: firstError.toString()));
+      return left(Failure.malformedResponse(message: firstError));
     }
     return right(unit);
   }

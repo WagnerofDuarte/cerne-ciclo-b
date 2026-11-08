@@ -611,4 +611,36 @@ void main() {
       expect(repository.currentDisplayName, 'Nome');
     });
   });
+
+  // Story 8.5 — a plain passthrough to `AccountRemoteDataSource.
+  // deleteAccount()` (Code Map: "implement deleteAccount() before
+  // dispose()"); unlike setBiometricEnabled/setDisplayName, no local state
+  // of this repository's own to update on success.
+  group('deleteAccount() — Story 8.5', () {
+    test('delegates straight to the data source and returns Right(unit) '
+        'on success', () async {
+      when(() => mockRemoteDataSource.deleteAccount())
+          .thenAnswer((_) async => right(unit));
+
+      final result = await repository.deleteAccount();
+
+      expect(result.isRight(), isTrue);
+      verify(() => mockRemoteDataSource.deleteAccount()).called(1);
+    });
+
+    test('a failure passes straight through as Left(Failure)', () async {
+      when(() => mockRemoteDataSource.deleteAccount()).thenAnswer(
+        (_) async =>
+            left(const Failure.networkOffline(message: 'fake: offline')),
+      );
+
+      final result = await repository.deleteAccount();
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<NetworkOffline>()),
+        (_) => fail('expected Left'),
+      );
+    });
+  });
 }

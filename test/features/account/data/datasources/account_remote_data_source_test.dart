@@ -221,4 +221,81 @@ void main() {
       );
     });
   });
+
+  // Story 8.5 — `account-delete`'s own slice: no DTO shape, so (unlike
+  // `fetchSettings`/`updateDisplayName`/`updateBiometricEnabled` above) a
+  // `Right` from `ApiClient.delete` is never re-parsed and can never itself
+  // become a `malformedResponse` — `runWriteFailureMatrix` doesn't apply
+  // here, same rationale `auth_remote_data_source_test.dart`'s own
+  // `AuthRemoteDataSource.logout` tests already establish for the other
+  // response-body-unused call in this codebase.
+  group('AccountRemoteDataSource.deleteAccount', () {
+    test('calls DELETE account-delete with exactly '
+        '{"confirmation": "DELETE"}', () async {
+      when(
+        () => mockApiClient.delete(
+          'account-delete',
+          data: any(named: 'data'),
+        ),
+      ).thenAnswer(
+        (_) async => right(<String, dynamic>{
+          'data': {'ok': true},
+        }),
+      );
+
+      await dataSource.deleteAccount();
+
+      final captured = verify(
+        () => mockApiClient.delete(
+          'account-delete',
+          data: captureAny(named: 'data'),
+        ),
+      ).captured;
+      expect(captured.single, {'confirmation': 'DELETE'});
+    });
+
+    test('a successful call maps to Right(unit), discarding the response '
+        'body (Boundaries: "response body unused")', () async {
+      when(
+        () => mockApiClient.delete(
+          'account-delete',
+          data: any(named: 'data'),
+        ),
+      ).thenAnswer(
+        (_) async => right(<String, dynamic>{
+          'data': {'ok': true},
+        }),
+      );
+
+      final result = await dataSource.deleteAccount();
+
+      expect(result.isRight(), isTrue);
+      result.match((_) => fail('expected Right'), (value) {
+        expect(value, unit);
+      });
+    });
+
+    test('a Left from ApiClient.delete propagates unchanged through '
+        '.map((_) => unit)', () async {
+      when(
+        () => mockApiClient.delete(
+          'account-delete',
+          data: any(named: 'data'),
+        ),
+      ).thenAnswer(
+        (_) async => left(const Failure.networkOffline(message: 'Offline')),
+      );
+
+      final result = await dataSource.deleteAccount();
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) {
+          expect(failure, isA<NetworkOffline>());
+          expect(failure.message, 'Offline');
+        },
+        (_) => fail('expected Left'),
+      );
+    });
+  });
 }
