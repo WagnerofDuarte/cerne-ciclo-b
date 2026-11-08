@@ -108,4 +108,11 @@ abstract class EntriesRepository {
     DateTime? dateFrom,
     DateTime? dateTo,
   });
+
+  /// Story 8.4 — closes deferred-work.md's "no clear-on-logout hook" gap:
+  /// empties the `entries` Hive box, called by `AccountSettingsCubit.
+  /// logout()` alongside [ChatRepository.clearLocalCache]. A thrown Hive/
+  /// disk exception never escapes unmapped (RNF09), same convention every
+  /// other write in this port already follows.
+  Future<Either<Failure, Unit>> clearLocalCache();
 }

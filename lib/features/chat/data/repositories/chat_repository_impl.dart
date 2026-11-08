@@ -159,6 +159,31 @@ class ChatRepositoryImpl implements ChatRepository {
     );
   }
 
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async {
+    // Review finding: the two boxes are cleared independently (each in its
+    // own try/catch) rather than sequentially inside one shared try/catch —
+    // otherwise a throw clearing `_sessionsBox` would skip `_messagesBox.
+    // clear()` entirely, leaving it uncleared on logout with no record of
+    // why. Both are always attempted; `Left` only if at least one failed.
+    Object? firstError;
+    try {
+      await _sessionsBox.clear();
+    } catch (error) {
+      firstError = error;
+    }
+    try {
+      await _messagesBox.clear();
+    } catch (error) {
+      firstError ??= error;
+    }
+    if (firstError != null) {
+      // Same RNF09 rationale as every other Hive-write guard in this file.
+      return left(Failure.malformedResponse(message: firstError.toString()));
+    }
+    return right(unit);
+  }
+
   /// [listSessions]'s own offline/timeout fallback — a full `chat_
   /// sessions` Hive box dump, sorted `updatedAt` desc (so `ChatCubit.
   /// init()`'s own "reuse the most recent session" pick is already

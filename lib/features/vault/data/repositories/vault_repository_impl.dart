@@ -290,6 +290,9 @@ class VaultRepositoryImpl
   }
 
   @override
+  void lock() => _emit(VaultStatus.locked);
+
+  @override
   Future<void> dispose() async {
     WidgetsBinding.instance.removeObserver(this);
     await _statusController.close();

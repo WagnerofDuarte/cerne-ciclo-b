@@ -30,6 +30,11 @@ class _FakeSessionRepository implements SessionRepository {
   @override
   void markAuthenticated() => setStatus(SessionStatus.authenticated);
 
+  // Story 8.4 — not exercised by this overlay-focused suite, same trivial
+  // rationale this fake's other untouched members already follow.
+  @override
+  Future<Either<Failure, Unit>> logout() async => right(unit);
+
   @override
   Future<void> dispose() => _controller.close();
 

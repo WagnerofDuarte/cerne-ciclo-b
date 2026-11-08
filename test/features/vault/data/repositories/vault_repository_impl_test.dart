@@ -456,6 +456,47 @@ void main() {
     });
   });
 
+  group('lock() — Story 8.4', () {
+    test('synchronously emits locked, flips currentStatus, no network/'
+        'storage call — mirrors markAuthenticated()\'s own shape for the '
+        'opposite direction', () async {
+      when(
+        () => mockLocalAuthentication.authenticate(
+          localizedReason: any(named: 'localizedReason'),
+          biometricOnly: any(named: 'biometricOnly'),
+          persistAcrossBackgrounding: any(named: 'persistAcrossBackgrounding'),
+        ),
+      ).thenAnswer((_) async => true);
+      await repository.authenticate();
+      expect(repository.currentStatus, VaultStatus.unlocked);
+
+      final emitted = await emittedDuring(() async {
+        repository.lock();
+      });
+
+      expect(emitted, [VaultStatus.locked]);
+      expect(repository.currentStatus, VaultStatus.locked);
+      verifyNever(() => mockSecureStorage.read(key: any(named: 'key')));
+      verifyNever(() => mockSecureStorage.write(
+            key: any(named: 'key'),
+            value: any(named: 'value'),
+          ));
+    });
+
+    test('while already locked -> still emits locked (no dedup guard, '
+        'unlike idle re-lock) — harmless, logout() always calls it '
+        'unconditionally', () async {
+      expect(repository.currentStatus, VaultStatus.locked);
+
+      final emitted = await emittedDuring(() async {
+        repository.lock();
+      });
+
+      expect(emitted, [VaultStatus.locked]);
+      expect(repository.currentStatus, VaultStatus.locked);
+    });
+  });
+
   group('dispose()', () {
     test('closes the underlying stream — a subsequent authenticate() '
         'success never throws trying to emit on a closed controller '

@@ -173,6 +173,24 @@ class SessionRepositoryImpl implements SessionRepository {
   }
 
   @override
+  Future<Either<Failure, Unit>> logout() async {
+    final result = await _remoteDataSource.logout();
+    // UNCONDITIONAL — must work even offline (Boundaries): regardless of
+    // whether the backend call above succeeded, the local session is
+    // cleared and the stream emits unauthenticated so the vault-gate-first
+    // redirect (AD-14) lands the user on `/vault` either way.
+    try {
+      await _accessTokenProvider.clearSession();
+    } catch (_) {
+      // Best-effort — the session is already being treated as ended below
+      // regardless of whether this succeeds, same rationale
+      // `restoreSession()`'s own dead-token clear already uses.
+    }
+    _emit(SessionStatus.unauthenticated);
+    return result;
+  }
+
+  @override
   Future<void> dispose() async {
     await _expirySubscription.cancel();
     await _statusController.close();

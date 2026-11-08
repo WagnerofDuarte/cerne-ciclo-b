@@ -319,6 +319,54 @@ void main() {
     });
   });
 
+  group('logout() — Story 8.4', () {
+    test('backend succeeds -> clearSession() called, stream emits '
+        'unauthenticated, Right(unit) returned', () async {
+      when(() => mockRemoteDataSource.logout())
+          .thenAnswer((_) async => right(unit));
+
+      Either<Failure, Unit>? result;
+      final emitted = await emittedDuring(() async {
+        result = await repository.logout();
+      });
+
+      expect(emitted, [SessionStatus.unauthenticated]);
+      expect(result!.isRight(), isTrue);
+      verify(() => mockAccessTokenProvider.clearSession()).called(1);
+    });
+
+    test('backend call fails (e.g. offline) -> clearSession() still called '
+        'UNCONDITIONALLY, stream still emits unauthenticated — must work '
+        'even offline (Boundaries)', () async {
+      when(() => mockRemoteDataSource.logout()).thenAnswer(
+        (_) async => left(const Failure.networkOffline(message: 'Offline')),
+      );
+
+      Either<Failure, Unit>? result;
+      final emitted = await emittedDuring(() async {
+        result = await repository.logout();
+      });
+
+      expect(emitted, [SessionStatus.unauthenticated]);
+      expect(result!.isLeft(), isTrue);
+      verify(() => mockAccessTokenProvider.clearSession()).called(1);
+    });
+
+    test('clearSession() itself throwing never escapes unmapped (RNF09) — '
+        'the stream still emits unauthenticated regardless', () async {
+      when(() => mockRemoteDataSource.logout())
+          .thenAnswer((_) async => right(unit));
+      when(() => mockAccessTokenProvider.clearSession())
+          .thenThrow(Exception('secure storage unavailable'));
+
+      final emitted = await emittedDuring(() async {
+        await repository.logout();
+      });
+
+      expect(emitted, [SessionStatus.unauthenticated]);
+    });
+  });
+
   group('Story 1.5 — SessionExpiryNotifier bridged onto statusStream', () {
     test('a mid-session expiry event while authenticated -> stream emits '
         'expired', () async {

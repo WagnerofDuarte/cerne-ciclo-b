@@ -6,6 +6,18 @@ import 'package:fpdart/fpdart.dart';
 import 'package:cerne/core/failure/failure.dart';
 import 'package:cerne/features/account/domain/repositories/account_settings_repository.dart';
 import 'package:cerne/features/account/presentation/cubit/account_settings_cubit.dart';
+import 'package:cerne/features/auth/domain/entities/session_status.dart';
+import 'package:cerne/features/auth/domain/repositories/session_repository.dart';
+import 'package:cerne/features/chat/domain/entities/chat_insight.dart';
+import 'package:cerne/features/chat/domain/entities/chat_message.dart';
+import 'package:cerne/features/chat/domain/entities/chat_session.dart';
+import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
+import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
+import 'package:cerne/features/entries/domain/entities/entries_page.dart';
+import 'package:cerne/features/entries/domain/entities/entry.dart';
+import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
+import 'package:cerne/features/vault/domain/entities/vault_status.dart';
+import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 
 /// A plain (non-mocktail) fake — same rationale as `vault_lock_screen_test.
 /// dart`'s own `_FakeVaultRepository`: this suite needs a scriptable
@@ -43,6 +55,15 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
   /// already gives for the toggle.
   Completer<void>? setDisplayNameGate;
 
+  /// Review finding — mirrors `AccountSettingsRepositoryImpl.
+  /// setDisplayName`'s own "echo wins" behavior: on success,
+  /// `currentDisplayName` is set to this value (defaulting to whatever was
+  /// actually sent) rather than always just echoing the argument back
+  /// unchanged. Lets a test prove the cubit reads the repository's own
+  /// post-save value rather than assuming the server stored exactly what
+  /// was sent.
+  String? setDisplayNameEchoedNameOverride;
+
   @override
   Future<Either<Failure, Unit>> setDisplayName(String name) async {
     setDisplayNameCallCount += 1;
@@ -50,6 +71,9 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
     final gate = setDisplayNameGate;
     if (gate != null) {
       await gate.future;
+    }
+    if (setDisplayNameResult.isRight()) {
+      currentDisplayName = setDisplayNameEchoedNameOverride ?? name;
     }
     return setDisplayNameResult;
   }
@@ -94,6 +118,186 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
   }
 }
 
+/// Story 8.4 — a plain (non-mocktail) fake [SessionRepository]: this
+/// suite's own `AccountSettingsCubit.logout()` tests only ever call
+/// [logout] on it (never `restoreSession`/`markAuthenticated` — those are
+/// exercised by `session_repository_impl_test.dart`/`auth_cubit_test.dart`
+/// instead), so every other member throws if ever reached.
+class _FakeSessionRepository implements SessionRepository {
+  int logoutCallCount = 0;
+
+  /// Lets a test hold [logout] unresolved, to observe ordering against
+  /// [_FakeVaultRepository.lock] (Boundaries: "`vaultRepository.lock()`...
+  /// BEFORE awaiting `sessionRepository.logout()`").
+  Completer<void>? logoutGate;
+
+  Either<Failure, Unit> logoutResult = right(unit);
+
+  @override
+  SessionStatus? get currentStatus =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<SessionStatus> get statusStream =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, Unit>> restoreSession() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  void markAuthenticated() =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, Unit>> logout() async {
+    logoutCallCount += 1;
+    final gate = logoutGate;
+    if (gate != null) {
+      await gate.future;
+    }
+    return logoutResult;
+  }
+
+  @override
+  Future<void> dispose() async {}
+}
+
+/// Story 8.4 — same rationale as [_FakeSessionRepository]: only [lock] is
+/// ever expected to be called by this cubit.
+class _FakeVaultRepository implements VaultRepository {
+  int lockCallCount = 0;
+
+  @override
+  VaultStatus get currentStatus =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<VaultStatus> get statusStream =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, Unit>> authenticate() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, Unit>> submitPin(String pin) async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  void lock() {
+    lockCallCount += 1;
+  }
+
+  @override
+  Future<void> dispose() async {}
+}
+
+/// Story 8.4 — same rationale as [_FakeSessionRepository]: only
+/// [clearLocalCache] is ever expected to be called by this cubit.
+class _FakeEntriesRepository implements EntriesRepository {
+  int clearLocalCacheCallCount = 0;
+
+  /// Lets a test hold [clearLocalCache] unresolved, to prove it's awaited
+  /// alongside [_FakeChatRepository.clearLocalCache] via `Future.wait`
+  /// (Boundaries), not sequentially.
+  Completer<void>? clearLocalCacheGate;
+
+  Either<Failure, Unit> clearLocalCacheResult = right(unit);
+
+  @override
+  Future<Either<Failure, Entry>> create({
+    required String content,
+    required EntrySource source,
+    int? mediaDurationSeconds,
+    String? chatMessageId,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, EntriesPage>> list({
+    String? cursor,
+    int limit = 20,
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, Entry>> getById(String id) async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, List<Entry>>> search(
+    String query, {
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async {
+    clearLocalCacheCallCount += 1;
+    final gate = clearLocalCacheGate;
+    if (gate != null) {
+      await gate.future;
+    }
+    return clearLocalCacheResult;
+  }
+}
+
+/// Story 8.4 — same rationale as [_FakeEntriesRepository] above.
+class _FakeChatRepository implements ChatRepository {
+  int clearLocalCacheCallCount = 0;
+
+  /// Same ordering rationale as
+  /// [_FakeEntriesRepository.clearLocalCacheGate].
+  Completer<void>? clearLocalCacheGate;
+
+  Either<Failure, Unit> clearLocalCacheResult = right(unit);
+
+  @override
+  Future<Either<Failure, List<ChatSession>>> listSessions() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, ChatSession>> createSession() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, List<ChatMessage>>> listMessages(
+    String sessionId,
+  ) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<Either<Failure, ChatStreamEvent>> sendMessage(
+    String sessionId,
+    String content,
+  ) => throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<Either<Failure, ChatStreamEvent>> retryMessage(
+    String sessionId,
+    String userMessageId,
+  ) => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, ChatInsight?>> generateInsight(
+    String sessionId, {
+    required InsightTriggerType triggerType,
+    required String triggerKey,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async {
+    clearLocalCacheCallCount += 1;
+    final gate = clearLocalCacheGate;
+    if (gate != null) {
+      await gate.future;
+    }
+    return clearLocalCacheResult;
+  }
+}
+
 Future<List<AccountSettingsState>> _emittedDuring(
   AccountSettingsCubit cubit,
   Future<void> Function() act,
@@ -114,14 +318,35 @@ Future<List<AccountSettingsState>> _emittedDuring(
 
 void main() {
   late _FakeAccountSettingsRepository fakeRepository;
+  late _FakeSessionRepository fakeSessionRepository;
+  late _FakeVaultRepository fakeVaultRepository;
+  late _FakeEntriesRepository fakeEntriesRepository;
+  late _FakeChatRepository fakeChatRepository;
 
   setUp(() {
     fakeRepository = _FakeAccountSettingsRepository();
+    fakeSessionRepository = _FakeSessionRepository();
+    fakeVaultRepository = _FakeVaultRepository();
+    fakeEntriesRepository = _FakeEntriesRepository();
+    fakeChatRepository = _FakeChatRepository();
   });
+
+  /// Story 8.4 — every pre-existing test in this file only exercises the
+  /// biometric toggle / profile-name slices, never [AccountSettingsCubit.
+  /// logout], so the widened constructor's 4 new deps are passed through
+  /// this one helper rather than repeating them at each of this file's
+  /// pre-existing 16 call sites.
+  AccountSettingsCubit buildCubit() => AccountSettingsCubit(
+    fakeRepository,
+    fakeSessionRepository,
+    fakeVaultRepository,
+    fakeEntriesRepository,
+    fakeChatRepository,
+  );
 
   group('initial state', () {
     test('mirrors currentBiometricEnabled (true) at construction', () async {
-      final cubit = AccountSettingsCubit(fakeRepository);
+      final cubit = buildCubit();
 
       expect(cubit.state.biometricEnabled, isTrue);
       expect(cubit.state.errorMessage, isNull);
@@ -131,7 +356,7 @@ void main() {
     test('mirrors a false currentBiometricEnabled (e.g. already fetched '
         'before the screen opened)', () async {
       fakeRepository._emit(false);
-      final cubit = AccountSettingsCubit(fakeRepository);
+      final cubit = buildCubit();
 
       expect(cubit.state.biometricEnabled, isFalse);
       await cubit.close();
@@ -142,7 +367,7 @@ void main() {
     test('flips to the new value and clears any prior error, calling the '
         'repository with exactly the requested value', () async {
       fakeRepository.setBiometricEnabledResult = right(unit);
-      final cubit = AccountSettingsCubit(fakeRepository);
+      final cubit = buildCubit();
 
       final emitted = await _emittedDuring(
         cubit,
@@ -162,7 +387,7 @@ void main() {
       fakeRepository.setBiometricEnabledResult = left(
         const Failure.networkTimeout(message: 'Sem conexão'),
       );
-      final cubit = AccountSettingsCubit(fakeRepository);
+      final cubit = buildCubit();
       // Drains the constructor's own subscription-replay of the current
       // value (Stream.multi's replay goes through its own forwarding
       // subscription, several microtask hops deep) before the capture
@@ -203,7 +428,7 @@ void main() {
         fakeRepository.setBiometricEnabledResult = left(
           const Failure.networkTimeout(message: 'Sem conexão'),
         );
-        final cubit = AccountSettingsCubit(fakeRepository);
+        final cubit = buildCubit();
         await cubit.toggleBiometric(false);
         // `toggleBiometric()`'s own await only guarantees its direct
         // `setBiometricEnabled()` Future resolved — the `biometricEnabled`
@@ -231,7 +456,7 @@ void main() {
     test('mirrors currentDisplayName/currentEmail at construction', () async {
       fakeRepository.currentDisplayName = 'Ana Silva';
       fakeRepository.currentEmail = 'ana@example.com';
-      final cubit = AccountSettingsCubit(fakeRepository);
+      final cubit = buildCubit();
 
       expect(cubit.state.displayName, 'Ana Silva');
       expect(cubit.state.email, 'ana@example.com');
@@ -245,7 +470,7 @@ void main() {
     test('switches to edit mode with draft = current name, clearing any '
         'leftover error (I/O matrix: "Tap pencil")', () async {
       fakeRepository.currentDisplayName = 'Ana Silva';
-      final cubit = AccountSettingsCubit(fakeRepository);
+      final cubit = buildCubit();
 
       cubit.startEditingName();
 
@@ -260,7 +485,7 @@ void main() {
     test(
       'updates nameDraft without touching isEditingName/displayName',
       () async {
-        final cubit = AccountSettingsCubit(fakeRepository);
+        final cubit = buildCubit();
         cubit.startEditingName();
 
         cubit.updateNameDraft('Novo Nome');
@@ -277,7 +502,7 @@ void main() {
     test('an unchanged draft reverts immediately, no PATCH sent (I/O '
         'matrix)', () async {
       fakeRepository.currentDisplayName = 'Ana Silva';
-      final cubit = AccountSettingsCubit(fakeRepository);
+      final cubit = buildCubit();
       cubit.startEditingName();
 
       await cubit.confirmEditingName();
@@ -291,7 +516,7 @@ void main() {
     test('an all-whitespace (trims to empty) draft reverts immediately, no '
         'PATCH sent', () async {
       fakeRepository.currentDisplayName = 'Ana Silva';
-      final cubit = AccountSettingsCubit(fakeRepository);
+      final cubit = buildCubit();
       cubit.startEditingName();
       cubit.updateNameDraft('   ');
 
@@ -310,7 +535,7 @@ void main() {
       fakeRepository.currentDisplayName = 'Ana Silva';
       fakeRepository.setDisplayNameResult = right(unit);
       fakeRepository.setDisplayNameGate = Completer<void>();
-      final cubit = AccountSettingsCubit(fakeRepository);
+      final cubit = buildCubit();
       cubit.startEditingName();
       cubit.updateNameDraft('  Nome Novo  ');
 
@@ -329,6 +554,33 @@ void main() {
       expect(fakeRepository.lastSetDisplayNameArg, 'Nome Novo');
       await cubit.close();
     });
+
+    test(
+      // Review finding: the success branch used to emit the locally-sent,
+      // merely-trimmed draft instead of re-reading the repository's own
+      // post-save value — defeating `AccountSettingsRepositoryImpl.
+      // setDisplayName`'s own code-review patch, which sets
+      // `currentDisplayName` from the response's echoed value so any
+      // backend-side normalization (trimming, casing, etc.) is reflected
+      // locally. This proves the cubit now shows that echoed value, not
+      // the locally-sent one.
+      'shows the repository\'s own echoed name on success, not the '
+      'locally-sent one, when the server normalizes it differently',
+      () async {
+        fakeRepository.currentDisplayName = 'Ana Silva';
+        fakeRepository.setDisplayNameResult = right(unit);
+        fakeRepository.setDisplayNameEchoedNameOverride = 'Nome Novo (Servidor)';
+        final cubit = buildCubit();
+        cubit.startEditingName();
+        cubit.updateNameDraft('Nome Novo');
+
+        await cubit.confirmEditingName();
+
+        expect(fakeRepository.lastSetDisplayNameArg, 'Nome Novo');
+        expect(cubit.state.displayName, 'Nome Novo (Servidor)');
+        await cubit.close();
+      },
+    );
   });
 
   group('confirmEditingName() — failure', () {
@@ -338,7 +590,7 @@ void main() {
       fakeRepository.setDisplayNameResult = left(
         const Failure.networkTimeout(message: 'Sem conexão'),
       );
-      final cubit = AccountSettingsCubit(fakeRepository);
+      final cubit = buildCubit();
       cubit.startEditingName();
       cubit.updateNameDraft('Nome Novo');
 
@@ -361,7 +613,7 @@ void main() {
           message: AccountSettingsRepository.supersededMessage,
         ),
       );
-      final cubit = AccountSettingsCubit(fakeRepository);
+      final cubit = buildCubit();
       cubit.startEditingName();
       cubit.updateNameDraft('Nome Novo');
 
@@ -377,7 +629,7 @@ void main() {
     test('not saving -> reverts immediately, no PATCH sent (I/O matrix: '
         '"Tap away, not saving")', () async {
       fakeRepository.currentDisplayName = 'Ana Silva';
-      final cubit = AccountSettingsCubit(fakeRepository);
+      final cubit = buildCubit();
       cubit.startEditingName();
       cubit.updateNameDraft('Rascunho descartado');
 
@@ -394,7 +646,7 @@ void main() {
       fakeRepository.currentDisplayName = 'Ana Silva';
       fakeRepository.setDisplayNameResult = right(unit);
       fakeRepository.setDisplayNameGate = Completer<void>();
-      final cubit = AccountSettingsCubit(fakeRepository);
+      final cubit = buildCubit();
       cubit.startEditingName();
       cubit.updateNameDraft('Nome Novo');
       final confirmFuture = cubit.confirmEditingName();
@@ -415,6 +667,130 @@ void main() {
       expect(cubit.state.isEditingName, isFalse);
       expect(cubit.state.displayName, 'Nome Novo');
       await cubit.close();
+    });
+  });
+
+  // Story 8.4 — the full I/O & Edge-Case Matrix for the "Sair" flow.
+  group('logout() — Story 8.4', () {
+    test('locks the vault BEFORE awaiting sessionRepository.logout() — '
+        'AD-14\'s vault-gate-first redirect lands on /vault with no '
+        'transient /auth hop (Boundaries)', () async {
+      fakeSessionRepository.logoutGate = Completer<void>();
+      final cubit = buildCubit();
+
+      final logoutFuture = cubit.logout();
+      // The vault lock is synchronous, fired before the await on
+      // sessionRepository.logout() below ever resolves.
+      expect(fakeVaultRepository.lockCallCount, 1);
+      expect(fakeSessionRepository.logoutCallCount, 1);
+
+      fakeSessionRepository.logoutGate!.complete();
+      await logoutFuture;
+      await cubit.close();
+    });
+
+    test('awaits sessionRepository.logout() before clearing the entries/'
+        'chat caches — each cache clear only starts once the session '
+        'logout call has resolved', () async {
+      fakeSessionRepository.logoutGate = Completer<void>();
+      final cubit = buildCubit();
+
+      final logoutFuture = cubit.logout();
+      await Future<void>.delayed(Duration.zero);
+      expect(fakeEntriesRepository.clearLocalCacheCallCount, 0);
+      expect(fakeChatRepository.clearLocalCacheCallCount, 0);
+
+      fakeSessionRepository.logoutGate!.complete();
+      await logoutFuture;
+
+      expect(fakeEntriesRepository.clearLocalCacheCallCount, 1);
+      expect(fakeChatRepository.clearLocalCacheCallCount, 1);
+      await cubit.close();
+    });
+
+    test('clears the entries and chat caches concurrently via Future.wait '
+        '— neither awaits the other', () async {
+      fakeEntriesRepository.clearLocalCacheGate = Completer<void>();
+      fakeChatRepository.clearLocalCacheGate = Completer<void>();
+      final cubit = buildCubit();
+
+      final logoutFuture = cubit.logout();
+      await Future<void>.delayed(Duration.zero);
+      // Both calls have started even though neither has resolved yet —
+      // proves they're concurrent, not sequential.
+      expect(fakeEntriesRepository.clearLocalCacheCallCount, 1);
+      expect(fakeChatRepository.clearLocalCacheCallCount, 1);
+
+      fakeEntriesRepository.clearLocalCacheGate!.complete();
+      fakeChatRepository.clearLocalCacheGate!.complete();
+      await logoutFuture;
+      await cubit.close();
+    });
+
+    test('isLoggingOut is true for the duration of the call, then false '
+        'once everything settles', () async {
+      fakeSessionRepository.logoutGate = Completer<void>();
+      final cubit = buildCubit();
+      expect(cubit.state.isLoggingOut, isFalse);
+
+      final logoutFuture = cubit.logout();
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.isLoggingOut, isTrue);
+
+      fakeSessionRepository.logoutGate!.complete();
+      await logoutFuture;
+
+      expect(cubit.state.isLoggingOut, isFalse);
+      await cubit.close();
+    });
+
+    test('a double-tap (second call while the first is still in flight) '
+        'no-ops — the switch\'s own disabled state is the first line of '
+        'defense, this guard is the backstop (Boundaries)', () async {
+      fakeSessionRepository.logoutGate = Completer<void>();
+      final cubit = buildCubit();
+
+      final firstLogout = cubit.logout();
+      await Future<void>.delayed(Duration.zero);
+      await cubit.logout();
+
+      expect(fakeVaultRepository.lockCallCount, 1);
+      expect(fakeSessionRepository.logoutCallCount, 1);
+
+      fakeSessionRepository.logoutGate!.complete();
+      await firstLogout;
+      await cubit.close();
+    });
+
+    test('a backend logout failure (e.g. offline) still clears the local '
+        'caches and settles isLoggingOut — never surfaced as an error '
+        '(Never: "surfacing a backend-logout-failure error")', () async {
+      fakeSessionRepository.logoutResult = left(
+        const Failure.networkOffline(message: 'Offline'),
+      );
+      final cubit = buildCubit();
+
+      await cubit.logout();
+
+      expect(fakeEntriesRepository.clearLocalCacheCallCount, 1);
+      expect(fakeChatRepository.clearLocalCacheCallCount, 1);
+      expect(cubit.state.isLoggingOut, isFalse);
+      expect(cubit.state.errorMessage, isNull);
+      await cubit.close();
+    });
+
+    test('isClosed guard — a cubit closed mid-logout never throws trying '
+        'to emit on it (same convention as toggleBiometric\'s own guard)',
+        () async {
+      fakeSessionRepository.logoutGate = Completer<void>();
+      final cubit = buildCubit();
+
+      final logoutFuture = cubit.logout();
+      await Future<void>.delayed(Duration.zero);
+      await cubit.close();
+      fakeSessionRepository.logoutGate!.complete();
+
+      await expectLater(logoutFuture, completes);
     });
   });
 }

@@ -90,6 +90,11 @@ class _FakeEntriesRepository implements EntriesRepository {
     DateTime? dateFrom,
     DateTime? dateTo,
   }) async => throw UnimplementedError('not expected to be called');
+
+  // Story 8.4 — not exercised by this suite, same trivial rationale
+  // this fake's other untouched members already follow.
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async => right(unit);
 }
 
 /// A `Completer`-per-call fake, letting a test resolve `list()` calls in
@@ -135,6 +140,11 @@ class _GatedEntriesRepository implements EntriesRepository {
     DateTime? dateFrom,
     DateTime? dateTo,
   }) async => throw UnimplementedError('not expected to be called');
+
+  // Story 8.4 — not exercised by this suite, same trivial rationale
+  // this fake's other untouched members already follow.
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async => right(unit);
 }
 
 /// A controllable `PendingEntryWriteTracker` fake — lets a test drive

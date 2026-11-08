@@ -72,6 +72,11 @@ class _FakeEntriesRepository implements EntriesRepository {
     ));
     return right(const []);
   }
+
+  // Story 8.4 — not exercised by this suite, same trivial rationale
+  // this fake's other untouched members already follow.
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async => right(unit);
 }
 
 class _FakePendingEntryWriteTracker implements PendingEntryWriteTracker {

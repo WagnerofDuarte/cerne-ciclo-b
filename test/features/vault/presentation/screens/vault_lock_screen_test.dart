@@ -96,6 +96,14 @@ class _FakeVaultRepository implements VaultRepository {
     return left(const Failure.malformedResponse(message: 'fake: PIN mismatch'));
   }
 
+  // Story 8.4 — not exercised by this suite, same trivial rationale this
+  // fake's other untouched members already follow.
+  @override
+  void lock() {
+    _status = VaultStatus.locked;
+    _controller.add(_status);
+  }
+
   @override
   Future<void> dispose() => _controller.close();
 }

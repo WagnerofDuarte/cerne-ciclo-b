@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/design_tokens.dart';
 import '../../../../core/resource.dart';
+import '../../../../core/widgets/app_button.dart';
 import '../../../../core/widgets/app_text_field.dart';
 import '../../../../core/widgets/avatar.dart';
 import '../../../../core/widgets/back_arrow_header.dart';
@@ -54,7 +55,22 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _nameController = TextEditingController();
+    // Review finding: `widget.cubit` is a DI singleton that outlives this
+    // `State` — if it's already mid-edit on mount (e.g. the user left
+    // Configurações via the back arrow, which never calls
+    // `cancelEditingName`, then reopened it), a fresh, empty controller
+    // would otherwise desync from the retained `nameDraft`: the field
+    // shows blank while `confirmEditingName()` would silently save the
+    // old, invisible draft.
+    final cubitState = widget.cubit.state;
+    _nameController = TextEditingController(
+      text: cubitState.isEditingName ? cubitState.nameDraft : '',
+    );
+    if (cubitState.isEditingName) {
+      _nameController.selection = TextSelection.collapsed(
+        offset: _nameController.text.length,
+      );
+    }
     // Review finding: clears a leftover error from a previous visit's
     // failed toggle — this cubit is a DI singleton, so without this a
     // stale message would still be showing on an unrelated later visit.
@@ -222,6 +238,11 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                 style: DesignTokens.dashboardNarrativeTextStyle.copyWith(
                   color: DesignTokens.colorTextSecondary,
                 ),
+                // Review finding: same overflow fix as the adjacent name
+                // `Text` above — a long e-mail would otherwise wrap to
+                // multiple lines and misalign this row.
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           ),
@@ -486,6 +507,19 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                           DashboardCubit,
                           Resource<DashboardAggregate>
                         >(
+                          // Review finding: without this, every later
+                          // `DashboardCubit` emission with `totalCount >
+                          // 30` (e.g. each further `confirmedWrites`-
+                          // triggered reload) re-ran the listener and
+                          // re-announced the same unchanged narrative
+                          // error — not just the one missed transition
+                          // this listener exists to catch. Only fires on
+                          // the transition *into* `totalCount > 30`.
+                          listenWhen: (previous, current) =>
+                              !(previous is ResourceData<DashboardAggregate> &&
+                                  previous.data.totalCount > 30) &&
+                              current is ResourceData<DashboardAggregate> &&
+                              current.data.totalCount > 30,
                           listener: (context, state) {
                             if (state is! ResourceData<DashboardAggregate> ||
                                 state.data.totalCount <= 30) {
@@ -504,6 +538,22 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                         ),
                       ],
                       child: const DashboardChartSection(),
+                    ),
+                    // Story 8.4 — "Sair": the scroll column's last child,
+                    // below DashboardChartSection (Code Map). No new
+                    // navigation code — the existing app_router.dart
+                    // redirect (already watching both the vault and
+                    // session streams) takes the user to Biometria once
+                    // VaultRepository.lock() relocks the vault.
+                    const SizedBox(height: DesignTokens.spacingXl),
+                    BlocBuilder<AccountSettingsCubit, AccountSettingsState>(
+                      builder: (context, state) => AppButton(
+                        label: 'Sair',
+                        variant: AppButtonVariant.secondaryOutline,
+                        onPressed: state.isLoggingOut
+                            ? null
+                            : widget.cubit.logout,
+                      ),
                     ),
                   ],
                 ),

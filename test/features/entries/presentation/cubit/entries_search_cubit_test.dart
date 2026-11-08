@@ -94,6 +94,11 @@ class _FakeEntriesRepository implements EntriesRepository {
   @override
   Future<Either<Failure, Entry>> getById(String id) async =>
       throw UnimplementedError('not expected to be called');
+
+  // Story 8.4 — not exercised by this suite, same trivial rationale
+  // create()/list()/getById() above already follow.
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async => right(unit);
 }
 
 /// Collects every state the cubit emits for the duration of [act] — same

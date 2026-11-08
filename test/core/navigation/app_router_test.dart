@@ -99,6 +99,12 @@ class _FakeEntriesRepository implements EntriesRepository {
     DateTime? dateFrom,
     DateTime? dateTo,
   }) async => throw UnimplementedError('not expected to be called');
+
+  // Story 8.4 — `sl<AccountSettingsCubit>()`'s widened constructor now
+  // resolves `sl<EntriesRepository>()` too; this suite never exercises
+  // `logout()` itself, only that the registration resolves.
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async => right(unit);
 }
 
 /// A trivial fake `PendingEntryWriteTracker` — this suite never exercises
@@ -196,6 +202,11 @@ class _FakeChatRepository implements ChatRepository {
     required InsightTriggerType triggerType,
     required String triggerKey,
   }) async => throw UnimplementedError('not expected to be called');
+
+  // Story 8.4 — same rationale as `_FakeEntriesRepository.clearLocalCache`
+  // above.
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async => right(unit);
 }
 
 /// A plain (non-mocktail) fake — the redirect matrix needs [currentStatus]
@@ -217,6 +228,19 @@ class _FakeSessionRepository implements SessionRepository {
 
   @override
   void markAuthenticated() => setStatus(SessionStatus.authenticated);
+
+  // Story 8.4 — `sl<AccountSettingsCubit>()`'s widened constructor now
+  // resolves `sl<SessionRepository>()` too; this suite never exercises the
+  // real "Sair" flow (no dedicated test for it here — Intent/Boundaries:
+  // "no new navigation code", the existing redirect matrix above already
+  // covers the vault-locked -> `/vault` case this flow relies on), so this
+  // just needs to resolve and settle the status like `restoreSession()`
+  // above.
+  @override
+  Future<Either<Failure, Unit>> logout() async {
+    setStatus(SessionStatus.unauthenticated);
+    return right(unit);
+  }
 
   @override
   Future<void> dispose() => _controller.close();
@@ -274,6 +298,12 @@ class _FakeVaultRepository implements VaultRepository {
     _status = status;
     _controller.add(status);
   }
+
+  // Story 8.4 — `sl<AccountSettingsCubit>()`'s widened constructor now
+  // resolves `sl<VaultRepository>()` too; mirrors `markAuthenticated()`'s
+  // own shape for the opposite direction.
+  @override
+  void lock() => setStatus(VaultStatus.locked);
 }
 
 /// A plain (non-mocktail) fake for [AccountSettingsRepository] (Story 2.4,
@@ -291,19 +321,33 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
   @override
   Stream<bool> get biometricEnabledStream => _controller.stream;
 
-  // spec-8-3 — this suite never exercises the profile-name feature; a
-  // trivial, never-asserted-on default is enough to satisfy the widened
-  // interface (same rationale `_FakeAccountSettingsRepository`'s other
-  // untouched members already follow).
+  // spec-8-3 — mutable (not a fixed-`''` getter) so a test can configure
+  // the profile fields *before* `AccountSettingsCubit`'s own constructor
+  // reads them, same rationale `_pumpScreenWithProfile`'s own fake gives in
+  // account_settings_screen_test.dart. Untouched by any test other than the
+  // dedicated spec-8-3 group below, so this stays a safe default for every
+  // pre-existing case that never asserts on it.
   @override
-  String get currentDisplayName => '';
+  String currentDisplayName = '';
 
   @override
-  String get currentEmail => '';
+  String currentEmail = '';
+
+  /// The next `setDisplayName()` call's own result — defaults to a failure
+  /// so a test must opt in to the success path explicitly, same convention
+  /// as [setBiometricEnabledResult] in account_settings_screen_test.dart's
+  /// own fake.
+  Either<Failure, Unit> setDisplayNameResult = left(
+    const Failure.malformedResponse(message: 'fake: not configured'),
+  );
 
   @override
-  Future<Either<Failure, Unit>> setDisplayName(String name) async =>
-      right(unit);
+  Future<Either<Failure, Unit>> setDisplayName(String name) async {
+    if (setDisplayNameResult.isRight()) {
+      currentDisplayName = name;
+    }
+    return setDisplayNameResult;
+  }
 
   @override
   Future<Either<Failure, Unit>> fetchBiometricEnabled() async => right(unit);
@@ -377,8 +421,22 @@ void main() {
     // ()` (Story 2.4) — same rationale as `AuthCubit` above, wired to the
     // same fake repository `pumpRouter` passes into `buildAppRouter` so a
     // test can also drive it through the cubit if ever needed.
+    //
+    // Story 8.4 — widened with the suite's own `fakeSessionRepository`/
+    // `fakeVaultRepository` (same two instances `pumpRouter` passes into
+    // `buildAppRouter`, so a "Sair" tap's `vaultRepository.lock()` would be
+    // observable through the router's own redirect if a test ever drove
+    // it) plus a fresh `_FakeEntriesRepository`/`_FakeChatRepository` pair
+    // — this suite never exercises `logout()` itself, only that the
+    // registration resolves.
     sl.registerLazySingleton<AccountSettingsCubit>(
-      () => AccountSettingsCubit(fakeAccountSettingsRepository),
+      () => AccountSettingsCubit(
+        fakeAccountSettingsRepository,
+        fakeSessionRepository,
+        fakeVaultRepository,
+        _FakeEntriesRepository(),
+        _FakeChatRepository(),
+      ),
     );
     // spec-8-1 — `/configuracoes`'s `GoRoute.builder` also resolves `sl<
     // DashboardCubit>()` now; same trivial-fake rationale as
@@ -662,6 +720,81 @@ void main() {
             find.byType(VaultLockScreen),
           );
           expect(screen.attemptBiometricFirst, isFalse);
+        },
+      );
+    },
+  );
+
+  group(
+    'spec-8-3 — profile name editing survives real router navigation (not '
+    'the isolated two-route stub account_settings_screen_test.dart uses)',
+    () {
+      testWidgets(
+        'editing the name on /configuracoes, navigating away to another '
+        'real destination and back shows the saved name — not a stale '
+        'draft or a blank field (the exact "left via back arrow, '
+        'reopened" scenario spec-8-3\'s own review finding describes, now '
+        'proved against the app\'s real multi-destination router instead '
+        'of a synthetic two-route stub)',
+        (tester) async {
+          fakeAccountSettingsRepository.currentDisplayName = 'Ana Silva';
+          fakeAccountSettingsRepository.setDisplayNameResult = right(unit);
+          final router = await pumpRouter(tester);
+          fakeSessionRepository.setStatus(SessionStatus.authenticated);
+          await tester.pumpAndSettle();
+
+          router.go(AppRoutePaths.configuracoes);
+          await tester.pumpAndSettle();
+          expect(find.text('Ana Silva'), findsOneWidget);
+
+          await tester.tap(find.byIcon(Icons.edit));
+          await tester.pump();
+          await tester.enterText(find.byType(TextField), 'Ana Souza');
+          await tester.tap(find.byIcon(Icons.check));
+          await tester.pumpAndSettle();
+          expect(find.text('Ana Souza'), findsOneWidget);
+
+          // Leaves for another real destination, then comes back — a
+          // fresh AccountSettingsScreen/State is built around the exact
+          // same sl<AccountSettingsCubit>() singleton, exactly as a real
+          // app launch would when the user leaves the tab and reopens it.
+          router.go(AppRoutePaths.home);
+          await tester.pumpAndSettle();
+          router.go(AppRoutePaths.configuracoes);
+          await tester.pumpAndSettle();
+
+          expect(tester.takeException(), isNull);
+          expect(find.text('Ana Souza'), findsOneWidget);
+          expect(find.byType(TextField), findsNothing);
+        },
+      );
+
+      testWidgets(
+        'a failed save leaves the field editable with the typed draft when '
+        'reached through the real router, not just the isolated screen '
+        'test\'s own stub',
+        (tester) async {
+          fakeAccountSettingsRepository.currentDisplayName = 'Ana Silva';
+          fakeAccountSettingsRepository.setDisplayNameResult = left(
+            const Failure.networkTimeout(message: 'Sem conexão'),
+          );
+          final router = await pumpRouter(tester);
+          fakeSessionRepository.setStatus(SessionStatus.authenticated);
+          await tester.pumpAndSettle();
+
+          router.go(AppRoutePaths.configuracoes);
+          await tester.pumpAndSettle();
+
+          await tester.tap(find.byIcon(Icons.edit));
+          await tester.pump();
+          await tester.enterText(find.byType(TextField), 'Ana Souza');
+          await tester.tap(find.byIcon(Icons.check));
+          await tester.pumpAndSettle();
+
+          expect(find.byType(TextField), findsOneWidget);
+          final field = tester.widget<TextField>(find.byType(TextField));
+          expect(field.controller!.text, 'Ana Souza');
+          expect(find.text('Sem conexão'), findsOneWidget);
         },
       );
     },

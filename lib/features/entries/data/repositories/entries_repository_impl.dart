@@ -230,6 +230,17 @@ class EntriesRepositoryImpl implements EntriesRepository {
     }
   }
 
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async {
+    try {
+      await _entriesBox.clear();
+      return right(unit);
+    } catch (error) {
+      // Same RNF09 rationale as every other Hive-write guard in this file.
+      return left(Failure.malformedResponse(message: error.toString()));
+    }
+  }
+
   Entry _toEntry(EntryDto dto) => Entry(
     id: dto.id,
     content: dto.content,

@@ -38,6 +38,15 @@ abstract class SessionRepository {
   /// straight back to `/auth`.
   void markAuthenticated();
 
+  /// Story 8.4 — mirrors [restoreSession]'s own shape, inverted: calls
+  /// `AuthRemoteDataSource.logout()` (`POST auth-logout`), then
+  /// UNCONDITIONALLY calls `AccessTokenProvider.clearSession()` and emits
+  /// [SessionStatus.unauthenticated] regardless of whether the backend call
+  /// succeeded — must work even offline (`AccountSettingsCubit.logout()`
+  /// awaits this, then ignores its result; the local session is already
+  /// treated as ended either way).
+  Future<Either<Failure, Unit>> logout();
+
   /// Releases the underlying stream resource. Wired as `get_it`'s
   /// `dispose:` callback on registration, so `resetCoreDependencies()`
   /// (`sl.reset()`) closes it instead of leaking a `StreamController` on

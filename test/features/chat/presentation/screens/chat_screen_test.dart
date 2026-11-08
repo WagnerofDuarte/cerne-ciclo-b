@@ -108,6 +108,11 @@ class _FakeChatRepository implements ChatRepository {
     generateInsightCalls.add(sessionId);
     return generateInsightResult;
   }
+
+  // Story 8.4 — not exercised by this screen-focused suite, same trivial
+  // rationale this fake's other untouched members already follow.
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async => right(unit);
 }
 
 /// spec-6-4 — a controllable fake, same shape `chat_cubit_test.dart`'s own

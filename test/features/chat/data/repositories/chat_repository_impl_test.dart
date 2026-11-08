@@ -321,6 +321,65 @@ void main() {
     });
   });
 
+  group('clearLocalCache() — Story 8.4', () {
+    test('clears both the sessions and messages Hive boxes, returns '
+        'Right(unit)', () async {
+      when(() => mockSessionsBox.clear()).thenAnswer((_) async => 0);
+      when(() => mockMessagesBox.clear()).thenAnswer((_) async => 0);
+
+      final result = await repository.clearLocalCache();
+
+      verify(() => mockSessionsBox.clear()).called(1);
+      verify(() => mockMessagesBox.clear()).called(1);
+      expect(result.isRight(), isTrue);
+    });
+
+    test('a Hive clear failure on either box maps to Left(malformedResponse), '
+        'never throws (RNF09)', () async {
+      when(() => mockSessionsBox.clear())
+          .thenThrow(Exception('disk full'));
+      when(() => mockMessagesBox.clear()).thenAnswer((_) async => 0);
+
+      final result = await repository.clearLocalCache();
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
+
+    test('review finding: a thrown failure clearing the sessions box never '
+        'skips the messages box — both are always attempted independently, '
+        'so a disk-full error on one never leaves the other uncleared',
+        () async {
+      when(() => mockSessionsBox.clear()).thenThrow(Exception('disk full'));
+      when(() => mockMessagesBox.clear()).thenAnswer((_) async => 0);
+
+      await repository.clearLocalCache();
+
+      verify(() => mockSessionsBox.clear()).called(1);
+      verify(() => mockMessagesBox.clear()).called(1);
+    });
+
+    test('the mirror image: a thrown failure clearing the messages box '
+        'never prevents the sessions box from having already been '
+        'attempted (and still surfaces as Left)', () async {
+      when(() => mockSessionsBox.clear()).thenAnswer((_) async => 0);
+      when(() => mockMessagesBox.clear()).thenThrow(Exception('disk full'));
+
+      final result = await repository.clearLocalCache();
+
+      verify(() => mockSessionsBox.clear()).called(1);
+      verify(() => mockMessagesBox.clear()).called(1);
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
+  });
+
   group('generateInsight — spec-6-5', () {
     test(
       'wireValue strings reach the datasource, never the enum\'s own name',

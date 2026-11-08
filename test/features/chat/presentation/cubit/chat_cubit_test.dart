@@ -107,6 +107,11 @@ class _FakeChatRepository implements ChatRepository {
     lastRetryController = controller;
     return controller.stream;
   }
+
+  // Story 8.4 — not exercised by this suite, same trivial rationale this
+  // fake's other untouched members already follow.
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async => right(unit);
 }
 
 /// spec-6-4 — a controllable fake, same `Completer`-per-call shape
@@ -1979,4 +1984,9 @@ class _CountingChatRepository implements ChatRepository {
     triggerType: triggerType,
     triggerKey: triggerKey,
   );
+
+  // Story 8.4 — not exercised by this counting wrapper's own test, same
+  // pure-delegation rationale every other method above already follows.
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() => _delegate.clearLocalCache();
 }

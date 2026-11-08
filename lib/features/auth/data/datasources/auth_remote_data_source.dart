@@ -47,6 +47,15 @@ class AuthRemoteDataSource {
     });
   }
 
+  /// Story 8.4 — `auth-logout` (`openapi.yaml`'s `/auth/logout`), bearerAuth,
+  /// no request body and no DTO shape worth decoding: the response is just
+  /// `{data: {ok: true}}`, which [SessionRepositoryImpl.logout] never reads
+  /// — only whether the call itself succeeded or failed matters here.
+  Future<Either<Failure, Unit>> logout() async {
+    final result = await _apiClient.post('auth-logout');
+    return result.map((_) => unit);
+  }
+
   Future<Either<Failure, AuthResponseDto>> _post(
     String function, {
     required String email,

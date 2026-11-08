@@ -1,7 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../auth/domain/repositories/session_repository.dart';
+import '../../../chat/domain/repositories/chat_repository.dart';
+import '../../../entries/domain/repositories/entries_repository.dart';
+import '../../../vault/domain/repositories/vault_repository.dart';
 import '../../domain/repositories/account_settings_repository.dart';
 
 /// Drives [AccountSettingsScreen]: just the one toggle's current value
@@ -19,6 +24,7 @@ class AccountSettingsState {
     this.nameDraft = '',
     this.isSavingName = false,
     this.nameErrorMessage,
+    this.isLoggingOut = false,
   });
 
   final bool biometricEnabled;
@@ -71,6 +77,13 @@ class AccountSettingsState {
   /// kept").
   final String? nameErrorMessage;
 
+  /// Story 8.4 — `true` for the duration of one
+  /// [AccountSettingsCubit.logout] call, guarding against re-entry
+  /// (double-tap no-ops, Boundaries) — `account_settings_screen.dart`
+  /// disables the "Sair" button while this is `true`, same convention
+  /// [isSaving]/[isSavingName] already use for their own in-flight calls.
+  final bool isLoggingOut;
+
   AccountSettingsState copyWith({
     bool? biometricEnabled,
     String? errorMessage,
@@ -83,6 +96,7 @@ class AccountSettingsState {
     bool? isSavingName,
     String? nameErrorMessage,
     bool clearNameErrorMessage = false,
+    bool? isLoggingOut,
   }) {
     return AccountSettingsState(
       biometricEnabled: biometricEnabled ?? this.biometricEnabled,
@@ -98,6 +112,7 @@ class AccountSettingsState {
       nameErrorMessage: clearNameErrorMessage
           ? null
           : (nameErrorMessage ?? this.nameErrorMessage),
+      isLoggingOut: isLoggingOut ?? this.isLoggingOut,
     );
   }
 
@@ -113,7 +128,8 @@ class AccountSettingsState {
           other.isEditingName == isEditingName &&
           other.nameDraft == nameDraft &&
           other.isSavingName == isSavingName &&
-          other.nameErrorMessage == nameErrorMessage);
+          other.nameErrorMessage == nameErrorMessage &&
+          other.isLoggingOut == isLoggingOut);
 
   @override
   int get hashCode => Object.hash(
@@ -126,6 +142,7 @@ class AccountSettingsState {
     nameDraft,
     isSavingName,
     nameErrorMessage,
+    isLoggingOut,
   );
 
   @override
@@ -134,7 +151,8 @@ class AccountSettingsState {
       'errorMessage: $errorMessage, isSaving: $isSaving, '
       'displayName: $displayName, email: $email, '
       'isEditingName: $isEditingName, nameDraft: $nameDraft, '
-      'isSavingName: $isSavingName, nameErrorMessage: $nameErrorMessage)';
+      'isSavingName: $isSavingName, nameErrorMessage: $nameErrorMessage, '
+      'isLoggingOut: $isLoggingOut)';
 }
 
 /// Calls [AccountSettingsRepository] directly (no use-case — same small-
@@ -146,8 +164,13 @@ class AccountSettingsState {
 /// (subscribed once, at construction) and separately layers the
 /// toggle-failure error message on top.
 class AccountSettingsCubit extends Cubit<AccountSettingsState> {
-  AccountSettingsCubit(this._repository)
-    : super(
+  AccountSettingsCubit(
+    this._repository,
+    this._sessionRepository,
+    this._vaultRepository,
+    this._entriesRepository,
+    this._chatRepository,
+  ) : super(
         AccountSettingsState(
           biometricEnabled: _repository.currentBiometricEnabled,
           // spec-8-3 — read once, at construction (Boundaries); never
@@ -171,6 +194,16 @@ class AccountSettingsCubit extends Cubit<AccountSettingsState> {
   }
 
   final AccountSettingsRepository _repository;
+
+  // Story 8.4 — direct-domain-interface deps, same precedent
+  // `EntryDetailCubit`'s own `SessionRepository` param already sets (no
+  // dedicated logout use-case; RNF06 is still satisfied since all four are
+  // domain-layer abstractions).
+  final SessionRepository _sessionRepository;
+  final VaultRepository _vaultRepository;
+  final EntriesRepository _entriesRepository;
+  final ChatRepository _chatRepository;
+
   late final StreamSubscription<bool> _subscription;
 
   Future<void> toggleBiometric(bool value) async {
@@ -284,16 +317,64 @@ class AccountSettingsCubit extends Cubit<AccountSettingsState> {
         );
       },
       (_) {
+        // Review finding: reads the repository's own echoed value (set
+        // from `dto.displayName` in `setDisplayName`'s success branch),
+        // not the locally-sent `trimmed` string — any backend-side
+        // normalization (trimming, casing, etc.) must reach this state,
+        // the one place the user actually sees the name, not just the
+        // repository's own internal cache.
         emit(
           state.copyWith(
             isEditingName: false,
             isSavingName: false,
-            displayName: trimmed,
+            displayName: _repository.currentDisplayName,
             clearNameErrorMessage: true,
           ),
         );
       },
     );
+  }
+
+  /// Story 8.4 — the "Sair" button's whole flow, end to end. Guards
+  /// re-entry via [AccountSettingsState.isLoggingOut] (Boundaries: a
+  /// double-tap no-ops). [VaultRepository.lock] fires synchronously
+  /// BEFORE awaiting [SessionRepository.logout] (Boundaries) — AD-14's
+  /// vault-gate-first redirect then lands on `/vault` immediately, with no
+  /// transient `/auth` hop, while the backend call and the local cache
+  /// clears still happen in the background. The session logout's own
+  /// result is ignored (Boundaries: "local session already ended
+  /// regardless") — it must never surface a backend-logout-failure error
+  /// (Never). Same `isClosed` guard as [toggleBiometric].
+  Future<void> logout() async {
+    if (state.isLoggingOut) {
+      return;
+    }
+    emit(state.copyWith(isLoggingOut: true));
+    _vaultRepository.lock();
+    await _sessionRepository.logout();
+    final cacheResults = await Future.wait([
+      _entriesRepository.clearLocalCache(),
+      _chatRepository.clearLocalCache(),
+    ]);
+    // Review finding: neither result was ever inspected — a cache-clear
+    // failure (e.g. Hive disk-full) was silently swallowed with zero
+    // record anywhere. `debugPrint`-only (never surfaced to the UI, same
+    // "no UI-visible error" boundary the session-logout call itself
+    // follows), mirroring this codebase's existing silent-swallow-with-
+    // debugPrint convention (`ApiClient.postStream`/`HeaderInterceptor`).
+    for (final result in cacheResults) {
+      result.match(
+        (failure) => debugPrint(
+          'AccountSettingsCubit.logout: clearLocalCache failed — '
+          '${failure.message}',
+        ),
+        (_) {},
+      );
+    }
+    if (isClosed) {
+      return;
+    }
+    emit(state.copyWith(isLoggingOut: false));
   }
 
   @override

@@ -229,6 +229,95 @@ exercised through the same e2e suite.
   — profile editing, logout, account deletion — is still `backlog`, so
   e2e coverage for those is N/A for now.
 
+## Target feature: account (story 8.3 — profile name editing)
+
+Chosen because `account` was the one remaining feature with thorough
+per-layer/widget coverage (see the story 8.3 paragraph under
+Verification above) but no `*_flow_e2e_test.dart` of its own — the same
+gap pattern auth/dashboard above were chosen to close.
+
+- [x] `test/features/account/account_settings_flow_e2e_test.dart` — 7
+  new tests, driven directly against the real, DI-resolved
+  `AccountSettingsRepository` (`sl<AccountSettingsRepository>()`, the
+  exact instance `AccountSettingsCubit`/`VaultLockScreen` share via
+  `app_router.dart`):
+  - Happy path: `fetchBiometricEnabled()` → genuine empty-body
+    `account-settings-update` PATCH (Boundaries: "called empty to
+    read"), real `apikey`/bearer headers → real
+    `AccountSettingsDto.fromJson()` decode → `currentBiometricEnabled`/
+    `currentDisplayName`/`currentEmail` all set from one real response.
+  - `setBiometricEnabled(true)` → genuine PATCH with exactly
+    `{"biometricEnabled": true}` and real headers.
+  - spec-8-3 `setDisplayName` group: happy path (genuine PATCH with
+    exactly `{"displayName": name}`); the code-review "response's echo
+    wins over the locally-sent value" patch proved for real (sends a
+    padded name, the fixture echoes back a different, normalized one,
+    and `currentDisplayName` takes the echoed value); a non-retryable
+    `VALIDATION_ERROR` → real `Failure.fromCode` → `Left(Validation)`,
+    exactly one request (no `RetryInterceptor` retry — confirms
+    `account-settings-update` is not in `neverRetriedFunctions`); a
+    retryable `NETWORK_TIMEOUT` → exhausts the real `RetryInterceptor`
+    policy (1 + `maxRetries` requests); a response missing a required
+    field (`email`) → the real `AccountRemoteDataSource` try/catch →
+    `Left(MalformedResponse)`, never a crash.
+
+  This complements, and does not duplicate, existing coverage:
+  `account_settings_repository_impl_test.dart` (mocked
+  `AccountRemoteDataSource`, every I/O-matrix transition including both
+  generation guards), `account_remote_data_source_test.dart` (mocked
+  `ApiClient`, the RNF09 write-failure matrix and request-shape/decode
+  tests), and `account_settings_cubit_test.dart`/
+  `account_settings_screen_test.dart` (fake-repository cubit/widget
+  coverage). None of those drove a real `account-settings-update` round
+  trip — real URL building, real headers, the real `RetryInterceptor`
+  policy, the real `AccountSettingsDto.fromJson()` mapping off a real
+  decoded JSON payload — nor proved that `setDisplayName`'s "echo wins"
+  patch survives a real backend-side normalization rather than a
+  hand-written fake's own pass-through.
+
+- [x] `test/core/navigation/app_router_test.dart` — 2 new tests in a
+  `spec-8-3 — profile name editing survives real router navigation`
+  group, closing a gap the router suite's own pre-existing
+  `_FakeAccountSettingsRepository` comment flagged ("this suite never
+  exercises the profile-name feature"):
+  - Editing the name on `/configuracoes`, navigating away to another
+    real destination (`/`) and back shows the saved name, not a stale
+    draft or a blank field — the exact "left via back arrow, reopened"
+    scenario spec-8-3's own review finding describes, now proved
+    against the app's real multi-destination `GoRouter` instead of
+    `account_settings_screen_test.dart`'s own synthetic two-route stub.
+  - A failed save leaves the field editable with the typed draft when
+    reached through the real router, not just the isolated screen
+    test's own stub.
+
+### API Tests
+
+Not applicable separately, same rationale as export/auth/dashboard
+above — exercised through the same e2e suite.
+
+## Verification
+
+- `fvm flutter analyze` — 0 issues (project-wide)
+- `fvm flutter test` — **1251/1251 passed**, no regressions. (Review
+  finding from this same file, taken to heart: rather than re-deriving
+  a delta against a prior tally that has already drifted twice, this
+  entry reports only the one number that was actually run just now —
+  1251/1251 — plus the exact count of tests this round added: 9 (7 in
+  the new `account_settings_flow_e2e_test.dart` + 2 in
+  `app_router_test.dart`'s new spec-8-3 group). A future entry should
+  do the same rather than trust-and-propagate this section's own prior
+  arithmetic.)
+
+## Coverage
+
+- Features with `*_flow_e2e_test.dart` coverage: capture, entries,
+  chat, export, auth, dashboard, **account** (now covering both the
+  Story 2.4 biometric toggle and spec-8-3's `setDisplayName`/
+  `fetchBiometricEnabled` boot-fetch piggyback through the real
+  transport).
+- Still missing this level of coverage: vault (biometric/PIN gate) —
+  unchanged from the gap already described above.
+
 ## Next Steps
 
 - Consider the same real-pipeline e2e treatment for vault (biometric/

@@ -1,4 +1,8 @@
 import '../../core/di/injection_container.dart';
+import '../auth/domain/repositories/session_repository.dart';
+import '../chat/domain/repositories/chat_repository.dart';
+import '../entries/domain/repositories/entries_repository.dart';
+import '../vault/domain/repositories/vault_repository.dart';
 import 'data/datasources/account_remote_data_source.dart';
 import 'data/repositories/account_settings_repository_impl.dart';
 import 'domain/repositories/account_settings_repository.dart';
@@ -31,8 +35,22 @@ void registerAccountFeature() {
   // subscription, which nothing previously called — `dispose:` wires it
   // into `get_it`'s own reset lifecycle, same convention as every other
   // registration in this file.
+  //
+  // Story 8.4 — widened with the 4 repos `logout()` orchestrates
+  // (`SessionRepository`/`VaultRepository`/`EntriesRepository`/
+  // `ChatRepository`), all already registered as `lazySingleton`s
+  // elsewhere — `sl()`'s own lazy resolution means the registration order
+  // across `registerXFeature()` calls in `setupCoreDependencies()` is not
+  // load-bearing here (same rationale that file's own comments already
+  // give for its sibling calls).
   sl.registerLazySingleton<AccountSettingsCubit>(
-    () => AccountSettingsCubit(sl()),
+    () => AccountSettingsCubit(
+      sl<AccountSettingsRepository>(),
+      sl<SessionRepository>(),
+      sl<VaultRepository>(),
+      sl<EntriesRepository>(),
+      sl<ChatRepository>(),
+    ),
     dispose: (cubit) => cubit.close(),
   );
 }

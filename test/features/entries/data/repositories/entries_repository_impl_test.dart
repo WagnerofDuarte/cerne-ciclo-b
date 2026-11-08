@@ -839,6 +839,30 @@ void main() {
     });
   });
 
+  group('clearLocalCache() — Story 8.4', () {
+    test('clears the entries Hive box, returns Right(unit)', () async {
+      when(() => mockBox.clear()).thenAnswer((_) async => 0);
+
+      final result = await repository.clearLocalCache();
+
+      verify(() => mockBox.clear()).called(1);
+      expect(result.isRight(), isTrue);
+    });
+
+    test('a Hive clear failure maps to Left(malformedResponse), never '
+        'throws (RNF09)', () async {
+      when(() => mockBox.clear()).thenThrow(Exception('disk full'));
+
+      final result = await repository.clearLocalCache();
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) => expect(failure, isA<MalformedResponse>()),
+        (_) => fail('expected Left'),
+      );
+    });
+  });
+
   group('search() — failure (Boundaries/AD-9: no cache fallback)', () {
     test('networkOffline propagates as Left, unmapped — unlike list()/'
         'getById(), there is no offline cache fallback for search', () async {

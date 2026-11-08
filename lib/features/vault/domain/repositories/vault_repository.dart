@@ -47,6 +47,14 @@ abstract class VaultRepository {
   /// (RNF09), so the caller always has a retryable path, never a dead end.
   Future<Either<Failure, Unit>> submitPin(String pin);
 
+  /// Story 8.4 — mirrors [markAuthenticated]'s own shape for the opposite
+  /// direction: synchronous, zero network/storage, simply emits
+  /// [VaultStatus.locked]. `AccountSettingsCubit.logout()` calls this
+  /// BEFORE awaiting `SessionRepository.logout()` so AD-14's vault-gate-
+  /// first redirect lands on `/vault` immediately, with no transient
+  /// `/auth` hop.
+  void lock();
+
   /// Releases the underlying stream resource. Wired as `get_it`'s
   /// `dispose:` callback on registration, so `resetCoreDependencies()`
   /// (`sl.reset()`) closes it instead of leaking a `StreamController` on

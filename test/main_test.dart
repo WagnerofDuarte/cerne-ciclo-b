@@ -61,6 +61,11 @@ class _FakeSessionRepository implements SessionRepository {
   @override
   void markAuthenticated() => setStatus(SessionStatus.authenticated);
 
+  // Story 8.4 — not exercised by this suite, same trivial rationale this
+  // fake's other untouched members already follow.
+  @override
+  Future<Either<Failure, Unit>> logout() async => right(unit);
+
   @override
   Future<void> dispose() => _controller.close();
 
@@ -114,6 +119,11 @@ class _FakeVaultRepository implements VaultRepository {
     }
     return left(const Failure.malformedResponse(message: 'fake: PIN mismatch'));
   }
+
+  // Story 8.4 — not exercised by this suite, same trivial rationale this
+  // fake's other untouched members already follow.
+  @override
+  void lock() => setStatus(VaultStatus.locked);
 
   @override
   Future<void> dispose() => _controller.close();
@@ -236,6 +246,11 @@ class _FakeChatRepository implements ChatRepository {
     required InsightTriggerType triggerType,
     required String triggerKey,
   }) async => throw UnimplementedError('not expected to be called');
+
+  // Story 8.4 — not exercised by this suite, same trivial rationale
+  // this fake's other untouched members already follow.
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async => right(unit);
 }
 
 /// spec-6-5 — wraps the real `testWidgets` so every test in this file

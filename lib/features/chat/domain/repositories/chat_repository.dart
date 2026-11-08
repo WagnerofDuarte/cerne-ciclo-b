@@ -89,4 +89,11 @@ abstract class ChatRepository {
     required InsightTriggerType triggerType,
     required String triggerKey,
   });
+
+  /// Story 8.4 — same gap-closing rationale as
+  /// `EntriesRepository.clearLocalCache`: empties both the `chat_sessions`
+  /// and `chat_messages` Hive boxes, called by `AccountSettingsCubit.
+  /// logout()` alongside it. A thrown Hive/disk exception never escapes
+  /// unmapped (RNF09).
+  Future<Either<Failure, Unit>> clearLocalCache();
 }

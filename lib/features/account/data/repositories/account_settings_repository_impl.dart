@@ -118,6 +118,23 @@ class AccountSettingsRepositoryImpl implements AccountSettingsRepository {
         return left(failure);
       },
       (dto) {
+        // spec-8-3 — same response, no new network call (Boundaries):
+        // `_currentDisplayName`/`_currentEmail` piggyback on this already
+        // in-flight fetch's own DTO. Code-review patch: only applied if no
+        // `setDisplayName` call has started since this fetch began — a
+        // concurrent name save that already resolved owns the name/email
+        // fields from here on, and this now-stale piggyback must not
+        // clobber it. Review finding: evaluated independently of (and
+        // before) the `_generation` check below — a fetch superseded only
+        // on its *biometric-toggle* generation (e.g. the double boot-time
+        // call in `main.dart`/`CerneApp.initState()`) still carries a
+        // perfectly valid, non-conflicting `displayName`/`email` that must
+        // not be thrown away along with the discarded `biometricEnabled`
+        // result.
+        if (nameGeneration == _nameGeneration) {
+          _currentDisplayName = dto.displayName;
+          _currentEmail = dto.email;
+        }
         // Review finding: a `setBiometricEnabled` call that started after
         // this fetch (and has therefore already bumped `_generation`) has
         // superseded it — this fetch's now-stale read must not clobber
@@ -130,17 +147,6 @@ class AccountSettingsRepositoryImpl implements AccountSettingsRepository {
               message: AccountSettingsRepository.supersededMessage,
             ),
           );
-        }
-        // spec-8-3 — same response, no new network call (Boundaries):
-        // `_currentDisplayName`/`_currentEmail` piggyback on this already
-        // in-flight fetch's own DTO. Code-review patch: only applied if no
-        // `setDisplayName` call has started since this fetch began — a
-        // concurrent name save that already resolved owns the name/email
-        // fields from here on, and this now-stale piggyback must not
-        // clobber it.
-        if (nameGeneration == _nameGeneration) {
-          _currentDisplayName = dto.displayName;
-          _currentEmail = dto.email;
         }
         _emit(dto.biometricEnabled);
         return right(unit);

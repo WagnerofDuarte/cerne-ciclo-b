@@ -6,19 +6,31 @@ import 'package:fpdart/fpdart.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:cerne/core/failure/failure.dart';
+import 'package:cerne/core/navigation/app_route_paths.dart';
 import 'package:cerne/core/widgets/avatar.dart';
 import 'package:cerne/core/widgets/back_arrow_header.dart';
 import 'package:cerne/features/account/domain/repositories/account_settings_repository.dart';
 import 'package:cerne/features/account/presentation/cubit/account_settings_cubit.dart';
 import 'package:cerne/features/account/presentation/screens/account_settings_screen.dart';
+import 'package:cerne/features/auth/domain/entities/session_status.dart';
+import 'package:cerne/features/auth/domain/repositories/session_repository.dart';
+import 'package:cerne/features/chat/domain/entities/chat_insight.dart';
+import 'package:cerne/features/chat/domain/entities/chat_message.dart';
+import 'package:cerne/features/chat/domain/entities/chat_session.dart';
+import 'package:cerne/features/chat/domain/entities/chat_stream_event.dart';
+import 'package:cerne/features/chat/domain/repositories/chat_repository.dart';
 import 'package:cerne/features/dashboard/domain/entities/dashboard_aggregate.dart';
 import 'package:cerne/features/dashboard/domain/repositories/dashboard_repository.dart';
 import 'package:cerne/features/dashboard/presentation/cubit/dashboard_cubit.dart';
 import 'package:cerne/features/dashboard/presentation/cubit/dashboard_narrative_cubit.dart';
 import 'package:cerne/features/dashboard/presentation/widgets/dashboard_chart_section.dart';
+import 'package:cerne/features/entries/domain/entities/entries_page.dart';
 import 'package:cerne/features/entries/domain/entities/entry.dart';
 import 'package:cerne/features/entries/domain/entities/pending_entry_write.dart';
+import 'package:cerne/features/entries/domain/repositories/entries_repository.dart';
 import 'package:cerne/features/entries/domain/services/pending_entry_write_tracker.dart';
+import 'package:cerne/features/vault/domain/entities/vault_status.dart';
+import 'package:cerne/features/vault/domain/repositories/vault_repository.dart';
 
 import '../../../../support/intercept_announcements.dart';
 
@@ -69,12 +81,22 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
 
   int setDisplayNameCallCount = 0;
 
+  /// Review finding — mirrors `AccountSettingsRepositoryImpl.
+  /// setDisplayName`'s own "echo wins" behavior: on success,
+  /// `currentDisplayName` is set to this value (defaulting to whatever
+  /// was actually sent) rather than always just echoing the argument
+  /// back unchanged.
+  String? setDisplayNameEchoedNameOverride;
+
   @override
   Future<Either<Failure, Unit>> setDisplayName(String name) async {
     setDisplayNameCallCount += 1;
     final gate = setDisplayNameGate;
     if (gate != null) {
       await gate.future;
+    }
+    if (setDisplayNameResult.isRight()) {
+      currentDisplayName = setDisplayNameEchoedNameOverride ?? name;
     }
     return setDisplayNameResult;
   }
@@ -111,6 +133,187 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
     _controller.add(value);
   }
 }
+
+/// Story 8.4 — a plain (non-mocktail) fake [SessionRepository]: this
+/// suite's own "Sair" tests only ever call [logout] on it; every other
+/// member throws if ever reached (exercised elsewhere, by
+/// `session_repository_impl_test.dart`/`auth_cubit_test.dart`).
+class _FakeSessionRepository implements SessionRepository {
+  int logoutCallCount = 0;
+  Completer<void>? logoutGate;
+  Either<Failure, Unit> logoutResult = right(unit);
+
+  @override
+  SessionStatus? get currentStatus =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<SessionStatus> get statusStream =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, Unit>> restoreSession() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  void markAuthenticated() =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, Unit>> logout() async {
+    logoutCallCount += 1;
+    final gate = logoutGate;
+    if (gate != null) {
+      await gate.future;
+    }
+    return logoutResult;
+  }
+
+  @override
+  Future<void> dispose() async {}
+}
+
+/// Story 8.4 — same rationale as [_FakeSessionRepository]: only [lock] is
+/// ever expected to be called by this suite.
+class _FakeVaultRepository implements VaultRepository {
+  // Review finding: [currentStatus]/[statusStream] now carry real state
+  // (not `throw UnimplementedError`) — the dedicated "Sair" group's own
+  // vault-gated router (below) reads [currentStatus] and listens on
+  // [statusStream] to prove the redirect actually fires once [lock] runs,
+  // same default-unlocked convention `app_router_test.dart`'s own
+  // `_FakeVaultRepository` already uses.
+  VaultStatus _status = VaultStatus.unlocked;
+  final _controller = StreamController<VaultStatus>.broadcast();
+
+  int lockCallCount = 0;
+
+  @override
+  VaultStatus get currentStatus => _status;
+
+  @override
+  Stream<VaultStatus> get statusStream => _controller.stream;
+
+  @override
+  Future<Either<Failure, Unit>> authenticate() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, Unit>> submitPin(String pin) async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  void lock() {
+    lockCallCount += 1;
+    _status = VaultStatus.locked;
+    _controller.add(_status);
+  }
+
+  @override
+  Future<void> dispose() => _controller.close();
+}
+
+/// Story 8.4 — same rationale as [_FakeSessionRepository]: only
+/// [clearLocalCache] is ever expected to be called by this suite.
+class _FakeEntriesRepository implements EntriesRepository {
+  int clearLocalCacheCallCount = 0;
+  Either<Failure, Unit> clearLocalCacheResult = right(unit);
+
+  @override
+  Future<Either<Failure, Entry>> create({
+    required String content,
+    required EntrySource source,
+    int? mediaDurationSeconds,
+    String? chatMessageId,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, EntriesPage>> list({
+    String? cursor,
+    int limit = 20,
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, Entry>> getById(String id) async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, List<Entry>>> search(
+    String query, {
+    EntrySource? source,
+    DateTime? dateFrom,
+    DateTime? dateTo,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async {
+    clearLocalCacheCallCount += 1;
+    return clearLocalCacheResult;
+  }
+}
+
+/// Story 8.4 — same rationale as [_FakeEntriesRepository] above.
+class _FakeChatRepository implements ChatRepository {
+  int clearLocalCacheCallCount = 0;
+  Either<Failure, Unit> clearLocalCacheResult = right(unit);
+
+  @override
+  Future<Either<Failure, List<ChatSession>>> listSessions() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, ChatSession>> createSession() async =>
+      throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, List<ChatMessage>>> listMessages(
+    String sessionId,
+  ) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<Either<Failure, ChatStreamEvent>> sendMessage(
+    String sessionId,
+    String content,
+  ) => throw UnimplementedError('not expected to be called');
+
+  @override
+  Stream<Either<Failure, ChatStreamEvent>> retryMessage(
+    String sessionId,
+    String userMessageId,
+  ) => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, ChatInsight?>> generateInsight(
+    String sessionId, {
+    required InsightTriggerType triggerType,
+    required String triggerKey,
+  }) async => throw UnimplementedError('not expected to be called');
+
+  @override
+  Future<Either<Failure, Unit>> clearLocalCache() async {
+    clearLocalCacheCallCount += 1;
+    return clearLocalCacheResult;
+  }
+}
+
+/// Story 8.4 — every pre-existing call site in this file only exercises
+/// the biometric toggle / profile-name / dashboard slices, never
+/// `AccountSettingsCubit.logout()`, so each one passes a fresh, never-
+/// asserted-on quartet through this helper instead of repeating the
+/// widened constructor's 4 new positional args inline. A caller that does
+/// need to assert on one of them (the dedicated "Sair" group below) builds
+/// `AccountSettingsCubit` directly instead.
+AccountSettingsCubit _buildAccountSettingsCubit(
+  AccountSettingsRepository repository,
+) => AccountSettingsCubit(
+  repository,
+  _FakeSessionRepository(),
+  _FakeVaultRepository(),
+  _FakeEntriesRepository(),
+  _FakeChatRepository(),
+);
 
 /// spec-8-1 — a trivial fake [DashboardRepository]: this suite only needs
 /// `AccountSettingsScreen.initState`'s own unconditional `dashboardCubit.
@@ -223,6 +426,57 @@ GoRouter _routerWith(Widget screen) {
   );
 }
 
+/// Story 8.4 (review finding) — wraps a [Stream] as a [Listenable] so
+/// `GoRouter`'s own `refreshListenable` re-runs `redirect` on every
+/// emission, same minimal purpose as `app_router.dart`'s own (private)
+/// `_GoRouterRefreshStream`, just local to this one test group.
+class _StreamRefreshListenable extends ChangeNotifier {
+  _StreamRefreshListenable(Stream<dynamic> stream) {
+    _subscription = stream.listen((_) => notifyListeners());
+  }
+
+  late final StreamSubscription<dynamic> _subscription;
+
+  @override
+  void dispose() {
+    _subscription.cancel();
+    super.dispose();
+  }
+}
+
+/// Story 8.4 (review finding) — the "Sair" group's own router: two routes
+/// (`/configuracoes`, `/vault`) plus a minimal AD-14-style gate (`redirect`
+/// away from `/configuracoes` whenever [vaultRepository] isn't
+/// [VaultStatus.unlocked], re-evaluated on every [VaultRepository.
+/// statusStream] emission) — just enough to prove `VaultRepository.lock()`
+/// actually drives this router to `/vault`, without pulling in the real
+/// `buildAppRouter()`'s full `sl` DI graph (every other route it declares
+/// needs cubits this suite has no reason to resolve).
+GoRouter _routerWithVaultGate(
+  Widget screen,
+  VaultRepository vaultRepository,
+) {
+  return GoRouter(
+    initialLocation: AppRoutePaths.configuracoes,
+    refreshListenable: _StreamRefreshListenable(vaultRepository.statusStream),
+    redirect: (context, state) {
+      if (vaultRepository.currentStatus != VaultStatus.unlocked) {
+        return state.matchedLocation == AppRoutePaths.vaultLock
+            ? null
+            : AppRoutePaths.vaultLock;
+      }
+      return null;
+    },
+    routes: [
+      GoRoute(
+        path: AppRoutePaths.vaultLock,
+        builder: (context, state) => const Text('Vault'),
+      ),
+      GoRoute(path: AppRoutePaths.configuracoes, builder: (context, state) => screen),
+    ],
+  );
+}
+
 /// Builds a fresh [_FakeAccountSettingsRepository] + [AccountSettingsCubit]
 /// pair and pumps the real screen around it, registering both for cleanup.
 ///
@@ -242,7 +496,7 @@ Future<(_FakeAccountSettingsRepository, AccountSettingsCubit)> _pumpScreen(
   WidgetTester tester,
 ) async {
   final fakeRepository = _FakeAccountSettingsRepository();
-  final cubit = AccountSettingsCubit(fakeRepository);
+  final cubit = _buildAccountSettingsCubit(fakeRepository);
   addTearDown(() => cubit.close());
   addTearDown(fakeRepository.dispose);
 
@@ -274,7 +528,7 @@ _pumpScreenWithProfile(
   final fakeRepository = _FakeAccountSettingsRepository()
     ..currentDisplayName = displayName
     ..currentEmail = email;
-  final cubit = AccountSettingsCubit(fakeRepository);
+  final cubit = _buildAccountSettingsCubit(fakeRepository);
   addTearDown(() => cubit.close());
   addTearDown(fakeRepository.dispose);
 
@@ -330,7 +584,7 @@ void main() {
     'opened) renders the switch off',
     (tester) async {
       final fakeRepository = _FakeAccountSettingsRepository().._emit(false);
-      final cubit = AccountSettingsCubit(fakeRepository);
+      final cubit = _buildAccountSettingsCubit(fakeRepository);
       addTearDown(() => cubit.close());
       addTearDown(fakeRepository.dispose);
 
@@ -468,7 +722,7 @@ void main() {
         repository: fakeDashboardRepository,
       );
       final fakeAccountRepository = _FakeAccountSettingsRepository();
-      final accountCubit = AccountSettingsCubit(fakeAccountRepository);
+      final accountCubit = _buildAccountSettingsCubit(fakeAccountRepository);
       addTearDown(() => accountCubit.close());
       addTearDown(fakeAccountRepository.dispose);
 
@@ -514,7 +768,7 @@ void main() {
         repository: fakeDashboardRepository,
       );
       final fakeAccountRepository = _FakeAccountSettingsRepository();
-      final accountCubit = AccountSettingsCubit(fakeAccountRepository);
+      final accountCubit = _buildAccountSettingsCubit(fakeAccountRepository);
       addTearDown(() => accountCubit.close());
       addTearDown(fakeAccountRepository.dispose);
 
@@ -555,7 +809,7 @@ void main() {
       final dashboardCubit = _buildDashboardCubit(repository: fakeRepository);
       final narrativeCubit = _buildNarrativeCubit(repository: fakeRepository);
       final fakeAccountRepository = _FakeAccountSettingsRepository();
-      final accountCubit = AccountSettingsCubit(fakeAccountRepository);
+      final accountCubit = _buildAccountSettingsCubit(fakeAccountRepository);
       addTearDown(() => accountCubit.close());
       addTearDown(fakeAccountRepository.dispose);
 
@@ -601,7 +855,7 @@ void main() {
         final dashboardCubit = _buildDashboardCubit(repository: fakeRepository);
         final narrativeCubit = _buildNarrativeCubit(repository: fakeRepository);
         final fakeAccountRepository = _FakeAccountSettingsRepository();
-        final accountCubit = AccountSettingsCubit(fakeAccountRepository);
+        final accountCubit = _buildAccountSettingsCubit(fakeAccountRepository);
         addTearDown(() => accountCubit.close());
         addTearDown(fakeAccountRepository.dispose);
 
@@ -654,7 +908,7 @@ void main() {
       final dashboardCubit = _buildDashboardCubit(repository: fakeRepository);
       final narrativeCubit = _buildNarrativeCubit(repository: fakeRepository);
       final fakeAccountRepository = _FakeAccountSettingsRepository();
-      final accountCubit = AccountSettingsCubit(fakeAccountRepository);
+      final accountCubit = _buildAccountSettingsCubit(fakeAccountRepository);
       addTearDown(() => accountCubit.close());
       addTearDown(fakeAccountRepository.dispose);
 
@@ -715,7 +969,7 @@ void main() {
         repository: fakeDashboardRepository,
       );
       final fakeAccountRepository = _FakeAccountSettingsRepository();
-      final accountCubit = AccountSettingsCubit(fakeAccountRepository);
+      final accountCubit = _buildAccountSettingsCubit(fakeAccountRepository);
       addTearDown(() => accountCubit.close());
       addTearDown(fakeAccountRepository.dispose);
 
@@ -830,6 +1084,79 @@ void main() {
     );
 
     testWidgets(
+      // Review finding: the test above only asserted the on-screen Text/
+      // TextField — it never proved `_announce` actually fires on a name-
+      // save failure, unlike the sibling toggle-failure and narrative-
+      // failure tests elsewhere in this file, which all intercept the
+      // real accessibility channel. Boundaries: "_announce fires on a
+      // save failure, same BlocListener convention as the toggle's
+      // error".
+      'a failed save sends the Failure\'s message as a real screen-reader '
+      'announcement, same BlocListener convention as the toggle\'s own '
+      'error',
+      (tester) async {
+        final announcements = interceptAnnouncements(tester);
+        final (fakeRepository, _) = await _pumpScreenWithProfile(
+          tester,
+          displayName: 'Ana Silva',
+        );
+        fakeRepository.setDisplayNameResult = left(
+          const Failure.networkTimeout(message: 'Sem conexão'),
+        );
+
+        await tester.tap(find.byIcon(Icons.edit));
+        await tester.pump();
+        await tester.enterText(find.byType(TextField), 'Ana Souza');
+        await tester.tap(find.byIcon(Icons.check));
+        await tester.pumpAndSettle();
+
+        expect(announcements, contains('Sem conexão'));
+      },
+    );
+
+    testWidgets(
+      // Review finding: `setDisplayNameGate` was added to this fake
+      // specifically to let a test hold `setDisplayName()` unresolved and
+      // observe the mid-flight UI, but nothing used it — the saving
+      // indicator and the "tap away while saving is a no-op" I/O-matrix
+      // row were proven only at the cubit level, never against the real
+      // screen widget.
+      'shows a saving indicator while a save is in flight; tapping away '
+      'during that save is a no-op until it completes (I/O matrix: "Tap '
+      'away, saving -> No-op, save completes")',
+      (tester) async {
+        final (fakeRepository, _) = await _pumpScreenWithProfile(
+          tester,
+          displayName: 'Ana Silva',
+        );
+        fakeRepository.setDisplayNameResult = right(unit);
+        fakeRepository.setDisplayNameGate = Completer<void>();
+
+        await tester.tap(find.byIcon(Icons.edit));
+        await tester.pump();
+        await tester.enterText(find.byType(TextField), 'Ana Souza');
+        await tester.tap(find.byIcon(Icons.check));
+        await tester.pump();
+
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+        expect(find.byIcon(Icons.check), findsNothing);
+
+        // Tap-away while saving is a no-op — the in-flight save still
+        // owns the eventual transition back to display mode.
+        await tester.tapAt(tester.getCenter(find.text('Entrar com biometria')));
+        await tester.pump();
+        expect(find.byType(TextField), findsOneWidget);
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+        fakeRepository.setDisplayNameGate!.complete();
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TextField), findsNothing);
+        expect(find.text('Ana Souza'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
       // AC: "Given an unconfirmed edit, when the user taps outside the
       // field/icon, then the screen reverts with no change sent."
       'tapping away from an unconfirmed edit reverts to display mode with '
@@ -910,6 +1237,203 @@ void main() {
         // unpaired surrogate half.
         expect(avatar.initials, '😀S');
         expect(tester.takeException(), isNull);
+      },
+    );
+  });
+
+  // Story 8.4 — the "Sair" button's own Acceptance Criteria, proved
+  // directly against the real screen widget (Code Map: "'Sair' AppButton
+  // as the scroll column's last child, below DashboardChartSection").
+  group('"Sair" button (Story 8.4)', () {
+    /// Builds the real screen around a fresh [AccountSettingsCubit] wired
+    /// to controllable session/vault/entries/chat fakes (unlike
+    /// [_pumpScreen]/[_pumpScreenWithProfile], which only need the trivial,
+    /// never-asserted-on quartet [_buildAccountSettingsCubit] gives). Uses
+    /// the same plain, non-navigating [_routerWith] stub every other test
+    /// in this file already uses — deliberately NOT the vault-gated router
+    /// below, since the two tests built on this helper (the button's own
+    /// render + its disabled-while-in-flight state) need the screen to
+    /// stay mounted through the whole call, which a real vault-gate
+    /// redirect would otherwise unmount mid-test.
+    Future<
+      (
+        _FakeSessionRepository,
+        _FakeVaultRepository,
+        _FakeEntriesRepository,
+        _FakeChatRepository,
+      )
+    >
+    pumpWithLogoutFakes(WidgetTester tester) async {
+      final fakeAccountRepository = _FakeAccountSettingsRepository();
+      final fakeSessionRepository = _FakeSessionRepository();
+      final fakeVaultRepository = _FakeVaultRepository();
+      final fakeEntriesRepository = _FakeEntriesRepository();
+      final fakeChatRepository = _FakeChatRepository();
+      final cubit = AccountSettingsCubit(
+        fakeAccountRepository,
+        fakeSessionRepository,
+        fakeVaultRepository,
+        fakeEntriesRepository,
+        fakeChatRepository,
+      );
+      addTearDown(() => cubit.close());
+      addTearDown(fakeAccountRepository.dispose);
+
+      final router = _routerWith(
+        AccountSettingsScreen(
+          cubit: cubit,
+          dashboardCubit: _buildDashboardCubit(),
+          narrativeCubit: _buildNarrativeCubit(),
+        ),
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+
+      return (
+        fakeSessionRepository,
+        fakeVaultRepository,
+        fakeEntriesRepository,
+        fakeChatRepository,
+      );
+    }
+
+    /// Review finding: same fakes/cubit wiring as [pumpWithLogoutFakes],
+    /// but around the dedicated vault-gated router below instead of the
+    /// plain stub — used ONLY by the one test that needs to prove
+    /// `VaultRepository.lock()` actually drives real navigation away from
+    /// `/configuracoes`, since that redirect unmounts the screen (same
+    /// AD-14 behavior the real `buildAppRouter()` has), which the other
+    /// tests in this group must NOT be subject to.
+    Future<
+      (
+        _FakeSessionRepository,
+        _FakeVaultRepository,
+        _FakeEntriesRepository,
+        _FakeChatRepository,
+        GoRouter,
+      )
+    >
+    pumpWithLogoutFakesAndVaultGate(WidgetTester tester) async {
+      final fakeAccountRepository = _FakeAccountSettingsRepository();
+      final fakeSessionRepository = _FakeSessionRepository();
+      final fakeVaultRepository = _FakeVaultRepository();
+      final fakeEntriesRepository = _FakeEntriesRepository();
+      final fakeChatRepository = _FakeChatRepository();
+      final cubit = AccountSettingsCubit(
+        fakeAccountRepository,
+        fakeSessionRepository,
+        fakeVaultRepository,
+        fakeEntriesRepository,
+        fakeChatRepository,
+      );
+      addTearDown(() => cubit.close());
+      addTearDown(fakeAccountRepository.dispose);
+
+      final router = _routerWithVaultGate(
+        AccountSettingsScreen(
+          cubit: cubit,
+          dashboardCubit: _buildDashboardCubit(),
+          narrativeCubit: _buildNarrativeCubit(),
+        ),
+        fakeVaultRepository,
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+
+      return (
+        fakeSessionRepository,
+        fakeVaultRepository,
+        fakeEntriesRepository,
+        fakeChatRepository,
+        router,
+      );
+    }
+
+    testWidgets(
+      'shows a "Sair" button below the chart section',
+      (tester) async {
+        await pumpWithLogoutFakes(tester);
+
+        expect(find.text('Sair'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'tapping "Sair" locks the vault, fires sessionRepository.logout(), '
+      'and clears both the entries and chat local caches',
+      (tester) async {
+        final (
+          fakeSessionRepository,
+          fakeVaultRepository,
+          fakeEntriesRepository,
+          fakeChatRepository,
+          router,
+        ) = await pumpWithLogoutFakesAndVaultGate(tester);
+
+        await tester.tap(find.text('Sair'));
+        await tester.pumpAndSettle();
+
+        expect(fakeVaultRepository.lockCallCount, 1);
+        expect(fakeSessionRepository.logoutCallCount, 1);
+        expect(fakeEntriesRepository.clearLocalCacheCallCount, 1);
+        expect(fakeChatRepository.clearLocalCacheCallCount, 1);
+        // Review finding: previously only the fakes' own call counts were
+        // asserted, never that the router actually redirected — this is
+        // the spec's own Acceptance Criteria ("the user is routed to the
+        // Biometric Vault screen"), proved here against the same router
+        // `VaultRepository.lock()` drives, with no navigation code of
+        // this screen's own involved (AD-14).
+        expect(router.state.uri.toString(), AppRoutePaths.vaultLock);
+      },
+    );
+
+    testWidgets(
+      'disables the button while a logout is in flight, so a double-tap '
+      'can never start a second, overlapping call (I/O matrix: '
+      '"Double-tap Sair")',
+      (tester) async {
+        final (fakeSessionRepository, fakeVaultRepository, _, _) =
+            await pumpWithLogoutFakes(tester);
+        fakeSessionRepository.logoutGate = Completer<void>();
+
+        await tester.tap(find.text('Sair'));
+        await tester.pump();
+
+        final button = tester.widget<OutlinedButton>(
+          find.byType(OutlinedButton),
+        );
+        expect(button.onPressed, isNull);
+
+        fakeSessionRepository.logoutGate!.complete();
+        await tester.pumpAndSettle();
+
+        expect(fakeVaultRepository.lockCallCount, 1);
+        expect(fakeSessionRepository.logoutCallCount, 1);
+      },
+    );
+
+    testWidgets(
+      'a backend logout failure (offline) still clears local caches, '
+      'with no error shown on screen (I/O matrix: "Left swallowed, no UI '
+      'message")',
+      (tester) async {
+        final (
+          fakeSessionRepository,
+          _,
+          fakeEntriesRepository,
+          fakeChatRepository,
+        ) = await pumpWithLogoutFakes(tester);
+        fakeSessionRepository.logoutResult = left(
+          const Failure.networkOffline(message: 'Offline'),
+        );
+
+        await tester.tap(find.text('Sair'));
+        await tester.pumpAndSettle();
+
+        expect(fakeEntriesRepository.clearLocalCacheCallCount, 1);
+        expect(fakeChatRepository.clearLocalCacheCallCount, 1);
+        expect(tester.takeException(), isNull);
+        expect(find.textContaining('Offline'), findsNothing);
       },
     );
   });

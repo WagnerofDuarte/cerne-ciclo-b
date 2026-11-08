@@ -105,4 +105,58 @@ void main() {
       );
     });
   });
+
+  // Story 8.4 — review finding: every `SessionRepositoryImpl.logout()` test
+  // mocks `AuthRemoteDataSource.logout()` wholesale, so this method's own
+  // real behavior (the literal endpoint string, and that a `Left` passes
+  // through unmapped) was never actually exercised anywhere — a typo'd
+  // endpoint string would ship undetected. Mirrors `AuthRemoteDataSource.
+  // refresh`'s own tests above.
+  group('AuthRemoteDataSource.logout', () {
+    test('posts to exactly "auth-logout", with no body', () async {
+      when(() => mockApiClient.post('auth-logout')).thenAnswer(
+        (_) async => right(<String, dynamic>{
+          'data': {'ok': true},
+        }),
+      );
+
+      await dataSource.logout();
+
+      verify(() => mockApiClient.post('auth-logout')).called(1);
+    });
+
+    test('a successful call maps to Right(unit), discarding the response '
+        'body', () async {
+      when(() => mockApiClient.post('auth-logout')).thenAnswer(
+        (_) async => right(<String, dynamic>{
+          'data': {'ok': true},
+        }),
+      );
+
+      final result = await dataSource.logout();
+
+      expect(result.isRight(), isTrue);
+      result.match((_) => fail('expected Right'), (value) {
+        expect(value, unit);
+      });
+    });
+
+    test('a Left from ApiClient.post propagates unchanged through '
+        '.map((_) => unit)', () async {
+      when(() => mockApiClient.post('auth-logout')).thenAnswer(
+        (_) async => left(const Failure.networkOffline(message: 'Offline')),
+      );
+
+      final result = await dataSource.logout();
+
+      expect(result.isLeft(), isTrue);
+      result.match(
+        (failure) {
+          expect(failure, isA<NetworkOffline>());
+          expect(failure.message, 'Offline');
+        },
+        (_) => fail('expected Left'),
+      );
+    });
+  });
 }
