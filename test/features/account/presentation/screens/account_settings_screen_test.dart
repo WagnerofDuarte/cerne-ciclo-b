@@ -1612,6 +1612,7 @@ void main() {
       'nothing (I/O matrix: "dialog already closed; inline red error... '
       'vault stays unlocked, nothing cleared")',
       (tester) async {
+        final announcements = interceptAnnouncements(tester);
         final (
           fakeAccountRepository,
           _,
@@ -1635,6 +1636,13 @@ void main() {
         expect(fakeVaultRepository.lockCallCount, 0);
         expect(fakeEntriesRepository.clearLocalCacheCallCount, 0);
         expect(fakeChatRepository.clearLocalCacheCallCount, 0);
+        // Code-review patch: proves the failure is both announced to
+        // screen readers (I/O matrix's own "Left.message shown") and
+        // announced exactly once, not twice (the failure emit and the
+        // outer `finally`'s `isDeletingAccount` reset emit both used to
+        // carry the same non-null message before the screen's listener
+        // gained a `listenWhen` guard).
+        expect(announcements, ['Offline']);
       },
     );
 

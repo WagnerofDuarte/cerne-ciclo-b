@@ -148,6 +148,51 @@ void main() {
         expect(bg, DesignTokens.colorBorder);
       },
     );
+
+    testWidgets(
+      // Code-review patch: the class doc claims backgroundColor is "only
+      // consulted for AppButtonVariant.primary" — nothing proved a
+      // non-null value is actually ignored for the other two variants.
+      'a non-null backgroundColor is ignored for secondaryOutline — the '
+      'variant keeps its transparent fill',
+      (tester) async {
+        await tester.pumpWidget(
+          _wrap(
+            AppButton(
+              label: 'Cancelar',
+              onPressed: () {},
+              variant: AppButtonVariant.secondaryOutline,
+              backgroundColor: DesignTokens.colorError,
+            ),
+          ),
+        );
+
+        final button = _buttonOf(tester) as OutlinedButton;
+        final bg = button.style!.backgroundColor!.resolve({});
+        expect(bg, Colors.transparent);
+      },
+    );
+
+    testWidgets(
+      'a non-null backgroundColor is ignored for textGhost — the variant '
+      'keeps its transparent fill',
+      (tester) async {
+        await tester.pumpWidget(
+          _wrap(
+            AppButton(
+              label: 'Fechar',
+              onPressed: () {},
+              variant: AppButtonVariant.textGhost,
+              backgroundColor: DesignTokens.colorError,
+            ),
+          ),
+        );
+
+        final button = _buttonOf(tester) as TextButton;
+        final bg = button.style!.backgroundColor!.resolve({});
+        expect(bg, Colors.transparent);
+      },
+    );
   });
 
   group('AppButton — secondaryOutline', () {

@@ -492,4 +492,152 @@ void main() {
       },
     );
   });
+
+  // Story 8.5 — closes this epic's own deferred Review Finding: "No
+  // real-DI (sl<...>-resolved) e2e test exists yet for deleteAccount()'s
+  // orchestration end-to-end, unlike the new real-DI e2e group this same
+  // diff adds for logout()." (deferred-work.md, spec-8-5-account-deletion.
+  // md). Same "call the public API, not tester.tap" rationale as the
+  // Story 8.4 group above — the fakes-based screen test
+  // (account_settings_screen_test.dart) already proves the confirm-then-
+  // relock widget-tree ordering; this group instead drives the real
+  // sl-resolved AccountSettingsCubit directly, proving the genuine
+  // DELETE account-delete request body/headers and both outcomes' real
+  // cross-repository orchestration (shared [_finishSession] on success,
+  // explicitly none of it on failure — unlike logout, a failed delete IS
+  // surfaced).
+  group('Story 8.5 — account deletion', () {
+    test(
+      'happy path: deleteAccount() fires a genuine DELETE to account-delete '
+      'with exactly {"confirmation": "DELETE"} and real headers, then runs '
+      'the same _finishSession() sequence as logout() — which itself fires '
+      'a second genuine request, POST auth-logout, as part of '
+      'SessionRepository.logout() — locking the vault, clearing the '
+      'session, emptying both the entries and chat Hive boxes, and '
+      'resetting isDeletingAccount with no error set',
+      () async {
+        // Two real round trips happen in sequence: account-delete itself,
+        // then _finishSession()'s own SessionRepository.logout() call,
+        // which is the same real auth-logout POST the Story 8.4 group above
+        // proves in isolation — both must be queued here.
+        adapter.queueJsonResponse(200, {
+          'data': {'ok': true},
+        });
+        adapter.queueJsonResponse(200, {
+          'data': {'ok': true},
+        });
+
+        final vaultRepository = sl<VaultRepository>();
+        final sessionRepository = sl<SessionRepository>();
+        final entriesBox = sl<Box<Map>>();
+        final chatSessionsBox = sl<Box<Map>>(
+          instanceName: chatSessionsBoxName,
+        );
+        final chatMessagesBox = sl<Box<Map>>(
+          instanceName: chatMessagesBoxName,
+        );
+
+        await vaultRepository.submitPin('1234');
+        sessionRepository.markAuthenticated();
+        await entriesBox.put('e1', {'id': 'e1'});
+        await chatSessionsBox.put('s1', {'id': 's1'});
+        await chatMessagesBox.put('m1', {'id': 'm1'});
+
+        final cubit = sl<AccountSettingsCubit>();
+        await cubit.deleteAccount();
+
+        expect(adapter.requests, hasLength(2));
+        final deleteRequest = adapter.requests.first;
+        expect(deleteRequest.path, sl<UrlBuilder>().build('account-delete'));
+        expect(deleteRequest.method, 'DELETE');
+        expect(deleteRequest.data, {'confirmation': 'DELETE'});
+        expect(
+          deleteRequest.headers['apikey'],
+          dotenv.get('SUPABASE_ANON_KEY'),
+        );
+        expect(
+          deleteRequest.headers['Authorization'],
+          'Bearer e2e-test-access-token',
+        );
+        expect(
+          adapter.requests[1].path,
+          sl<UrlBuilder>().build('auth-logout'),
+        );
+
+        expect(vaultRepository.currentStatus, VaultStatus.locked);
+        expect(
+          sessionRepository.currentStatus,
+          SessionStatus.unauthenticated,
+        );
+        expect(await sl<AccessTokenProvider>().readAccessToken(), isNull);
+        expect(entriesBox.isEmpty, isTrue);
+        expect(chatSessionsBox.isEmpty, isTrue);
+        expect(chatMessagesBox.isEmpty, isTrue);
+        expect(cubit.state.isDeletingAccount, isFalse);
+        expect(cubit.state.deleteAccountErrorMessage, isNull);
+      },
+    );
+
+    test(
+      'backend failure (account-delete returns a non-retryable error): '
+      'unlike logout, the failure IS surfaced (I/O matrix: "Left.message '
+      'shown (unlike logout\'s swallowed failure)") — _finishSession() '
+      'never runs, so the vault stays unlocked, the session stays '
+      'authenticated and the cache stays populated; isDeletingAccount '
+      'still resets',
+      () async {
+        adapter.queueErrorResponse('VALIDATION_ERROR', 'falha ao apagar');
+
+        final vaultRepository = sl<VaultRepository>();
+        final sessionRepository = sl<SessionRepository>();
+        final entriesBox = sl<Box<Map>>();
+
+        await vaultRepository.submitPin('1234');
+        sessionRepository.markAuthenticated();
+        await entriesBox.put('e1', {'id': 'e1'});
+
+        final cubit = sl<AccountSettingsCubit>();
+        await cubit.deleteAccount();
+
+        expect(vaultRepository.currentStatus, VaultStatus.unlocked);
+        expect(sessionRepository.currentStatus, SessionStatus.authenticated);
+        expect(await sl<AccessTokenProvider>().readAccessToken(), isNotNull);
+        expect(entriesBox.isEmpty, isFalse);
+        expect(cubit.state.isDeletingAccount, isFalse);
+        expect(cubit.state.deleteAccountErrorMessage, 'falha ao apagar');
+      },
+    );
+
+    test(
+      'double-tap: calling deleteAccount() again while the first call is '
+      'still in flight no-ops — exactly one account-delete request fires, '
+      'plus _finishSession()\'s own one auth-logout request on that same '
+      'successful call (I/O matrix: "Double-tap \'Apagar conta\' -> second '
+      'tap no-ops")',
+      () async {
+        adapter.queueJsonResponse(200, {
+          'data': {'ok': true},
+        });
+        adapter.queueJsonResponse(200, {
+          'data': {'ok': true},
+        });
+
+        final cubit = sl<AccountSettingsCubit>();
+        final first = cubit.deleteAccount();
+        final second = cubit.deleteAccount();
+
+        await Future.wait([first, second]);
+
+        expect(adapter.requests, hasLength(2));
+        expect(
+          adapter.requests[0].path,
+          sl<UrlBuilder>().build('account-delete'),
+        );
+        expect(
+          adapter.requests[1].path,
+          sl<UrlBuilder>().build('auth-logout'),
+        );
+      },
+    );
+  });
 }

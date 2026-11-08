@@ -112,9 +112,9 @@ Cross-story (epic-8-context.md): Story 8.5 (account deletion) reuses this same l
 **Orchestration (the "Sair" flow, end to end)**
 
 - Entry point — lock-before-await ordering, the result-ignored session call, and the now-logged (never UI-surfaced) cache-clear failures.
-  [`account_settings_cubit.dart:350`](../../lib/features/account/presentation/cubit/account_settings_cubit.dart#L350)
+  [`account_settings_cubit.dart:380`](../../lib/features/account/presentation/cubit/account_settings_cubit.dart#L380)
 - The re-entry guard and in-flight state the "Sair" button's disabled state depends on.
-  [`account_settings_cubit.dart:351`](../../lib/features/account/presentation/cubit/account_settings_cubit.dart#L351)
+  [`account_settings_cubit.dart:381`](../../lib/features/account/presentation/cubit/account_settings_cubit.dart#L381)
 
 **Session end (backend + local, unconditional)**
 
@@ -138,7 +138,7 @@ Cross-story (epic-8-context.md): Story 8.5 (account deletion) reuses this same l
 **UI + DI wiring**
 
 - The "Sair" button — `secondaryOutline`, disabled while `isLoggingOut`, last child below the chart section.
-  [`account_settings_screen.dart:577`](../../lib/features/account/presentation/screens/account_settings_screen.dart#L577)
+  [`account_settings_screen.dart:616`](../../lib/features/account/presentation/screens/account_settings_screen.dart#L616)
 - `AccountSettingsCubit`'s widened registration — the 4 new repos it now orchestrates.
   [`account_injection.dart:47`](../../lib/features/account/account_injection.dart#L47)
 

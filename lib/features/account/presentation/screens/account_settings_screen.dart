@@ -625,10 +625,19 @@ class _AccountSettingsScreenState extends State<AccountSettingsScreen> {
                     // prototype-extract.md:116).
                     const SizedBox(height: DesignTokens.spacingXl),
                     BlocConsumer<AccountSettingsCubit, AccountSettingsState>(
+                      // Code-review patch: `deleteAccount()`'s failure
+                      // branch and its outer `finally`'s `isDeletingAccount`
+                      // reset are two distinct emitted states that both
+                      // carry a non-null `deleteAccountErrorMessage` — the
+                      // same `listenWhen` convention `nameErrorMessage`'s
+                      // own listener already uses collapses them to one
+                      // announcement per failure.
+                      listenWhen: (previous, current) =>
+                          current.deleteAccountErrorMessage != null &&
+                          current.deleteAccountErrorMessage !=
+                              previous.deleteAccountErrorMessage,
                       listener: (context, state) {
-                        if (state.deleteAccountErrorMessage != null) {
-                          _announce(state.deleteAccountErrorMessage!);
-                        }
+                        _announce(state.deleteAccountErrorMessage!);
                       },
                       builder: (context, state) {
                         return Column(
