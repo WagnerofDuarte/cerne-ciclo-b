@@ -23,6 +23,37 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
 
   int setBiometricEnabledCallCount = 0;
 
+  // spec-8-3 — a scriptable profile-name slice, same rationale
+  // [setBiometricEnabledResult] already gives for the toggle: a test must
+  // opt in to a non-default [currentDisplayName]/[currentEmail] or a
+  // [setDisplayNameResult] success explicitly.
+  @override
+  String currentDisplayName = '';
+  @override
+  String currentEmail = '';
+  Either<Failure, Unit> setDisplayNameResult = left(
+    const Failure.malformedResponse(message: 'fake: not configured'),
+  );
+  int setDisplayNameCallCount = 0;
+  String? lastSetDisplayNameArg;
+
+  /// Lets a test hold `setDisplayName()` unresolved, to observe
+  /// `state.isSavingName` mid-flight — same rationale
+  /// `account_settings_screen_test.dart`'s own `setBiometricEnabledGate`
+  /// already gives for the toggle.
+  Completer<void>? setDisplayNameGate;
+
+  @override
+  Future<Either<Failure, Unit>> setDisplayName(String name) async {
+    setDisplayNameCallCount += 1;
+    lastSetDisplayNameArg = name;
+    final gate = setDisplayNameGate;
+    if (gate != null) {
+      await gate.future;
+    }
+    return setDisplayNameResult;
+  }
+
   @override
   bool get currentBiometricEnabled => _value;
 
@@ -192,5 +223,198 @@ void main() {
         await cubit.close();
       },
     );
+  });
+
+  // spec-8-3 — Boundaries: "Cubit reads displayName/email from the
+  // repository at construction".
+  group('initial state — displayName/email (spec-8-3)', () {
+    test('mirrors currentDisplayName/currentEmail at construction', () async {
+      fakeRepository.currentDisplayName = 'Ana Silva';
+      fakeRepository.currentEmail = 'ana@example.com';
+      final cubit = AccountSettingsCubit(fakeRepository);
+
+      expect(cubit.state.displayName, 'Ana Silva');
+      expect(cubit.state.email, 'ana@example.com');
+      expect(cubit.state.isEditingName, isFalse);
+      await cubit.close();
+    });
+  });
+
+  // spec-8-3 — the full I/O & Edge-Case Matrix for the inline name edit.
+  group('startEditingName()', () {
+    test('switches to edit mode with draft = current name, clearing any '
+        'leftover error (I/O matrix: "Tap pencil")', () async {
+      fakeRepository.currentDisplayName = 'Ana Silva';
+      final cubit = AccountSettingsCubit(fakeRepository);
+
+      cubit.startEditingName();
+
+      expect(cubit.state.isEditingName, isTrue);
+      expect(cubit.state.nameDraft, 'Ana Silva');
+      expect(cubit.state.nameErrorMessage, isNull);
+      await cubit.close();
+    });
+  });
+
+  group('updateNameDraft()', () {
+    test(
+      'updates nameDraft without touching isEditingName/displayName',
+      () async {
+        final cubit = AccountSettingsCubit(fakeRepository);
+        cubit.startEditingName();
+
+        cubit.updateNameDraft('Novo Nome');
+
+        expect(cubit.state.nameDraft, 'Novo Nome');
+        expect(cubit.state.isEditingName, isTrue);
+        expect(cubit.state.displayName, fakeRepository.currentDisplayName);
+        await cubit.close();
+      },
+    );
+  });
+
+  group('confirmEditingName() — empty/unchanged draft', () {
+    test('an unchanged draft reverts immediately, no PATCH sent (I/O '
+        'matrix)', () async {
+      fakeRepository.currentDisplayName = 'Ana Silva';
+      final cubit = AccountSettingsCubit(fakeRepository);
+      cubit.startEditingName();
+
+      await cubit.confirmEditingName();
+
+      expect(cubit.state.isEditingName, isFalse);
+      expect(cubit.state.displayName, 'Ana Silva');
+      expect(fakeRepository.setDisplayNameCallCount, 0);
+      await cubit.close();
+    });
+
+    test('an all-whitespace (trims to empty) draft reverts immediately, no '
+        'PATCH sent', () async {
+      fakeRepository.currentDisplayName = 'Ana Silva';
+      final cubit = AccountSettingsCubit(fakeRepository);
+      cubit.startEditingName();
+      cubit.updateNameDraft('   ');
+
+      await cubit.confirmEditingName();
+
+      expect(cubit.state.isEditingName, isFalse);
+      expect(cubit.state.displayName, 'Ana Silva');
+      expect(fakeRepository.setDisplayNameCallCount, 0);
+      await cubit.close();
+    });
+  });
+
+  group('confirmEditingName() — changed non-empty draft, success', () {
+    test('saves (trimmed), shows a saving indicator mid-flight, then '
+        'reverts to display mode with the new name (I/O matrix)', () async {
+      fakeRepository.currentDisplayName = 'Ana Silva';
+      fakeRepository.setDisplayNameResult = right(unit);
+      fakeRepository.setDisplayNameGate = Completer<void>();
+      final cubit = AccountSettingsCubit(fakeRepository);
+      cubit.startEditingName();
+      cubit.updateNameDraft('  Nome Novo  ');
+
+      final confirmFuture = cubit.confirmEditingName();
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.isSavingName, isTrue);
+      expect(cubit.state.isEditingName, isTrue);
+
+      fakeRepository.setDisplayNameGate!.complete();
+      await confirmFuture;
+
+      expect(cubit.state.isSavingName, isFalse);
+      expect(cubit.state.isEditingName, isFalse);
+      expect(cubit.state.displayName, 'Nome Novo');
+      expect(cubit.state.nameErrorMessage, isNull);
+      expect(fakeRepository.lastSetDisplayNameArg, 'Nome Novo');
+      await cubit.close();
+    });
+  });
+
+  group('confirmEditingName() — failure', () {
+    test('stays editing with the draft kept and an inline error (I/O '
+        'matrix)', () async {
+      fakeRepository.currentDisplayName = 'Ana Silva';
+      fakeRepository.setDisplayNameResult = left(
+        const Failure.networkTimeout(message: 'Sem conexão'),
+      );
+      final cubit = AccountSettingsCubit(fakeRepository);
+      cubit.startEditingName();
+      cubit.updateNameDraft('Nome Novo');
+
+      await cubit.confirmEditingName();
+
+      expect(cubit.state.isEditingName, isTrue);
+      expect(cubit.state.isSavingName, isFalse);
+      expect(cubit.state.nameDraft, 'Nome Novo');
+      expect(cubit.state.nameErrorMessage, 'Sem conexão');
+      // The display name itself is untouched by a failed save.
+      expect(cubit.state.displayName, 'Ana Silva');
+      await cubit.close();
+    });
+
+    test('the superseded-call message is suppressed, same convention as '
+        'toggleBiometric\'s own failure branch', () async {
+      fakeRepository.currentDisplayName = 'Ana Silva';
+      fakeRepository.setDisplayNameResult = left(
+        const Failure.malformedResponse(
+          message: AccountSettingsRepository.supersededMessage,
+        ),
+      );
+      final cubit = AccountSettingsCubit(fakeRepository);
+      cubit.startEditingName();
+      cubit.updateNameDraft('Nome Novo');
+
+      await cubit.confirmEditingName();
+
+      expect(cubit.state.isSavingName, isFalse);
+      expect(cubit.state.nameErrorMessage, isNull);
+      await cubit.close();
+    });
+  });
+
+  group('cancelEditingName()', () {
+    test('not saving -> reverts immediately, no PATCH sent (I/O matrix: '
+        '"Tap away, not saving")', () async {
+      fakeRepository.currentDisplayName = 'Ana Silva';
+      final cubit = AccountSettingsCubit(fakeRepository);
+      cubit.startEditingName();
+      cubit.updateNameDraft('Rascunho descartado');
+
+      cubit.cancelEditingName();
+
+      expect(cubit.state.isEditingName, isFalse);
+      expect(cubit.state.displayName, 'Ana Silva');
+      expect(fakeRepository.setDisplayNameCallCount, 0);
+      await cubit.close();
+    });
+
+    test('a no-op while saving — the in-flight confirm owns the eventual '
+        'transition (I/O matrix: "Tap away, saving")', () async {
+      fakeRepository.currentDisplayName = 'Ana Silva';
+      fakeRepository.setDisplayNameResult = right(unit);
+      fakeRepository.setDisplayNameGate = Completer<void>();
+      final cubit = AccountSettingsCubit(fakeRepository);
+      cubit.startEditingName();
+      cubit.updateNameDraft('Nome Novo');
+      final confirmFuture = cubit.confirmEditingName();
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.isSavingName, isTrue);
+
+      cubit.cancelEditingName();
+
+      // Still editing/saving — the cancel call above was a no-op.
+      expect(cubit.state.isEditingName, isTrue);
+      expect(cubit.state.isSavingName, isTrue);
+
+      fakeRepository.setDisplayNameGate!.complete();
+      await confirmFuture;
+
+      // The save completes normally, unaffected by the earlier no-op
+      // cancel attempt.
+      expect(cubit.state.isEditingName, isFalse);
+      expect(cubit.state.displayName, 'Nome Novo');
+      await cubit.close();
+    });
   });
 }

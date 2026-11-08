@@ -29,6 +29,18 @@ class AccountSettingsRepositoryImpl implements AccountSettingsRepository {
   /// for both the vault gate and the Configurações toggle.
   bool _currentValue = true;
 
+  /// spec-8-3 — starts `''` (Boundaries: "default ''"), set only from
+  /// [fetchBiometricEnabled]'s own success branch (piggybacking on that
+  /// call's response — no new network call) or from a successful
+  /// [setDisplayName].
+  String _currentDisplayName = '';
+
+  /// spec-8-3 — same "starts `''`, boot-fetch piggyback" shape as
+  /// [_currentDisplayName]; never written anywhere else — `PATCH
+  /// /account/settings` rejects `email` (contract summary: "email is
+  /// rejected").
+  String _currentEmail = '';
+
   /// Review finding: without this, two overlapping calls — a double-tap
   /// toggle, or a boot [fetchBiometricEnabled] resolving while a
   /// [setBiometricEnabled] call is still in flight — let a stale call's
@@ -42,8 +54,20 @@ class AccountSettingsRepositoryImpl implements AccountSettingsRepository {
   /// call's result is discarded.
   int _generation = 0;
 
+  /// spec-8-3 — [setDisplayName]'s own generation guard, same shape as
+  /// [_generation] but kept separate (Boundaries): a name write and a
+  /// biometric toggle/fetch are independent calls that must never
+  /// supersede each other's in-flight state.
+  int _nameGeneration = 0;
+
   @override
   bool get currentBiometricEnabled => _currentValue;
+
+  @override
+  String get currentDisplayName => _currentDisplayName;
+
+  @override
+  String get currentEmail => _currentEmail;
 
   @override
   Stream<bool> get biometricEnabledStream {
@@ -77,6 +101,14 @@ class AccountSettingsRepositoryImpl implements AccountSettingsRepository {
   @override
   Future<Either<Failure, Unit>> fetchBiometricEnabled() async {
     final generation = ++_generation;
+    // Code-review patch (spec-8-3): captured so the piggybacked
+    // `displayName`/`email` write below can detect a `setDisplayName`
+    // call that started *after* this fetch — without this, a stale fetch
+    // resolving after a concurrent name save already succeeded would
+    // silently overwrite the just-saved name/email back to this fetch's
+    // own (older) values, the same class of bug `_generation` already
+    // guards against for `currentBiometricEnabled`.
+    final nameGeneration = _nameGeneration;
     final result = await _remoteDataSource.fetchSettings();
     return result.match(
       (failure) {
@@ -99,10 +131,48 @@ class AccountSettingsRepositoryImpl implements AccountSettingsRepository {
             ),
           );
         }
+        // spec-8-3 — same response, no new network call (Boundaries):
+        // `_currentDisplayName`/`_currentEmail` piggyback on this already
+        // in-flight fetch's own DTO. Code-review patch: only applied if no
+        // `setDisplayName` call has started since this fetch began — a
+        // concurrent name save that already resolved owns the name/email
+        // fields from here on, and this now-stale piggyback must not
+        // clobber it.
+        if (nameGeneration == _nameGeneration) {
+          _currentDisplayName = dto.displayName;
+          _currentEmail = dto.email;
+        }
         _emit(dto.biometricEnabled);
         return right(unit);
       },
     );
+  }
+
+  @override
+  Future<Either<Failure, Unit>> setDisplayName(String name) async {
+    final generation = ++_nameGeneration;
+    // spec-8-3 — not optimistic (Boundaries): unlike
+    // `setBiometricEnabled`, `_currentDisplayName` only changes once the
+    // PATCH below actually succeeds.
+    final result = await _remoteDataSource.updateDisplayName(name);
+    if (generation != _nameGeneration) {
+      // Superseded by a newer overlapping `setDisplayName` call — same
+      // "discard, don't clobber" rationale as `setBiometricEnabled`'s own
+      // stale-generation branch, just on its own, separate counter.
+      return left(
+        const Failure.malformedResponse(
+          message: AccountSettingsRepository.supersededMessage,
+        ),
+      );
+    }
+    return result.match((failure) => left(failure), (dto) {
+      // Code-review patch: the response's own echoed `displayName` is the
+      // source of truth, not the local `name` parameter — any backend-side
+      // normalization (trimming, casing, etc.) must be reflected locally
+      // rather than assuming the server stored exactly what was sent.
+      _currentDisplayName = dto.displayName;
+      return right(unit);
+    });
   }
 
   @override

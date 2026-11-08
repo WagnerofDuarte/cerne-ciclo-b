@@ -6,6 +6,7 @@ import 'package:fpdart/fpdart.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:cerne/core/failure/failure.dart';
+import 'package:cerne/core/widgets/avatar.dart';
 import 'package:cerne/core/widgets/back_arrow_header.dart';
 import 'package:cerne/features/account/domain/repositories/account_settings_repository.dart';
 import 'package:cerne/features/account/presentation/cubit/account_settings_cubit.dart';
@@ -45,6 +46,38 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
   /// `state.isSaving` mid-flight (review finding: the `Switch` must
   /// disable itself while a toggle is in flight).
   Completer<void>? setBiometricEnabledGate;
+
+  // spec-8-3 — same "configurable before the screen is pumped" convention
+  // `_FakeDashboardRepository`'s own fields already use.
+  @override
+  String currentDisplayName = '';
+
+  @override
+  String currentEmail = '';
+
+  /// The next `setDisplayName()` call's own result — defaults to a failure
+  /// so a test must opt in to the success path explicitly, same convention
+  /// as [setBiometricEnabledResult].
+  Either<Failure, Unit> setDisplayNameResult = left(
+    const Failure.malformedResponse(message: 'fake: not configured'),
+  );
+
+  /// Lets a test hold `setDisplayName()` unresolved, to observe
+  /// `state.isSavingName` mid-flight — same rationale
+  /// [setBiometricEnabledGate] already gives for the toggle.
+  Completer<void>? setDisplayNameGate;
+
+  int setDisplayNameCallCount = 0;
+
+  @override
+  Future<Either<Failure, Unit>> setDisplayName(String name) async {
+    setDisplayNameCallCount += 1;
+    final gate = setDisplayNameGate;
+    if (gate != null) {
+      await gate.future;
+    }
+    return setDisplayNameResult;
+  }
 
   @override
   bool get currentBiometricEnabled => _value;
@@ -95,10 +128,23 @@ class _FakeDashboardRepository implements DashboardRepository {
   /// (`dashboard_chart_section_test.dart`'s job).
   Either<Failure, String> getNarrativeResult = right('');
 
+  /// Review finding: lets a test hold `getAggregate()` unresolved, to
+  /// prove the narrative-error announcement gate still fires once the
+  /// aggregate *later* resolves to `totalCount > 30` — the two fetches
+  /// race independently (Boundaries: "neither awaiting the other"), and
+  /// the narrative can resolve to its own error first.
+  Completer<void>? aggregateGate;
+
   @override
   Future<Either<Failure, DashboardAggregate>> getAggregate({
     required String period,
-  }) async => getAggregateResult;
+  }) async {
+    final gate = aggregateGate;
+    if (gate != null) {
+      await gate.future;
+    }
+    return getAggregateResult;
+  }
 
   @override
   Future<Either<Failure, String>> getNarrative({
@@ -196,6 +242,38 @@ Future<(_FakeAccountSettingsRepository, AccountSettingsCubit)> _pumpScreen(
   WidgetTester tester,
 ) async {
   final fakeRepository = _FakeAccountSettingsRepository();
+  final cubit = AccountSettingsCubit(fakeRepository);
+  addTearDown(() => cubit.close());
+  addTearDown(fakeRepository.dispose);
+
+  final router = _routerWith(
+    AccountSettingsScreen(
+      cubit: cubit,
+      dashboardCubit: _buildDashboardCubit(),
+      narrativeCubit: _buildNarrativeCubit(),
+    ),
+  );
+  addTearDown(router.dispose);
+  await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+
+  return (fakeRepository, cubit);
+}
+
+/// spec-8-3 — same shape as [_pumpScreen], but lets a test pre-configure
+/// the fake's [_FakeAccountSettingsRepository.currentDisplayName]/
+/// [_FakeAccountSettingsRepository.currentEmail] *before* the cubit (and
+/// therefore its initial state) is constructed — needed because
+/// `AccountSettingsCubit` reads both only once, at construction
+/// (Boundaries).
+Future<(_FakeAccountSettingsRepository, AccountSettingsCubit)>
+_pumpScreenWithProfile(
+  WidgetTester tester, {
+  String displayName = '',
+  String email = '',
+}) async {
+  final fakeRepository = _FakeAccountSettingsRepository()
+    ..currentDisplayName = displayName
+    ..currentEmail = email;
   final cubit = AccountSettingsCubit(fakeRepository);
   addTearDown(() => cubit.close());
   addTearDown(fakeRepository.dispose);
@@ -551,6 +629,66 @@ void main() {
   );
 
   testWidgets(
+    // Review finding: the two listener tests above both let the aggregate
+    // fetch settle (gated or not) before the narrative one ever resolves,
+    // so neither can distinguish a gate that only checks `DashboardCubit`'s
+    // *current* state at the narrative's own error transition from one
+    // that's correctly reactive to both cubits. The two fetches race
+    // independently (Boundaries: "neither awaiting the other") — this
+    // proves the announcement still fires when the narrative resolves to
+    // its error *first*, before the aggregate has reached totalCount > 30.
+    'a narrative ResourceError that resolves before the aggregate reaches '
+    'totalCount > 30 still announces once the aggregate later resolves '
+    '(out-of-order fetch resolution)',
+    (tester) async {
+      final announcements = interceptAnnouncements(tester);
+      final aggregateGate = Completer<void>();
+      final fakeRepository = _FakeDashboardRepository()
+        ..getAggregateResult = right(
+          const DashboardAggregate(totalCount: 42, bucketCounts: [42]),
+        )
+        ..getNarrativeResult = left(
+          const Failure.networkTimeout(message: 'mensagem crua do narrative'),
+        )
+        ..aggregateGate = aggregateGate;
+      final dashboardCubit = _buildDashboardCubit(repository: fakeRepository);
+      final narrativeCubit = _buildNarrativeCubit(repository: fakeRepository);
+      final fakeAccountRepository = _FakeAccountSettingsRepository();
+      final accountCubit = AccountSettingsCubit(fakeAccountRepository);
+      addTearDown(() => accountCubit.close());
+      addTearDown(fakeAccountRepository.dispose);
+
+      final router = _routerWith(
+        AccountSettingsScreen(
+          cubit: accountCubit,
+          dashboardCubit: dashboardCubit,
+          narrativeCubit: narrativeCubit,
+        ),
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+      // The aggregate fetch is still gated (ResourceLoading), but the
+      // narrative one is free to settle into its own ResourceError.
+      await tester.pump();
+      await tester.pump();
+      expect(
+        announcements,
+        isEmpty,
+        reason:
+            'the aggregate has not reached totalCount > 30 yet, so the '
+            'narrative section is not visible — nothing to announce yet',
+      );
+
+      // The aggregate now resolves to totalCount > 30, after the
+      // narrative has already settled into ResourceError.
+      aggregateGate.complete();
+      await tester.pumpAndSettle();
+
+      expect(announcements, contains('Não foi possível gerar o balanço agora'));
+    },
+  );
+
+  testWidgets(
     // Review finding: the switch from a non-scrolling `Padding` to
     // `Expanded` + `SingleChildScrollView` (round 2) was made specifically
     // because the toggle plus the new chart section "can grow past the
@@ -597,4 +735,182 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  // spec-8-3 — the profile header's own Acceptance Criteria, proved
+  // directly against the real screen widget.
+  group('profile header (spec-8-3)', () {
+    testWidgets('shows a large avatar with initials, the display name and the '
+        'e-mail above the toggle, in display mode', (tester) async {
+      await _pumpScreenWithProfile(
+        tester,
+        displayName: 'Ana Silva',
+        email: 'ana@example.com',
+      );
+
+      final avatar = tester.widget<Avatar>(find.byType(Avatar));
+      expect(avatar.size, AvatarSize.large);
+      expect(avatar.initials, 'AS');
+      expect(find.text('Ana Silva'), findsOneWidget);
+      expect(find.text('ana@example.com'), findsOneWidget);
+      expect(find.byIcon(Icons.edit), findsOneWidget);
+      expect(find.byIcon(Icons.check), findsNothing);
+      expect(find.byType(TextField), findsNothing);
+    });
+
+    testWidgets(
+      // AC: "Given display mode, when the pencil is tapped, then the name
+      // becomes editable (pre-filled) and the icon becomes a check."
+      'tapping the pencil icon switches the name to an editable, pre-filled '
+      'field and the icon becomes a check',
+      (tester) async {
+        await _pumpScreenWithProfile(tester, displayName: 'Ana Silva');
+
+        await tester.tap(find.byIcon(Icons.edit));
+        await tester.pump();
+
+        expect(find.byType(TextField), findsOneWidget);
+        final field = tester.widget<TextField>(find.byType(TextField));
+        expect(field.controller!.text, 'Ana Silva');
+        expect(find.byIcon(Icons.check), findsOneWidget);
+        expect(find.byIcon(Icons.edit), findsNothing);
+      },
+    );
+
+    testWidgets(
+      // AC: "Given a changed non-empty draft, when the check is tapped and
+      // save succeeds, then the screen shows the new name in display
+      // mode."
+      'confirming a changed, non-empty name saves it and shows the new '
+      'name in display mode on success',
+      (tester) async {
+        final (fakeRepository, _) = await _pumpScreenWithProfile(
+          tester,
+          displayName: 'Ana Silva',
+        );
+        fakeRepository.setDisplayNameResult = right(unit);
+
+        await tester.tap(find.byIcon(Icons.edit));
+        await tester.pump();
+        await tester.enterText(find.byType(TextField), 'Ana Souza');
+        await tester.tap(find.byIcon(Icons.check));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TextField), findsNothing);
+        expect(find.text('Ana Souza'), findsOneWidget);
+        expect(find.byIcon(Icons.edit), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      // AC: "Given a save fails, then the field stays editable with the
+      // typed text and an inline error."
+      'a failed save keeps the field editable with the typed text and '
+      'shows the Failure\'s message inline',
+      (tester) async {
+        final (fakeRepository, _) = await _pumpScreenWithProfile(
+          tester,
+          displayName: 'Ana Silva',
+        );
+        fakeRepository.setDisplayNameResult = left(
+          const Failure.networkTimeout(message: 'Sem conexão'),
+        );
+
+        await tester.tap(find.byIcon(Icons.edit));
+        await tester.pump();
+        await tester.enterText(find.byType(TextField), 'Ana Souza');
+        await tester.tap(find.byIcon(Icons.check));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TextField), findsOneWidget);
+        final field = tester.widget<TextField>(find.byType(TextField));
+        expect(field.controller!.text, 'Ana Souza');
+        expect(find.text('Sem conexão'), findsOneWidget);
+        expect(find.byIcon(Icons.check), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      // AC: "Given an unconfirmed edit, when the user taps outside the
+      // field/icon, then the screen reverts with no change sent."
+      'tapping away from an unconfirmed edit reverts to display mode with '
+      'no PATCH sent',
+      (tester) async {
+        final (fakeRepository, _) = await _pumpScreenWithProfile(
+          tester,
+          displayName: 'Ana Silva',
+        );
+
+        await tester.tap(find.byIcon(Icons.edit));
+        await tester.pump();
+        await tester.enterText(find.byType(TextField), 'Rascunho descartado');
+        // Taps a point well outside the name field + check icon's own
+        // `TapRegion` — the biometric toggle's own label, elsewhere on the
+        // same screen.
+        await tester.tapAt(tester.getCenter(find.text('Entrar com biometria')));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TextField), findsNothing);
+        expect(find.text('Ana Silva'), findsOneWidget);
+        expect(find.byIcon(Icons.edit), findsOneWidget);
+        expect(fakeRepository.setDisplayNameCallCount, 0);
+      },
+    );
+
+    testWidgets(
+      'confirming an unchanged draft reverts immediately with no PATCH '
+      'sent (I/O matrix)',
+      (tester) async {
+        await _pumpScreenWithProfile(tester, displayName: 'Ana Silva');
+
+        await tester.tap(find.byIcon(Icons.edit));
+        await tester.pump();
+        await tester.tap(find.byIcon(Icons.check));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TextField), findsNothing);
+        expect(find.text('Ana Silva'), findsOneWidget);
+      },
+    );
+
+    // Code-review patch: the backend allows a displayName up to 80
+    // characters — the display-mode Text had no maxLines/overflow, so a
+    // long name could wrap to multiple lines and misalign against the
+    // fixed-size pencil icon beside it.
+    testWidgets(
+      'a long (80-character) display name renders on one line with an '
+      'ellipsis, no overflow exception',
+      (tester) async {
+        final longName = 'A' * 80;
+        await _pumpScreenWithProfile(tester, displayName: longName);
+        await tester.pumpAndSettle();
+
+        final textWidget = tester.widget<Text>(find.text(longName));
+        expect(textWidget.maxLines, 1);
+        expect(textWidget.overflow, TextOverflow.ellipsis);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    // Code-review patch: `_initialsFor` used to slice each initial via
+    // `String.substring(0, 1)`, which operates on UTF-16 code units and
+    // can split a surrogate pair — e.g. an emoji starting a word — into a
+    // lone, unpaired surrogate. Fixed to use `Characters.first`
+    // (grapheme-cluster aware).
+    testWidgets(
+      'a display name whose first word starts with an emoji derives '
+      'initials via whole Unicode grapheme clusters, renders without '
+      'throwing',
+      (tester) async {
+        await _pumpScreenWithProfile(tester, displayName: '😀 Silva');
+        await tester.pumpAndSettle();
+
+        final avatar = tester.widget<Avatar>(find.byType(Avatar));
+        // The emoji's own surrogate pair stays intact (one whole
+        // grapheme), followed by "Silva"'s own first letter — not a lone,
+        // unpaired surrogate half.
+        expect(avatar.initials, '😀S');
+        expect(tester.takeException(), isNull);
+      },
+    );
+  });
 }

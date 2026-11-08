@@ -179,11 +179,33 @@ exercised through the same e2e suite.
 ## Verification
 
 - `fvm flutter analyze` — 0 issues (project-wide)
-- `fvm flutter test` — **1199/1199 passed**, no regressions in the
+- `fvm flutter test` — **1239/1239 passed**, no regressions in the
   existing suite (story 8.2's additions — the 3-test narrative e2e
   group above, plus the account-settings-screen announcement-gating
-  widget tests and the rest of its own unit/widget coverage — account
-  for the +24 difference from the prior 1175/1175 baseline)
+  widget tests and the rest of its own unit/widget coverage, plus a
+  code-review round adding 7 tests across the narrative cubit/widget/e2e
+  suites — account for the +71 difference from the 1135/1135 baseline
+  above (review finding: this entry previously claimed a "+24 ... from
+  the prior 1175/1175 baseline," an intermediate total this diff never
+  actually ran or committed — 8.1 and 8.2 land together in this single
+  commit, so 1135 is the only real prior baseline). Story 8.3 (profile
+  name editing) then adds its own coverage on top — `updateDisplayName`'s
+  RNF09 write-failure matrix plus request-shape/decode tests in
+  `account_remote_data_source_test.dart`; the `displayName`/`email`
+  boot-fetch piggyback, `setDisplayName`'s not-optimistic success/
+  failure and its own (separate-from-the-toggle's) generation guard in
+  `account_settings_repository_impl_test.dart`; the full inline-edit
+  I/O & Edge-Case Matrix (start/update/cancel/confirm across empty-draft,
+  unchanged-draft, success, failure, and the superseded-message
+  suppression) in `account_settings_cubit_test.dart`; and the four
+  Acceptance Criteria plus the long-name/emoji-initials edge cases in
+  `account_settings_screen_test.dart` — 29 tests from the initial
+  implementation plus a further 4 from a code-review round (a stale-
+  fetch-must-not-clobber-a-saved-name race, the PATCH response's own
+  echoed `displayName` winning over the locally-sent value, a long
+  (80-char) display name's overflow handling, and an emoji-led name's
+  Unicode-grapheme-aware initials) — account for the full +33 difference
+  from the 1206/1206 baseline above
 
 ## Coverage
 

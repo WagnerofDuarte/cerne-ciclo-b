@@ -112,6 +112,12 @@ void main() {
 
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
       expect(find.byType(DashboardChartBar), findsNothing);
+      // Review finding: the spinner now carries its own `semanticsLabel`
+      // rather than being announced as a bare, unlabeled indicator.
+      expect(
+        find.bySemanticsLabel('Carregando gráfico de evolução'),
+        findsOneWidget,
+      );
     },
   );
 
@@ -366,6 +372,58 @@ void main() {
   });
 
   testWidgets(
+    // Review finding: `heightFraction`'s `.clamp(0, 1)` guard (added to
+    // stop a negative, malformed-backend bucket count from producing a
+    // negative `Container` height and crashing) had no test — every
+    // existing test's own counts are already within `[0, maxCount]`, so
+    // the clamp was a no-op for all of them.
+    'defensive guard: a negative bucket count (malformed/inconsistent '
+    'backend data) never produces a negative heightFraction, no crash',
+    (tester) async {
+      fakeRepository.result = right(
+        const DashboardAggregate(totalCount: 15, bucketCounts: [-5, 10]),
+      );
+      await pumpSection(tester);
+      await cubit.load();
+      await tester.pump();
+
+      final bars = tester
+          .widgetList<DashboardChartBar>(find.byType(DashboardChartBar))
+          .toList();
+      expect(bars, hasLength(2));
+      expect(bars[0].heightFraction, 0.0);
+      expect(bars[1].heightFraction, 1.0);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    // Review finding: the existing "empty bucketCounts" guard test above
+    // only exercises the literally-empty-list shape, which the *old*
+    // `barCounts.isEmpty` condition already caught before it was changed
+    // to `maxCount == 0` specifically so it would also catch `_condense`'s
+    // own output — never empty, but can still be entirely zero. This is
+    // the one shape that distinguishes the two conditions.
+    'defensive guard: ">30 entries" with every real bucketCounts entry at '
+    'zero (contract-inconsistent/malformed data) falls back to a single '
+    'bar for the whole totalCount, never 10 invisible zero-height bars',
+    (tester) async {
+      fakeRepository.result = right(
+        const DashboardAggregate(totalCount: 40, bucketCounts: [0, 0, 0]),
+      );
+      await pumpSection(tester);
+      await cubit.load();
+      await tester.pump();
+
+      expect(find.byType(DashboardChartBar), findsOneWidget);
+      final bar = tester.widget<DashboardChartBar>(
+        find.byType(DashboardChartBar),
+      );
+      expect(bar.heightFraction, 1.0);
+    },
+  );
+
+  testWidgets(
     'I/O matrix: "Fetch fails" — ResourceError shows the Failure\'s message '
     'inline, no crash',
     (tester) async {
@@ -457,6 +515,12 @@ void main() {
           find.text('Ainda é cedo pra ver um padrão — volte em alguns dias.'),
           findsNothing,
         );
+        // Review finding: the only prior assertion on this link was a
+        // `find.text()` tap below — nothing proved its new
+        // `Semantics(button: true, ...)` role actually reaches the
+        // semantics tree, unlike every other retry/bookmark affordance in
+        // this codebase that got the same accessibility pass.
+        expect(find.bySemanticsLabel('tentar novamente'), findsOneWidget);
 
         // Tapping "tentar novamente" re-calls narrativeCubit.load(), no
         // crash (Boundaries: "re-calls narrativeCubit.load()").
@@ -465,6 +529,31 @@ void main() {
         await tester.pump();
 
         expect(find.text('Recuperado com sucesso.'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets(
+      // Review finding: a blank/whitespace-only narrative string (a
+      // malformed but not-quite-decode-failing backend response) must
+      // render nothing, same as the Idle/Loading branch — never an
+      // empty-but-present `Text` paragraph indistinguishable from
+      // "nothing to show yet".
+      'I/O matrix: ">30 entries, narrative resolves" with a blank/'
+      'whitespace-only string renders nothing, never an empty paragraph',
+      (tester) async {
+        fakeRepository.narrativeResult = right('   ');
+        await pumpOver30(tester);
+        await narrativeCubit.load();
+        await tester.pump();
+
+        expect(find.byType(DashboardChartBar), findsNWidgets(10));
+        expect(
+          tester
+              .widgetList<Text>(find.byType(Text))
+              .where((text) => text.data == '   '),
+          isEmpty,
+        );
         expect(tester.takeException(), isNull);
       },
     );

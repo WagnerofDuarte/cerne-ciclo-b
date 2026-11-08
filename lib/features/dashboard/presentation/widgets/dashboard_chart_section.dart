@@ -60,13 +60,13 @@ class DashboardChartSection extends StatelessWidget {
         ),
         const SizedBox(height: DesignTokens.dashboardSectionGap),
         BlocBuilder<DashboardCubit, Resource<DashboardAggregate>>(
-          builder: (context, state) => _buildBody(context, state),
+          builder: (context, state) => _buildBody(state),
         ),
       ],
     );
   }
 
-  Widget _buildBody(BuildContext context, Resource<DashboardAggregate> state) {
+  Widget _buildBody(Resource<DashboardAggregate> state) {
     return switch (state) {
       ResourceIdle<DashboardAggregate>() ||
       ResourceLoading<DashboardAggregate>() => _loadingCard(),
@@ -74,7 +74,6 @@ class DashboardChartSection extends StatelessWidget {
         failure.message,
       ),
       ResourceData<DashboardAggregate>(data: final aggregate) => _populatedCard(
-        context,
         aggregate,
       ),
     };
@@ -146,7 +145,7 @@ class DashboardChartSection extends StatelessWidget {
   /// "matrix gap" the frozen spec's own Boundaries line resolves per
   /// AGENTS.md's "decide and proceed". None of the non-zero branches ever
   /// renders text other than the `1`-count message (Boundaries: "no text").
-  Widget _populatedCard(BuildContext context, DashboardAggregate aggregate) {
+  Widget _populatedCard(DashboardAggregate aggregate) {
     final totalCount = aggregate.totalCount;
     if (totalCount == 0) {
       return _emptyCard();
@@ -164,7 +163,7 @@ class DashboardChartSection extends StatelessWidget {
       message = _oneEntryMessage;
     } else if (totalCount > 30) {
       barCounts = _condense(aggregate.bucketCounts);
-      narrativeSection = _narrativeSection(context);
+      narrativeSection = _narrativeSection();
     } else {
       barCounts = aggregate.bucketCounts;
     }
@@ -246,7 +245,7 @@ class DashboardChartSection extends StatelessWidget {
   /// `Idle`/`Loading` render nothing (so the chart never waits on the
   /// narrative); `ResourceData` renders the text; `ResourceError` renders
   /// the dedicated "unavailable, tap to retry" message.
-  Widget _narrativeSection(BuildContext context) {
+  Widget _narrativeSection() {
     return BlocBuilder<DashboardNarrativeCubit, Resource<String>>(
       builder: (context, state) {
         return switch (state) {
@@ -282,16 +281,30 @@ class DashboardChartSection extends StatelessWidget {
               // accessibility pass (`ChatBubble`'s own retry/bookmark
               // affordances), a screen reader would announce this as plain
               // static text, not a working control.
+              //
+              // Review finding: that same pass never addressed touch-
+              // target *size* — a bare `GestureDetector` around 13px text
+              // has a tap area no larger than the glyphs themselves, well
+              // under [DesignTokens.insertionModalTapTargetMin]. Wrapped
+              // in `InkWell` + `ConstrainedBox` the same way `ChatBubble`'s
+              // own retry/bookmark affordances already are.
               Semantics(
                 button: true,
                 label: _narrativeRetryLabel,
                 excludeSemantics: true,
-                child: GestureDetector(
+                child: InkWell(
                   onTap: () => context.read<DashboardNarrativeCubit>().load(),
-                  child: Text(
-                    _narrativeRetryLabel,
-                    style: DesignTokens.dashboardNarrativeTextStyle.copyWith(
-                      color: DesignTokens.colorAccent,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minHeight: DesignTokens.insertionModalTapTargetMin,
+                    ),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _narrativeRetryLabel,
+                        style: DesignTokens.dashboardNarrativeTextStyle
+                            .copyWith(color: DesignTokens.colorAccent),
+                      ),
                     ),
                   ),
                 ),

@@ -144,6 +144,20 @@ Future<void> _waitForState(
   return cubit.stream.firstWhere(match).timeout(const Duration(seconds: 10));
 }
 
+/// Same rationale as [_waitForState], for [DashboardNarrativeCubit]'s own
+/// `Resource<String>` — review finding: the sibling [DashboardCubit] had a
+/// dedicated real-`confirmedWrites` e2e proof, this cubit (Boundaries:
+/// "mirroring DashboardCubit's exact shape") did not.
+Future<void> _waitForNarrativeState(
+  DashboardNarrativeCubit cubit,
+  bool Function(Resource<String>) match,
+) {
+  if (match(cubit.state)) {
+    return Future.value();
+  }
+  return cubit.stream.firstWhere(match).timeout(const Duration(seconds: 10));
+}
+
 /// End-to-end coverage for spec-8-1's dashboard aggregation (plus spec-8-2's
 /// independent narrative fetch, added in its own `DashboardNarrativeCubit`
 /// group below), driven through the real production object graph `sl`
@@ -428,5 +442,82 @@ void main() {
       expect(state.failure, isA<Validation>());
       expect(adapter.requests, hasLength(1));
     });
+
+    test(
+      'a retryable NETWORK_TIMEOUT exhausts the real RetryInterceptor\'s '
+      'retries (1 + maxRetries requests, same policy the sibling '
+      'DashboardCubit group above already proves for the identical '
+      'transport/retry pipeline) before surfacing as ResourceError',
+      () async {
+        for (var i = 0; i <= RetryInterceptor.maxRetries; i++) {
+          adapter.queueErrorResponse('NETWORK_TIMEOUT', 'Tempo esgotado');
+        }
+
+        final cubit = sl<DashboardNarrativeCubit>();
+        await cubit.load();
+
+        final state = cubit.state as ResourceError<String>;
+        expect(state.failure, isA<NetworkTimeout>());
+        expect(adapter.requests, hasLength(1 + RetryInterceptor.maxRetries));
+      },
+    );
+
+    test(
+      'Boundaries: "constructor-subscribes to confirmedWrites, recompute on '
+      'every entry write, same as the aggregate" driven for real — a '
+      'genuine entries-create round trip through the exact shared '
+      'sl<PendingEntryWriteTracker>() singleton confirms a write, and '
+      "DashboardNarrativeCubit's own constructor subscription (wired by "
+      'registerDashboardFeature()) reacts with a brand-new real '
+      'dashboard-narrative-get fetch, with no test/screen code ever calling '
+      'load() a second time',
+      () async {
+        // Resolves (and starts) the real DashboardNarrativeCubit — same as
+        // AccountSettingsScreen.initState mounting Configurações — before
+        // the write is confirmed, so its constructor subscription is
+        // already live when confirmedWrites fires.
+        final cubit = sl<DashboardNarrativeCubit>();
+        adapter.queueJsonResponse(
+          200,
+          _narrativeJson(text: 'Balanço inicial.'),
+        );
+        await cubit.load();
+        expect((cubit.state as ResourceData<String>).data, 'Balanço inicial.');
+
+        adapter.queueJsonResponse(
+          200,
+          _entryJson(
+            id: 'entry-1',
+            content: 'Primeiro registro do dia.',
+            source: 'manual',
+            occurredAt: '2026-01-02T10:00:00Z',
+          ),
+        );
+        adapter.queueJsonResponse(
+          200,
+          _narrativeJson(text: 'Balanço atualizado.'),
+        );
+
+        final tracker = sl<PendingEntryWriteTracker>();
+        final result = await tracker.create(
+          content: 'Primeiro registro do dia.',
+          source: EntrySource.manual,
+        );
+        expect(result.isRight(), isTrue);
+
+        await _waitForNarrativeState(
+          cubit,
+          (s) => s is ResourceData<String> && s.data == 'Balanço atualizado.',
+        );
+
+        // Exactly two dashboard-narrative-get calls left through the real
+        // transport — the initial load() plus the one confirmedWrites-
+        // triggered reload, never a third.
+        final narrativeRequests = adapter.requests
+            .where((r) => r.path.contains('dashboard-narrative-get'))
+            .toList();
+        expect(narrativeRequests, hasLength(2));
+      },
+    );
   });
 }

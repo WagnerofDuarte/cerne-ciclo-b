@@ -51,6 +51,30 @@ abstract class AccountSettingsRepository {
   /// `Right(unit)`.
   Future<Either<Failure, Unit>> setBiometricEnabled(bool enabled);
 
+  /// spec-8-3 — the profile name shown on Configurações, read by
+  /// `AccountSettingsCubit` at construction (Boundaries: "Cubit reads
+  /// displayName/email from the repository at construction"). Starts `''`
+  /// (Boundaries: "default ''") and is set only from
+  /// [fetchBiometricEnabled]'s own success branch (piggybacking on that
+  /// call's response, Boundaries: "no new network call") or, once set,
+  /// from a successful [setDisplayName].
+  String get currentDisplayName;
+
+  /// spec-8-3 — the account's e-mail, read the same way as
+  /// [currentDisplayName]; never written by this repository ("email is
+  /// rejected" per the contract's own `PATCH /account/settings` summary).
+  String get currentEmail;
+
+  /// spec-8-3 — writes the profile's `displayName` via
+  /// `PATCH {"displayName": name}`. Not optimistic (Boundaries): unlike
+  /// [setBiometricEnabled], [currentDisplayName] only changes once this
+  /// call's PATCH actually succeeds. Guarded by its own generation counter,
+  /// same shape as [setBiometricEnabled]'s own `_generation` guard but kept
+  /// separate (Boundaries) — a call superseded by a newer overlapping one
+  /// returns `Left(Failure.malformedResponse(message: supersededMessage))`
+  /// without touching [currentDisplayName].
+  Future<Either<Failure, Unit>> setDisplayName(String name);
+
   /// Releases the underlying stream resource. Wired as `get_it`'s
   /// `dispose:` callback on registration, same rationale as
   /// `VaultRepository.dispose()`/`SessionRepository.dispose()`.

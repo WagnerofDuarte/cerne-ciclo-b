@@ -234,6 +234,20 @@ void main() {
     },
   );
 
+  test('close() while a load() is in flight never throws (emit-after-close '
+      'guard, mirrors DashboardCubit)', () async {
+    fakeRepository.gated = true;
+
+    // ignore: unawaited_futures
+    cubit.load();
+    await Future<void>.delayed(Duration.zero);
+    await cubit.close();
+
+    fakeRepository.resolve(0, right('late'));
+    await Future<void>.delayed(Duration.zero);
+    // No exception means the generation/isClosed guard held.
+  });
+
   test(
     'a retry tap (AccountSettingsScreen/DashboardChartSection\'s own '
     'narrativeCubit.load() re-call) behaves like any other load() — '

@@ -291,6 +291,20 @@ class _FakeAccountSettingsRepository implements AccountSettingsRepository {
   @override
   Stream<bool> get biometricEnabledStream => _controller.stream;
 
+  // spec-8-3 — this suite never exercises the profile-name feature; a
+  // trivial, never-asserted-on default is enough to satisfy the widened
+  // interface (same rationale `_FakeAccountSettingsRepository`'s other
+  // untouched members already follow).
+  @override
+  String get currentDisplayName => '';
+
+  @override
+  String get currentEmail => '';
+
+  @override
+  Future<Either<Failure, Unit>> setDisplayName(String name) async =>
+      right(unit);
+
   @override
   Future<Either<Failure, Unit>> fetchBiometricEnabled() async => right(unit);
 

@@ -25,6 +25,12 @@ class AccountRemoteDataSource {
     bool enabled,
   ) => _patch({'biometricEnabled': enabled});
 
+  /// spec-8-3 — called with exactly `{"displayName": name}` to write the
+  /// profile name, mirroring [updateBiometricEnabled]'s own shape (Code
+  /// Map: "mirrors updateBiometricEnabled").
+  Future<Either<Failure, AccountSettingsDto>> updateDisplayName(String name) =>
+      _patch({'displayName': name});
+
   Future<Either<Failure, AccountSettingsDto>> _patch(
     Map<String, dynamic> data,
   ) async {

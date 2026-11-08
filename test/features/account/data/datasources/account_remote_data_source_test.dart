@@ -117,6 +117,72 @@ void main() {
     });
   });
 
+  // spec-8-3 — RNF09's slice for `updateDisplayName`, the same endpoint as
+  // `fetchSettings`/`updateBiometricEnabled` above (Code Map: "mirrors
+  // updateBiometricEnabled").
+  runWriteFailureMatrix<AccountSettingsDto>(
+    endpointName: 'account-settings-update (updateDisplayName)',
+    stubNetworkTimeout: () =>
+        when(() => mockApiClient.patch(any(), data: any(named: 'data')))
+            .thenAnswer(
+              (_) async =>
+                  left(const Failure.networkTimeout(message: 'Timed out')),
+            ),
+    stubMalformedResponse: () =>
+        when(() => mockApiClient.patch(any(), data: any(named: 'data')))
+            .thenAnswer((_) async => right({'unexpected': 'shape'})),
+    stubNoConnection: () =>
+        when(() => mockApiClient.patch(any(), data: any(named: 'data')))
+            .thenAnswer(
+              (_) async =>
+                  left(const Failure.networkOffline(message: 'Offline')),
+            ),
+    invoke: () => dataSource.updateDisplayName('Novo Nome'),
+  );
+
+  group('AccountRemoteDataSource.updateDisplayName', () {
+    test('calls PATCH account-settings-update with exactly '
+        '{"displayName": name} — mirrors updateBiometricEnabled (Code '
+        'Map)', () async {
+      when(
+        () => mockApiClient.patch(
+          'account-settings-update',
+          data: any(named: 'data'),
+        ),
+      ).thenAnswer(
+        (_) async => right(_settingsBody()..['data']['displayName'] = 'Ana'),
+      );
+
+      await dataSource.updateDisplayName('Ana');
+
+      final captured = verify(
+        () => mockApiClient.patch(
+          'account-settings-update',
+          data: captureAny(named: 'data'),
+        ),
+      ).captured;
+      expect(captured.single, {'displayName': 'Ana'});
+    });
+
+    test('decodes the written name back from the response', () async {
+      when(
+        () => mockApiClient.patch(
+          'account-settings-update',
+          data: any(named: 'data'),
+        ),
+      ).thenAnswer(
+        (_) async => right(_settingsBody()..['data']['displayName'] = 'Ana'),
+      );
+
+      final result = await dataSource.updateDisplayName('Ana');
+
+      result.match(
+        (_) => fail('expected Right'),
+        (dto) => expect(dto.displayName, 'Ana'),
+      );
+    });
+  });
+
   group('AccountRemoteDataSource.updateBiometricEnabled', () {
     test('calls PATCH account-settings-update with exactly '
         '{"biometricEnabled": enabled} — never displayName/persona '
