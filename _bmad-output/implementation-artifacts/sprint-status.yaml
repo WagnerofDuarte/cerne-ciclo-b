@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-26-2026 00:00
-last_updated: 11-08-2026 09:00
+last_updated: 11-08-2026 15:55
 project: cerne-ciclo-b
 project_key: NOKEY
 tracking_system: file-system
@@ -42,34 +42,34 @@ development_status:
   1-4-silent-session-refresh-persistence: done
   1-5-expired-session-recovery-overlay: done
   1-6-base-navigation-shell-with-feature-placeholders: done
-  epic-1-retrospective: optional
+  epic-1-retrospective: done
 
   epic-2: in-progress
   2-1-biometric-pin-app-access-gate: done
   2-2-biometric-failure-fallback-to-pin: done
   2-3-fixed-5-minute-idle-re-authentication-timeout: done
   2-4-biometric-preference-persistence: done
-  epic-2-retrospective: optional
+  epic-2-retrospective: done
 
   epic-3: in-progress
   3-1-text-entry-capture-insertion-modal-shell: done
   3-2-audio-entry-capture-on-device-transcription: done
   3-3-photo-entry-capture-backend-ocr: done
   3-4-cancel-safe-capture-across-all-tabs: done
-  epic-3-retrospective: optional
+  epic-3-retrospective: done
 
   epic-4: in-progress
   4-1-chronological-entry-list-with-origin-marking: done
   4-2-per-entry-sync-badge: done
   4-3-empty-state-handling: done
   4-4-entry-detail-view: done
-  epic-4-retrospective: optional
+  epic-4-retrospective: done
 
   epic-5: in-progress
   5-1-semantic-search-with-debounced-input: done
   5-2-metadata-filters: done
   5-3-combined-search-filter-non-disruptive-clearing: done
-  epic-5-retrospective: optional
+  epic-5-retrospective: done
 
   epic-6: in-progress
   6-1-send-message-receive-rag-grounded-streaming-response: done
@@ -77,13 +77,13 @@ development_status:
   6-3-dropped-stream-resilience-offline-composer-lock: done
   6-4-bookmark-a-chat-message-into-an-entry: done
   6-5-proactive-insight-injection-failure-isolation: done
-  epic-6-retrospective: optional
+  epic-6-retrospective: done
 
   epic-7: in-progress
   7-1-request-a-period-export-job-status-tracking: done
   7-2-narrative-independent-raw-data-download: done
   7-3-empty-period-handling: done
-  epic-7-retrospective: optional
+  epic-7-retrospective: done
 
   epic-8: in-progress
   8-1-on-demand-dashboard-aggregation-across-entry-counts: done
@@ -91,4 +91,726 @@ development_status:
   8-3-profile-name-editing: done
   8-4-logout: done
   8-5-account-deletion: done
-  epic-8-retrospective: optional
+  epic-8-retrospective: done
+action_items:
+  - id: "epic-8-retro-item-1-fix-narrative-error-announce-listener-to"
+    epic: 8
+    action: "Fix narrative-error announce listener to consult/set _dashboardOverflowAnnounced
+      so it cannot bypass the dedup guard its sibling listener already has (account_settings_screen.dart)"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-11-08.md"
+  - id: "epic-8-retro-item-2-widen-accountsettingscubit-clearstaleerr"
+    epic: 8
+    action: "Widen AccountSettingsCubit.clearStaleError() to also clear deleteAccountErrorMessage,
+      or add a sibling clear call from AccountSettingsScreen.initState()"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-11-08.md"
+  - id: "epic-8-retro-item-3-give-accountsettingsrepositoryimpl-delet"
+    epic: 8
+    action: "Give AccountSettingsRepositoryImpl.deleteAccount() its own generation
+      guard, consistent with setBiometricEnabled/setDisplayName"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-11-08.md"
+  - id: "epic-8-retro-item-4-add-a-catch-clause-to-accountsettingscub"
+    epic: 8
+    action: "Add a catch clause to AccountSettingsCubit.deleteAccount() so an unexpected
+      throw surfaces an error instead of silently resetting isDeletingAccount"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-11-08.md"
+  - id: "epic-8-retro-item-5-add-a-retry-affordance-to-dashboardchart"
+    epic: 8
+    action: "Add a retry affordance to DashboardChartSection._errorCard, matching
+      the narrative sections tentar novamente link"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-11-08.md"
+  - id: "epic-8-retro-item-6-fix-dashboardchartsection-_emptycard-pad"
+    epic: 8
+    action: "Fix DashboardChartSection._emptyCard padding to DesignTokens.dashboardCardPadding,
+      matching its sibling cards"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-11-08.md"
+  - id: "epic-8-retro-item-7-add-semanticslabel-to-the-biometric-togg"
+    epic: 8
+    action: "Add semanticsLabel to the biometric-toggle and name-save CircularProgressIndicators
+      in account_settings_screen.dart, matching the dashboard charts existing accessibility
+      treatment"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-11-08.md"
+  - id: "epic-8-retro-item-8-broaden-deferred-work-md-existing-spec-8"
+    epic: 8
+    action: "Broaden deferred-work.md existing spec-8-4 clearLocalCache race entry
+      to explicitly name ChatRepository.listSessions()/listMessages() repopulation
+      alongside create()/sendMessage()/retryMessage()"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-9-guard-functions_base_url-supabase_anon_k"
+    epic: 1
+    action: "Guard FUNCTIONS_BASE_URL/SUPABASE_ANON_KEY reads (url_builder.dart, injection_container.dart)
+      against an empty-but-present .env value so main.dart's existing friendly error
+      actually fires"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-10-validate-non-empty-access-refresh-tokens"
+    epic: 1
+    action: "Validate non-empty access/refresh tokens before saveSession in auth_repository_impl.dart
+      and/or guard header_interceptor.dart's Bearer attachment with isNotEmpty"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-11-exclude-auth-signup-auth-login-auth-refr"
+    epic: 1
+    action: "Exclude auth-signup/auth-login/auth-refresh from RetryInterceptor.shouldRetry,
+      following the precedent already set for chat/export writes in story 6.1"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-12-add-a-redirect-out-of-reauth-in-app_rout"
+    epic: 1
+    action: "Add a redirect out of /reauth in app_router.dart when SessionStatus transitions
+      back to authenticated"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-13-make-expiry_overlay_host-dart-s-null-ove"
+    epic: 1
+    action: "Make expiry_overlay_host.dart's null-overlay-context case retry on a
+      later frame instead of abandoning the expiry episode"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-14-add-an-issubmitting-guard-to-authcubit-t"
+    epic: 1
+    action: "Add an isSubmitting guard to AuthCubit.toggleMode/emailChanged/passwordChanged"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-15-give-authcubit-a-dispose-callback-in-aut"
+    epic: 1
+    action: "Give AuthCubit a dispose: callback in auth_injection.dart, consistent
+      with its sibling registrations"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-16-redact-password-in-authstate-tostring"
+    epic: 1
+    action: "Redact password in AuthState.toString()"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-17-give-biometricreauthplaceholderscreen-th"
+    epic: 1
+    action: "Give BiometricReauthPlaceholderScreen the same _BackArrowHeader escape
+      hatch its sibling placeholders use"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-18-investigate-whether-epic-8-s-account-del"
+    epic: 1
+    action: "Investigate whether Epic 8's account-deletion confirm dialog and the
+      session-expiry overlay can collide via ConfirmationDialog.isOpen's shared static
+      guard now that both consumers exist; scope a per-call-site guard if so"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-19-build-the-failure-to-localized-copy-mapp"
+    epic: 1
+    action: "Build the Failure-to-localized-copy mapping layer deferred since spec-1-3,
+      now recurring in 5 stories across 4 epics (entries, export, dashboard, auth)"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-20-annotate-deferred-work-md-s-spec-1-1-ori"
+    epic: 1
+    action: "Annotate deferred-work.md's spec-1-1 orientation-lock entry with resolved_by:
+      Story 1.6 (c35f704), matching the file's own convention"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-21-give-dio_error_code-dart-s-badcertificat"
+    epic: 1
+    action: "Give dio_error_code.dart's badCertificate/unknown exception types a distinct
+      non-retryable mapping instead of folding them into NETWORK_OFFLINE"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-22-distinguish-a-platform-exception-reading"
+    epic: 1
+    action: "Distinguish a platform exception reading the stored access token from
+      genuinely no token stored in header_interceptor.dart, instead of both triggering
+      a false session-expired overlay"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-23-give-restoresession-s-no-stored-token-ou"
+    epic: 1
+    action: "Give restoreSession()'s no-stored-token outcome a distinct marker from
+      a backend-confirmed dead token, instead of sharing Failure.authExpired"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-1-retro-item-24-add-a-regression-test-for-access_token_p"
+    epic: 1
+    action: "Add a regression test for access_token_provider.dart's saveSession/clearSession
+      write/delete ordering under a partial storage failure"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-11-08.md"
+  - id: "epic-2-retro-item-25-clear-the-vault-pin-from-both-logout-and"
+    epic: 2
+    action: "Clear the vault PIN from both logout() and deleteAccount()'s shared _finishSession()
+      path, alongside the existing VaultRepository.lock() call"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-08.md"
+  - id: "epic-2-retro-item-26-decouple-vaultlockscreen-s-pin-submit-ui"
+    epic: 2
+    action: "Decouple VaultLockScreen's PIN-submit UI timeout from the underlying
+      repository call's actual completion (attempt token to ignore a late-arriving
+      result)"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-08.md"
+  - id: "epic-2-retro-item-27-treat-an-empty-string-stored-pin-the-sam"
+    epic: 2
+    action: "Treat an empty-string stored PIN the same as null (unset) in VaultRepositoryImpl.submitPin"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-08.md"
+  - id: "epic-2-retro-item-28-check-os-biometric-capability-before-aut"
+    epic: 2
+    action: "Check OS biometric capability before auto-triggering authenticate(),
+      and self-heal a stale biometricEnabled=true preference when capability has been
+      revoked"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-08.md"
+  - id: "epic-2-retro-item-29-remove-the-redundant-fetchbiometricenabl"
+    epic: 2
+    action: "Remove the redundant fetchBiometricEnabled() call in CerneApp.initState()
+      now that main() always awaits one bounded fetch first"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-08.md"
+  - id: "epic-2-retro-item-30-add-a-test-for-main-s-awaited-fetch-befo"
+    epic: 2
+    action: "Add a test for main()'s awaited-fetch-before-first-build ordering (gate
+      fetchBiometricEnabled() on a delay, assert /vault's first build reflects the
+      awaited value)"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-08.md"
+  - id: "epic-2-retro-item-31-add-a-test-exercising-vaultrepositoryimp"
+    epic: 2
+    action: "Add a test exercising VaultRepositoryImpl's constructor catch(Object)
+      guard around addObserver (currently dead code in the suite)"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-08.md"
+  - id: "epic-2-retro-item-32-add-a-test-for-accountsettingsrepository"
+    epic: 2
+    action: "Add a test for AccountSettingsRepositoryImpl's generation guard under
+      two concurrent fetchBiometricEnabled() calls"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-08.md"
+  - id: "epic-2-retro-item-33-add-a-test-for-accountsettingscubit-togg"
+    epic: 2
+    action: "Add a test for AccountSettingsCubit.toggleBiometric's isClosed guard,
+      mirroring the existing logout()/deleteAccount() tests"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-08.md"
+  - id: "epic-2-retro-item-34-add-a-test-for-vaultrepositoryimpl-_emit"
+    epic: 2
+    action: "Add a test for VaultRepositoryImpl._emit's isClosed guard under a concurrent
+      dispose-during-call race, not just sequential dispose-then-call"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-11-08.md"
+  - id: "epic-3-retro-item-35-clear-entriesrepository-chatrepository-l"
+    epic: 3
+    action: "Clear EntriesRepository/ChatRepository local caches on the natural session-ending
+      paths (SessionRepositoryImpl.restoreSession's dead-token branch and AuthCubit.submit's
+      fresh login/signup success), not only the explicit logout/delete-account buttons"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-08.md"
+  - id: "epic-3-retro-item-36-gate-insertionmodal-s-swipe-to-dismiss-a"
+    epic: 3
+    action: "Gate InsertionModal's swipe-to-dismiss and scrim-tap dismissal on isSaving
+      for all three tabs (Texto/Audio/Foto), extending story 3.4's cancel-safety scope
+      to actually cover it"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-08.md"
+  - id: "epic-3-retro-item-37-give-audioentrycubit-a-widgetsbindingobs"
+    epic: 3
+    action: "Give AudioEntryCubit a WidgetsBindingObserver/didChangeAppLifecycleState,
+      mirroring VaultRepositoryImpl's existing pattern, to handle backgrounding during
+      recording/processing"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-08.md"
+  - id: "epic-3-retro-item-38-add-a-completer-gated-test-for-audioentr"
+    epic: 3
+    action: "Add a Completer-gated test for AudioEntryCubit.cancel(discardPreserved:true)
+      racing an in-flight save(), and the same for PhotoEntryCubit"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-08.md"
+  - id: "epic-3-retro-item-39-add-a-test-for-whisperaudiotranscriber-t"
+    epic: 3
+    action: "Add a test for WhisperAudioTranscriber.transcribe() itself throwing (only
+      downloadModel() throwing is currently tested)"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-08.md"
+  - id: "epic-3-retro-item-40-add-a-test-for-recordmicrecorder-cancel"
+    epic: 3
+    action: "Add a test for RecordMicRecorder.cancel()'s best-effort delete-failure
+      catch when cancel() is called before any file exists at the captured path"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-08.md"
+  - id: "epic-3-retro-item-41-add-a-di-factory-distinctness-check-for"
+    epic: 3
+    action: "Add a DI factory-distinctness check for PhotoEntryCubit in bootstrap_integration_test.dart,
+      mirroring the existing TextEntryCubit/AudioEntryCubit checks"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-42-wire-pendingentrywritetracker-reset-into"
+    epic: 4
+    action: "Wire PendingEntryWriteTracker.reset() into AccountSettingsCubit._finishSession(),
+      SessionRepositoryImpl.restoreSession()'s dead-token branch, and AuthCubit.submit()'s
+      success path, same as Epic 3's entries/chat cache-clear fix -- confirmed cross-account
+      content exposure and content-injection via retry"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-43-add-per-item-parse-isolation-to-entriesr"
+    epic: 4
+    action: "Add per-item parse isolation to EntriesRemoteDataSource.list()/search(),
+      matching entry_date_group.dart/the Hive-cache paths' existing pattern, so one
+      malformed item doesn't discard the whole page"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-44-give-entrydetailcubit-a-confirmedwrites"
+    epic: 4
+    action: "Give EntryDetailCubit a confirmedWrites subscription so a tempId-keyed
+      detail view re-resolves once the underlying write lands, instead of permanently
+      showing Registro nao encontrado"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-45-make-entrydetailcubit-s-pendingwrites-su"
+    epic: 4
+    action: "Make EntryDetailCubit's pendingWrites subscription call emit, not just
+      mutate a field, so an open detail view's sync badge updates live"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-46-scope-pendingentrywritetrackerimpl-creat"
+    epic: 4
+    action: "Scope PendingEntryWriteTrackerImpl.create()'s failed-record drop to the
+      write it's actually superseding (supersedesTempId), not every failed write tracker-wide"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-47-fix-meusregistroscubit-loadfirstpage-s-f"
+    epic: 4
+    action: "Fix MeusRegistrosCubit.loadFirstPage()'s failure branch to surface a
+      real MeusRegistrosError with retry instead of silently discarding previously-loaded
+      entries when a pending write also exists"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-48-add-a-debounce-in-flight-guard-to-criar"
+    epic: 4
+    action: "Add a debounce/in-flight guard to Criar primeiro registro's onPressed
+      and the identical unguarded Home/Chat FAB, covering both call sites together"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-49-add-a-real-tracker-plus-real-cubit-test"
+    epic: 4
+    action: "Add a real-tracker-plus-real-cubit test asserting intermediate stream
+      emissions for the one-frame double-placeholder/confirmed-entry de-dup fix"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-50-add-a-test-exercising-an-actual-di-reset"
+    epic: 4
+    action: "Add a test exercising an actual DI reset/rebuild cycle to prove the killed-app-loses-pending-writes
+      claim"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-51-add-close-before-resolve-tests-for-meusr"
+    epic: 4
+    action: "Add close-before-resolve tests for MeusRegistrosCubit's isClosed guards
+      in _loadFiltered/_fetchMore, mirroring EntryDetailCubit's existing sibling test"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-52-anchor-the-confirmed-entry-s-displayed-d"
+    epic: 4
+    action: "Anchor the confirmed entry's displayed date group to the pending write's
+      own startedAt day if the midnight-boundary grouping jump proves disruptive in
+      practice"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-53-revisit-unbounded-hive-box-growth-and-un"
+    epic: 4
+    action: "Revisit unbounded Hive box growth and unbounded groups/badgeFor/_displayEntries
+      recompute now that Epics 5 and 8 (the flagged trigger) have shipped"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-54-extract-shared-helpers-for-the-duplicate"
+    epic: 4
+    action: "Extract shared helpers for the duplicated date-formatting and offline-decode
+      logic, and the hand-rolled equality/hand-written test fakes, once a third consumer
+      needs the same shape"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-55-add-semantics-labels-to-entryrecordcard"
+    epic: 4
+    action: "Add Semantics labels to EntryRecordCard's origin icon, the tappable card,
+      and the not-found view as part of a deliberate accessibility pass"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-56-add-the-malformed-occurredat-empty-state"
+    epic: 4
+    action: "Add the malformed-occurredAt empty-state widget test, the 2+-concurrent-pending-writes
+      reversed test, the ValueKey badge-leak regression test, a real-Hive round-trip
+      for list()/_offlineFallback, app_router_test unauthenticated/cold-deep-link
+      coverage, and an ExpiryOverlayHost-above-detail e2e test"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-4-retro-item-57-add-a-clock-seam-to-pendingentrywritetra"
+    epic: 4
+    action: "Add a clock seam to PendingEntryWriteTrackerImpl.create()'s startedAt,
+      remove EntryDetailCubit's unreachable tempId-matching dead code, and add onError
+      handlers to the app-wide pendingWrites/statusStream subscriptions if any proves
+      reachable"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-11-08.md"
+  - id: "epic-5-retro-item-58-wire-entriessearchcubit-reset-into-the-s"
+    epic: 5
+    action: "Wire EntriesSearchCubit.reset() into the session-boundary cleanup chokepoint
+      -- this is the fourth consecutive epic with this gap, so build one consolidated
+      wipe-all-per-account-client-state method rather than a fourth separate point-fix"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-08.md"
+  - id: "epic-5-retro-item-59-give-entriessearchbar-s-textfield-a-cont"
+    epic: 5
+    action: "Give EntriesSearchBar's TextField a controller seeded from the cubit's
+      retained query, or force the search Resource back to idle on every MeusRegistrosScreen
+      mount, so the search surface never outlives its own query-text affordance"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-08.md"
+  - id: "epic-5-retro-item-60-bump-entriessearchcubit-_generation-on-e"
+    epic: 5
+    action: "Bump EntriesSearchCubit._generation on every keystroke in onQueryChanged,
+      not only on clear-to-empty or when a debounce fires, so a fast-resolving stale
+      result can never render momentarily"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-08.md"
+  - id: "epic-5-retro-item-61-thread-a-canceltoken-through-apiclient-g"
+    epic: 5
+    action: "Thread a CancelToken through ApiClient.get()/EntriesRemoteDataSource.search()/EntriesRepositoryImpl.search(),
+      cancelling the previous in-flight search before issuing the next one"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-08.md"
+  - id: "epic-5-retro-item-62-add-a-test-for-entriessearchcubit-onquer"
+    epic: 5
+    action: "Add a test for EntriesSearchCubit.onQueryChanged('') called after close(),
+      mirroring its two sibling isClosed-guard tests"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-08.md"
+  - id: "epic-5-retro-item-63-add-a-test-proving-entriessearchcubit-s"
+    epic: 5
+    action: "Add a test proving EntriesSearchCubit's singleton identity and query-persistence
+      across a real navigate-away-and-back round trip"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-08.md"
+  - id: "epic-5-retro-item-64-add-a-widget-screen-level-test-applying"
+    epic: 5
+    action: "Add a widget/screen-level test applying a filter mid-debounce or mid-flight
+      search through the real EntriesSearchBar/EntriesFilterSheet/MeusRegistrosScreen
+      wiring, not only at the isolated cubit level"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-08.md"
+  - id: "epic-5-retro-item-65-fix-search-s-dto-to-entity-mapping-runni"
+    epic: 5
+    action: "Fix search()'s DTO-to-Entity mapping running outside its own try/catch
+      together with list()'s and getById()'s identical gap, not in isolation"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-08.md"
+  - id: "epic-5-retro-item-66-add-a-dynamic-type-accessibility-scaling"
+    epic: 5
+    action: "Add a Dynamic Type/accessibility-scaling test for EntriesSearchBar as
+      part of a deliberate accessibility pass across the entries feature"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-08.md"
+  - id: "epic-5-retro-item-67-revisit-the-search-skeleton-timer-remoun"
+    epic: 5
+    action: "Revisit the search-skeleton-timer remount fix always restarting a fresh
+      300ms wait if it proves disruptive in practice"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-08.md"
+  - id: "epic-5-retro-item-68-add-a-test-for-the-source-chip-x-removal"
+    epic: 5
+    action: "Add a test for the source-chip x removal scenario with a date-range chip
+      also active"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-08.md"
+  - id: "epic-5-retro-item-69-add-e2e-coverage-for-combined-search-fil"
+    epic: 5
+    action: "Add e2e coverage for combined search+filter over the real network/Hive
+      pipeline"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-70-build-the-missing-session-lifecycle-chok"
+    epic: 6
+    action: "Build the missing session-lifecycle chokepoint: wire a real production
+      call to resetCoreDependencies() or an equivalent wipe-all-per-account-client-state
+      method into AccountSettingsCubit._finishSession(), SessionRepositoryImpl.restoreSession()'s
+      dead-token branch, and AuthCubit.submit()'s success path -- this is the fifth
+      consecutive epic with this gap and the root cause is now identified"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-71-clear-chatcubit-s-in-memory-state-messag"
+    epic: 6
+    action: "Clear ChatCubit's in-memory state (messages, sessions, bookmark states,
+      scroll offsets) at the same session-boundary chokepoint, since clearLocalCache()
+      alone does not reach it"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-72-add-a-user-account-id-to-chatsessiondto"
+    epic: 6
+    action: "Add a user/account id to ChatSessionDto/ChatMessageDto or otherwise scope
+      the offline-cache fallback, mirroring Epic 3's equivalent entries-side fix"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-73-scope-chatcubit-_insightrequestseq-per-s"
+    epic: 6
+    action: "Scope ChatCubit._insightRequestSeq per session so switching away and
+      back can't cause a valid insight for the returned-to session to be silently
+      dropped"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-74-add-a-client-side-timeout-ceiling-to-cha"
+    epic: 6
+    action: "Add a client-side timeout ceiling to ChatCubit._consumeStream independent
+      of the backend's own in-band timeout event, so a fully-hung connection can't
+      lock the composer forever"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-75-give-a-reloaded-message-with-persisted-s"
+    epic: 6
+    action: "Give a reloaded message with persisted streaming status either a retry
+      affordance or an automatic transition to a visibly-failed state, so it can't
+      become a permanent zombie bubble"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-76-distinguish-generateinsight-s-generating"
+    epic: 6
+    action: "Distinguish generateInsight()'s generating status from true failure/empty-result
+      outcomes, at minimum not resetting the trigger window until the result is actually
+      final"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-77-only-increment-the-message-count-insight"
+    epic: 6
+    action: "Only increment the message-count insight-trigger counter once a send
+      is confirmed to have reached the backend (e.g. on message_created), not on the
+      bare sendMessage() call"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-78-address-the-self-documented-stream-abort"
+    epic: 6
+    action: "Address the self-documented stream-abort-vs-backend-success defect so
+      an aborted-but-actually-successful response doesn't show failed and retry doesn't
+      send a duplicate question"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-79-add-a-test-for-the-documented-r-n-split"
+    epic: 6
+    action: "Add a test for the documented \\r\\n-split-across-SSE-chunks fix using
+      an actual \\r chunk boundary"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-80-add-tests-for-message_created-and-error"
+    epic: 6
+    action: "Add tests for message_created and error SSE event malformed-payload parsing,
+      mirroring the existing token-event test"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-81-add-a-test-for-generateinsight-s-blank-b"
+    epic: 6
+    action: "Add a test for generateInsight()'s blank-but-non-null content branch"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-82-add-buildwhen-throttling-to-the-four-unt"
+    epic: 6
+    action: "Add buildWhen/throttling to the four unthrottled BlocBuilders that rebuild
+      on every streamed token (scroll-to-bottom, drawer CONVERSAS, drawer Novo Chat
+      disable, offline banner) if streaming performance proves disruptive"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-83-add-semantics-accessibility-treatment-ac"
+    epic: 6
+    action: "Add Semantics/accessibility treatment across the chat feature's recurring
+      color-only/no-live-region gaps (streaming bubble, active-session cue, session-switch
+      announcement, bookmark-result announcement)"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-84-revisit-the-local-state-can-diverge-from"
+    epic: 6
+    action: "Revisit the local-state-can-diverge-from-backend-truth cluster together
+      (bookmark save false-error on local Hive failure, retryMessage not persisting
+      to cache, the stream-abort defect)"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-85-revisit-unbounded-growth-in-the-chat-hiv"
+    epic: 6
+    action: "Revisit unbounded growth in the chat Hive boxes and in-memory session
+      list together with Epic 4's equivalent entries-side item, at scale"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-6-retro-item-86-bundle-the-remaining-minor-ux-backlog-bo"
+    epic: 6
+    action: "Bundle the remaining minor UX backlog (bootstrap retry button, draft
+      carryover across session switch, timestamp day-ambiguity, connectivity-reachability
+      nuance, bookmark retryable-check product decision, bookmark-liveness-in-open-screens,
+      tap-target visual inflation) into one cleanup pass"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-11-08.md"
+  - id: "epic-7-retro-item-87-fast-fail-exportjobcubit-poll-failures-b"
+    epic: 7
+    action: "Fast-fail ExportJobCubit poll failures based on Failure.retryable instead
+      of a blind consecutive-count, so a non-retryable failure fails immediately and
+      a transient one isn't given up on too early"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-11-08.md"
+  - id: "epic-7-retro-item-88-check-entrycount-0-on-a-done-export-job"
+    epic: 7
+    action: "Check entryCount == 0 on a done export job and surface a distinct state
+      instead of rendering it identically to a normal non-empty success"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-11-08.md"
+  - id: "epic-7-retro-item-89-add-a-loading-indicator-to-_onexporttap"
+    epic: 7
+    action: "Add a loading indicator to _onExportTap's export-summary-create network
+      call, mirroring the screen's existing entries-list skeleton pattern, to satisfy
+      RNF01"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-11-08.md"
+  - id: "epic-7-retro-item-90-add-a-test-exercising-the-navigator-casc"
+    epic: 7
+    action: "Add a test exercising the Navigator-cascade interaction between forced
+      reauth navigation and an open polling export sheet, or explicitly confirm the
+      relied-upon Flutter/go_router semantics"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-11-08.md"
+  - id: "epic-7-retro-item-91-get-a-product-confirmation-on-whether-a"
+    epic: 7
+    action: "Get a product confirmation on whether a silently-dropped post-dismissal
+      download failure is intended, and add a fallback notification path if not"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-11-08.md"
+  - id: "epic-7-retro-item-92-add-a-test-for-exportjobcubit-close-call"
+    epic: 7
+    action: "Add a test for ExportJobCubit.close() called mid-flight during an in-progress
+      poll's getStatus call, using the existing delayNextGetStatus gate"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-11-08.md"
+  - id: "epic-7-retro-item-93-add-a-delay-gate-to-the-fake-exportrepos"
+    epic: 7
+    action: "Add a delay gate to the fake ExportRepository's createJob and a test
+      for close() called mid-flight during start()'s createJob call"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-11-08.md"
+  - id: "epic-7-retro-item-94-add-a-widget-test-that-unmounts-meusregi"
+    epic: 7
+    action: "Add a widget test that unmounts MeusRegistrosScreen mid-export-flow and
+      asserts the leaked ExportJobCubit/Timer is actually closed"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-11-08.md"
+  - id: "epic-7-retro-item-95-revisit-the-ad-15-app-kill-job-loss-trad"
+    epic: 7
+    action: "Revisit the AD-15 app-kill job-loss trade-off (no job-recovery/history
+      surface) if job-recovery UX becomes a priority"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-11-08.md"
+  - id: "epic-7-retro-item-96-scope-exportstatussheet-s-semantics-live"
+    epic: 7
+    action: "Scope ExportStatusSheet's Semantics(liveRegion:true) wrapper to just
+      the icon/status-text, excluding the now-interactive download button row"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-11-08.md"
+  - id: "epic-7-retro-item-97-bundle-the-remaining-cosmetic-documentat"
+    epic: 7
+    action: "Bundle the remaining cosmetic/documentation backlog (stale DI test label,
+      doc-comment wording gaps, missing test comment, EXPORT_EMPTY_PERIOD poll-vs-create
+      UI branch, getRedirectLocation catch-all, now-more-common empty-period copy/affordances)
+      into one low-priority cleanup pass"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-11-08.md"
